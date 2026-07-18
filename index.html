@@ -1,0 +1,36 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>immersive-g reveal — 1:1 ver1</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #b7b7b7; touch-action: none; overscroll-behavior: none; }
+  canvas { display: block; }
+  #hint {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    font: 12px/1.4 Helvetica, Arial, sans-serif; letter-spacing: .08em;
+    color: rgba(0,0,0,.45); text-transform: uppercase; pointer-events: none;
+    transition: opacity 1s ease;
+  }
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font: 12px/1 Helvetica, Arial, sans-serif; letter-spacing: .12em; color: rgba(0,0,0,.5);
+    text-transform: uppercase; background: #b7b7b7; transition: opacity .6s ease; z-index: 10;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="loading">loading model…</div>
+<div id="hint">move the cursor over the wall — scroll to zoom</div>
+<script type="module" src="./main.js?v=20260717224626"></script>
+</body>
+</html>
