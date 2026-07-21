@@ -424,17 +424,15 @@ void main(){
   // this is the second lever for how visible the relief-driven shading reads
   vec3 nRel = normalize(vec3(nFull.xy * uWineNormalStrength * (squash / max(nFull.z, 0.15)), 1.0));
 
-  // where the carved relief itself is (steep slope) vs the flat wall around it —
-  // drives which body color we paint, not whether the layer shows at all: the
-  // pattern silhouette (below) still decides placement, this decides red vs gray
-  // within it, so the carved line keeps its own baked shading unpainted and the
-  // metallic highlight (which is richest right there) still rides across it.
+  // slope signal, kept only as the geometric fallback mask further down (used
+  // when the pattern texture hasn't loaded yet) — no longer excludes the carved
+  // relief from the wine color: red is back across the whole revealed pattern,
+  // raised groove included.
   float grooveWeight = smoothstep(uGrooveGrayRange.x, uGrooveGrayRange.y, 1.0 - nFull.z);
 
   // fixed directional light: diffuse light/shadow across the relief
   float wineDiff = max(dot(nRel, normalize(uWineLightDir)), 0.0);
-  vec3 wineLit = uWineColor * mix(uWineAmbient, 1.0, wineDiff);
-  vec3 wineBody = mix(wineLit, color, grooveWeight);   // flat → lit wine red, groove → stays the plain baked gray
+  vec3 wineBody = uWineColor * mix(uWineAmbient, 1.0, wineDiff);
 
   // cursor-bound Blinn-Phong highlight. Two independent knobs, standard PBR split:
   // metallic tints the highlight hue (matte ink → warm steel), roughness shapes and
