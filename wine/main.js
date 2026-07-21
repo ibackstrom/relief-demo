@@ -53,11 +53,36 @@ const WINE = {
   enabled: true,
   blend: 0.5,                    // 0 = pure ver1 plaster look … 1 = full wine material
   color: 0x650003,               // Wine
-  metallic: 0.34,                // 0 = матовые чернила … 1 = стальной блик
+  metallic: 0.34,                // 0 = матовые чернила … 1 = стальной блик (tints the highlight hue)
+  roughness: 0.7,                // 0 = mirror-smooth … 1 = fully matte (shapes/dims the highlight itself)
+  normalStrength: 1.6,           // amplifies the baked normal's xy before lighting — a second, roughness-
+                                  // independent lever for how visible the relief-driven shading reads
   lightDir: [0.35, 0.55, 0.75],  // fixed directional light: top-right-front
   ambient: 0.55,                 // shadow floor (нижний порог тени)
   lightRadius: 0.6,              // cursor highlight falloff (screens)
-  intensity: 1.0,                // cursor highlight strength
+  intensity: 1.3,                // cursor highlight strength
+  grooveGray: [0.02, 0.12],      // smoothstep range on relief slope: below = flat wall (wine red shows),
+                                  // above = the carved relief itself (stays gray — its own baked shading
+                                  // + the metallic specular ride on top, unpainted so the relief detail reads)
+};
+
+// Where the wine color is allowed to show is no longer guessed from the baked
+// normals (reliefWeight/raisedWeight) — it's read straight from the original
+// vector artwork (../../Pattern filled (4).svg), rasterized 1:1 onto the plate's
+// UV space (pattern-mask.png, white = inside the pattern). A naive stretch-fit
+// (repeat 1:1) drifted increasingly off toward the right edge of the plate — the
+// SVG canvas and the plate weren't quite the same aspect, so translation alone
+// couldn't fix it, only scale could. Registered properly by optimizing repeat+
+// offset against normal.png's actual slope/edge signal (the real geometry's
+// groove outline — normal.png has no alpha channel, so heightMask was always a
+// no-op; this is ground truth instead), maximizing normalized cross-correlation
+// between the pattern's fill boundary and that groove outline. Confirmed by eye:
+// the fill now hugs the groove edge uniformly across the whole width.
+const PATTERN_MASK = {
+  enabled: true,
+  offset: [-0.0564, 0.0001],
+  repeat: [1.0560, 0.9981],
+  softness: 0.06,          // antialiasing width across the mask edge, in mask-value units
 };
 
 const ASSETS = './assets/';
@@ -261,11 +286,19 @@ uniform sampler2D tBake2;
 uniform sampler2D tPlaster;
 uniform vec2 uPlasterScale;
 uniform sampler2D tNormalMap;    // camera-space normals + height mask (bake)
+uniform sampler2D tPatternMask;  // rasterized original SVG pattern, fit to plate UV
+uniform vec2 uPatternOffset;
+uniform vec2 uPatternRepeat;
+uniform float uPatternSoftness;
+uniform float uPatternMaskLoaded; // 0 until the mask image has actually loaded
 uniform float uWineEnabled;      // 0 = plaster only, 1 = wine material on revealed relief
 uniform float uWineBlend;        // 0 = pure ver1 plaster … 1 = full wine
 uniform vec2 uCursorPos;         // eased cursor, uv space y-up (drives the highlight)
 uniform vec3 uWineColor;         // #650003
-uniform float uWineMetallic;     // 0.34: 0 = matte ink, 1 = steel glint
+uniform float uWineMetallic;     // 0.34: 0 = matte ink, 1 = steel glint (highlight hue)
+uniform float uWineRoughness;    // 0.95: 0 = mirror-smooth, 1 = fully matte (highlight shape/strength)
+uniform float uWineNormalStrength; // amplifies baked-normal xy before lighting
+uniform vec2 uGrooveGrayRange;   // slope smoothstep: below = flat (red), above = relief (stays gray)
 uniform vec3 uWineLightDir;      // fixed directional light (0.35, 0.55, 0.75)
 uniform float uWineAmbient;      // 0.55 shadow floor
 uniform float uWineLightRadius;  // 0.6 screens
@@ -387,29 +420,53 @@ void main(){
   vec3 nFull = nSample.xyz * 2.0 - 1.0;
   float heightMask = nSample.a;                                   // 0 = wall plate, 1 = raised element
   float squash = mix(0.05, 1.0, extrude);
-  vec3 nRel = normalize(vec3(nFull.xy * (squash / max(nFull.z, 0.15)), 1.0));
+  // normalStrength exaggerates the bump before lighting — independent of roughness,
+  // this is the second lever for how visible the relief-driven shading reads
+  vec3 nRel = normalize(vec3(nFull.xy * uWineNormalStrength * (squash / max(nFull.z, 0.15)), 1.0));
+
+  // where the carved relief itself is (steep slope) vs the flat wall around it —
+  // drives which body color we paint, not whether the layer shows at all: the
+  // pattern silhouette (below) still decides placement, this decides red vs gray
+  // within it, so the carved line keeps its own baked shading unpainted and the
+  // metallic highlight (which is richest right there) still rides across it.
+  float grooveWeight = smoothstep(uGrooveGrayRange.x, uGrooveGrayRange.y, 1.0 - nFull.z);
 
   // fixed directional light: diffuse light/shadow across the relief
   float wineDiff = max(dot(nRel, normalize(uWineLightDir)), 0.0);
-  vec3 wineBody = uWineColor * mix(uWineAmbient, 1.0, wineDiff);
+  vec3 wineLit = uWineColor * mix(uWineAmbient, 1.0, wineDiff);
+  vec3 wineBody = mix(wineLit, color, grooveWeight);   // flat → lit wine red, groove → stays the plain baked gray
 
-  // cursor-bound Blinn-Phong highlight: exponent 48 (matte, narrow) → 14
-  // (metallic, wide); color = lightened wine → white by metallic
+  // cursor-bound Blinn-Phong highlight. Two independent knobs, standard PBR split:
+  // metallic tints the highlight hue (matte ink → warm steel), roughness shapes and
+  // dims it (mirror-tight spike → wide, faint sheen) regardless of metallic. Not
+  // gated by grooveWeight — the highlight rides over both the red fill and the
+  // gray relief, since the relief is where the real normal variation (and so the
+  // most visible sheen) actually lives.
   vec2 arVec = vec2(uResolution.x / uResolution.y, 1.0);
   vec2 lightDelta = uCursorPos * arVec - uvScreen * arVec;
   float lightDist = length(lightDelta);
   vec3 lightDir = normalize(vec3(lightDelta, 0.4));
   vec3 halfVec = normalize(lightDir + vec3(0.0, 0.0, 1.0));
-  float specExp = mix(48.0, 14.0, uWineMetallic);
-  float spec = pow(max(dot(nRel, halfVec), 0.0), specExp);
+  float rough = clamp(uWineRoughness, 0.02, 1.0);
+  float specExp = mix(96.0, 6.0, rough);              // smooth → tight spike; rough → broad, soft
+  float specStrength = pow(1.0 - rough, 1.3);         // rough surfaces catch a dimmer, not absent, highlight
+  float spec = pow(max(dot(nRel, halfVec), 0.0), specExp) * specStrength;
   float atten = 1.0 - smoothstep(0.0, uWineLightRadius, lightDist);
   vec3 lightenedWine = mix(uWineColor, vec3(1.0), 0.6);
   vec3 specColor = mix(lightenedWine, vec3(1.0), uWineMetallic);  // 0.34 → warm steel
   vec3 wineColor = wineBody + specColor * spec * uWineIntensity * atten;
 
-  float reliefWeight = smoothstep(0.02, 0.18, 1.0 - nFull.z);     // sloped surfaces
-  float raisedWeight = smoothstep(0.15, 0.6, heightMask);         // whole raised elements (ribbons)
-  float wineMask = clamp(extrude, 0.0, 1.0) * max(reliefWeight, raisedWeight) * uWineEnabled;
+  float reliefWeight = grooveWeight;                              // sloped surfaces (fallback)
+  float raisedWeight = smoothstep(0.15, 0.6, heightMask);         // whole raised elements (fallback)
+  // the pattern SVG is the ground truth for *where* wine shows — it's the original
+  // vector artwork the OIT-baked relief was built from, so its silhouette is a much
+  // cleaner stencil than guessing from normals/height. Geometric weight stays only
+  // as a fallback so the layer degrades gracefully if the mask texture is missing.
+  float patternRaw = texture2D(tPatternMask, vUv * uPatternRepeat + uPatternOffset).r;
+  float patternMask = smoothstep(0.5 - uPatternSoftness, 0.5 + uPatternSoftness, patternRaw);
+  float geoWeight = max(reliefWeight, raisedWeight);
+  float placeWeight = mix(geoWeight, patternMask, uPatternMaskLoaded);
+  float wineMask = clamp(extrude, 0.0, 1.0) * placeWeight * uWineEnabled;
   color = mix(color, clamp(wineColor, 0.0, 1.0), wineMask * uWineBlend);
 
   vec3 dFdxPos = dFdx(vEye);
@@ -515,6 +572,17 @@ tFluidBlack.needsUpdate = true;
 const tFlatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1);
 tFlatNormal.needsUpdate = true;   // flat "up" normal → metal layer is a no-op until bound
 
+// original pattern SVG (../Pattern filled (4).svg), rasterized 1:1 onto plate UV —
+// see PATTERN_MASK above. uPatternMaskLoaded flips to 1 only once it's actually
+// decoded, so every wall section falls back to the old geometric mask until then.
+const uPatternMaskLoaded = { value: 0 };
+const tPatternMask = texLoader.load('./pattern-mask.png', () => {
+  if (PATTERN_MASK.enabled) uPatternMaskLoaded.value = 1;
+});
+tPatternMask.wrapT = THREE.RepeatWrapping;         // matches bake/normal: vertically periodic
+tPatternMask.wrapS = THREE.ClampToEdgeWrapping;
+tPatternMask.colorSpace = THREE.NoColorSpace;      // raw mask value, not a color to decode
+
 // shared uniforms
 const uTime = { value: 0 };
 const uResolution = { value: new THREE.Vector2() };
@@ -527,6 +595,9 @@ const uTextureStrength = { value: CONFIG.extrude.textureStrength };
 const uGradientStrength = { value: CONFIG.extrude.gradientStrength };
 
 const flowmap = new Flowmap(renderer, {
+  size: 512,      // was the class default (256) — vertex-level displacement samples this
+                   // directly, and at the plate's fine detail + up to 2.4x camera zoom, 256px
+                   // texels were visible as blocky/jaggy steps in the revealed edge ("glitchy")
   falloff: CONFIG.flowmap.falloff,
   alpha: CONFIG.flowmap.alpha,
   dissipation: CONFIG.flowmap.dissipation,
@@ -577,6 +648,11 @@ function makeWallMaterial(bake1, bake2) {
       tPlaster: { value: tPlaster },
       uPlasterScale: { value: new THREE.Vector2(10, 10) },   // site value; custom mode overrides
       tNormalMap: { value: tFlatNormal },                    // custom mode binds the baked normal map
+      tPatternMask: { value: tPatternMask },
+      uPatternOffset: { value: new THREE.Vector2(...PATTERN_MASK.offset) },
+      uPatternRepeat: { value: new THREE.Vector2(...PATTERN_MASK.repeat) },
+      uPatternSoftness: { value: PATTERN_MASK.softness },
+      uPatternMaskLoaded,
       uWineEnabled: { value: 0 },                            // wine off unless custom mode enables it
       uWineBlend: { value: WINE.blend },
       uCursorPos: { value: flowmap.mouse },                  // shared, eased — updates live
@@ -584,6 +660,9 @@ function makeWallMaterial(bake1, bake2) {
       // space, and default color management would darken #650003 to near-black
       uWineColor: { value: new THREE.Color().setHex(WINE.color, THREE.LinearSRGBColorSpace) },
       uWineMetallic: { value: WINE.metallic },
+      uWineRoughness: { value: WINE.roughness },
+      uWineNormalStrength: { value: WINE.normalStrength },
+      uGrooveGrayRange: { value: new THREE.Vector2(...WINE.grooveGray) },
       uWineLightDir: { value: new THREE.Vector3(...WINE.lightDir) },
       uWineAmbient: { value: WINE.ambient },
       uWineLightRadius: { value: WINE.lightRadius },
