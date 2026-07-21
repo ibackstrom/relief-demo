@@ -54,15 +54,15 @@ const METAL = {
 };
 
 // Red fill masked by the original pattern artwork (../Pattern filled (4).svg),
-// rasterized onto plate UV as pattern-mask.png (white = inside the pattern).
+// rasterized onto plate UV as pattern-mask.webp (white = inside the pattern).
 // Separate from CHROMA above (that one derives its shape from fresnel/fluid
 // edges) — this one is a direct, solid fill: wherever the relief is revealed by
 // the cursor AND the pattern covers that UV, it's colored. Registered against
-// normal.png's actual slope/edge signal (the real geometry's groove outline) by
+// normal.webp's actual slope/edge signal (the real geometry's groove outline) by
 // maximizing normalized cross-correlation between the pattern's fill boundary
 // and that groove outline (same registration as ver2 — shared plate dimensions)
 // — needed both a scale and an offset correction, not just translation.
-// That correction is baked directly INTO pattern-mask.png (a one-time affine
+// That correction is baked directly INTO pattern-mask.webp (a one-time affine
 // resample), not applied at sample time: doing it as a runtime repeat/offset
 // pushed sampled UV outside [0,1] near the plate's left edge, and this texture
 // isn't tileable (its own left/right edges don't match — solid black vs solid
@@ -87,8 +87,8 @@ const ASSETS = './assets/';
 const USE_CUSTOM = true; // packaged build: custom model only
 const CUSTOM = {
   model: './bakes/model.glb',   // welded copy written by scripts/bake_levels.py — NOT output.gltf
-  bake1: './bakes/bake1.png',
-  bake2: './bakes/bake2.png',
+  bake1: './bakes/bake1.webp',
+  bake2: './bakes/bake2.webp',
   meta: './bakes/meta.json',    // depthMult etc. — written by the bake, no manual sync
   depthMult: 6.25,              // fallback if meta.json is missing
 };
@@ -615,9 +615,9 @@ const loadTex = (url, wrap) => {
   if (wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 };
-const tPlaster = loadTex(ASSETS + 'plaster.jpg', true);
-const tMaskNoiseWall = loadTex(ASSETS + 'rgb-attenuation-0,9.png', true);  // fast-scroll noise
-const tFlowNoise = loadTex(ASSETS + 'mask-noise.png', true);               // flowmap stamp noise
+const tPlaster = loadTex(ASSETS + 'plaster.webp', true);
+const tMaskNoiseWall = loadTex(ASSETS + 'rgb-attenuation-0,9.webp', true);  // fast-scroll noise
+const tFlowNoise = loadTex(ASSETS + 'mask-noise.webp', true);               // flowmap stamp noise
 const tFluidBlack = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
 tFluidBlack.needsUpdate = true;
 const tFlatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1);
@@ -628,7 +628,7 @@ tFlatNormal.needsUpdate = true;   // flat "up" normal → metal layer is a no-op
 // actually decoded, so every wall section falls back to the old geometric mask
 // (reliefWeight/raisedWeight) until then.
 const uPatternMaskLoaded = { value: 0 };
-const tPatternMask = texLoader.load('./pattern-mask.png', () => { uPatternMaskLoaded.value = 1; });
+const tPatternMask = texLoader.load('./pattern-mask.webp', () => { uPatternMaskLoaded.value = 1; });
 tPatternMask.wrapT = THREE.RepeatWrapping;         // matches bake/normal: vertically periodic
 // the registration offset/scale is now baked into the texture itself (see
 // PATTERN_MASK above), sampled at a plain 1:1 UV — so, like bake1/bake2/
@@ -786,7 +786,7 @@ if (USE_CUSTOM) {
     t.wrapT = THREE.RepeatWrapping;          // bake is vertically periodic → filtering
     t.wrapS = THREE.ClampToEdgeWrapping;     //   at the seam samples the neighbor
   }
-  const normalMap = loadTex('./bakes/normal.png' + v);   // raw vectors — no color space
+  const normalMap = loadTex('./bakes/normal.webp' + v);   // raw vectors — no color space
   normalMap.wrapT = THREE.RepeatWrapping;
   normalMap.wrapS = THREE.ClampToEdgeWrapping;
   const depthMult = meta.depthMult || CUSTOM.depthMult;
