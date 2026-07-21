@@ -53,26 +53,29 @@ const METAL = {
 };
 
 // Red fill masked by the original pattern artwork (../Pattern filled (4).svg),
-// rasterized 1:1 onto plate UV as pattern-mask.png (white = inside the pattern).
+// rasterized onto plate UV as pattern-mask.png (white = inside the pattern).
 // Separate from CHROMA above (that one derives its shape from fresnel/fluid
 // edges) — this one is a direct, solid fill: wherever the relief is revealed by
-// the cursor AND the pattern covers that UV, it's colored. A naive stretch-fit
-// (repeat 1:1) drifted increasingly off toward the right edge of the plate — the
-// SVG canvas and the plate weren't quite the same aspect, so translation alone
-// couldn't fix it, only scale could. Registered properly by optimizing repeat+
-// offset against normal.png's actual slope/edge signal (the real geometry's
-// groove outline — normal.png has no alpha channel, so it's read straight off
-// the RGB slope, not a heightMask), maximizing normalized cross-correlation
-// between the pattern's fill boundary and that groove outline (same registration
-// as ver2 — ver1 and ver2 share plate dimensions).
+// the cursor AND the pattern covers that UV, it's colored. Registered against
+// normal.png's actual slope/edge signal (the real geometry's groove outline) by
+// maximizing normalized cross-correlation between the pattern's fill boundary
+// and that groove outline (same registration as ver2 — shared plate dimensions)
+// — needed both a scale and an offset correction, not just translation.
+// That correction is baked directly INTO pattern-mask.png (a one-time affine
+// resample), not applied at sample time: doing it as a runtime repeat/offset
+// pushed sampled UV outside [0,1] near the plate's left edge, and this texture
+// isn't tileable (its own left/right edges don't match — solid black vs solid
+// white), so wrapping there drew a hard seam right across the plate. The baked
+// version reads at a plain 1:1 UV with a clean background fill for the sliver
+// the source raster didn't cover.
 const PATTERN_RED = {
   enabled: true,
   blend: 1.0,             // 1 = solid fill within the pattern, on the revealed relief
   color: 0xff3300,
 };
 const PATTERN_MASK = {
-  offset: [-0.0564, 0.0001],
-  repeat: [1.0560, 0.9981],
+  offset: [0, 0],
+  repeat: [1, 1],
   softness: 0.06,         // antialiasing width across the mask edge, in mask-value units
 };
 
@@ -546,14 +549,12 @@ tFlatNormal.needsUpdate = true;   // flat "up" normal → metal layer is a no-op
 const uPatternMaskLoaded = { value: 0 };
 const tPatternMask = texLoader.load('./pattern-mask.png', () => { uPatternMaskLoaded.value = 1; });
 tPatternMask.wrapT = THREE.RepeatWrapping;         // matches bake/normal: vertically periodic
-// unlike bake1/bake2/normalMap (a single non-repeating panel render, correctly
-// clamped), pattern-mask.png IS a repeating tile — and PATTERN_MASK.repeat/offset
-// (needed to register it against the real geometry) push sampled u slightly below
-// 0 near the plate's left edge. Clamping there smeared one repeated texture column
-// across that sliver, and because that column sits right at the mask's threshold,
-// it flickered between red and gray — the reported glitchy half-red/half-gray
-// border. RepeatWrapping samples real (tileable) content there instead.
-tPatternMask.wrapS = THREE.RepeatWrapping;
+// the registration offset/scale is now baked into the texture itself (see
+// PATTERN_MASK above), sampled at a plain 1:1 UV — so, like bake1/bake2/
+// normalMap, this is safe to clamp: it's the source raster's own edges we'd hit,
+// not an out-of-[0,1] runtime transform, and the uncovered sliver was filled
+// with a clean background value rather than mismatched wrapped content.
+tPatternMask.wrapS = THREE.ClampToEdgeWrapping;
 tPatternMask.colorSpace = THREE.NoColorSpace;      // raw mask value, not a color to decode
 
 // shared uniforms
