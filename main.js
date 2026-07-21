@@ -52,6 +52,30 @@ const METAL = {
   lightColor: 0xffffff,  // wild: lightColor
 };
 
+// Red fill masked by the original pattern artwork (../Pattern filled (4).svg),
+// rasterized 1:1 onto plate UV as pattern-mask.png (white = inside the pattern).
+// Separate from CHROMA above (that one derives its shape from fresnel/fluid
+// edges) — this one is a direct, solid fill: wherever the relief is revealed by
+// the cursor AND the pattern covers that UV, it's colored. A naive stretch-fit
+// (repeat 1:1) drifted increasingly off toward the right edge of the plate — the
+// SVG canvas and the plate weren't quite the same aspect, so translation alone
+// couldn't fix it, only scale could. Registered properly by optimizing repeat+
+// offset against normal.png's actual slope/edge signal (the real geometry's
+// groove outline — normal.png has no alpha channel, so it's read straight off
+// the RGB slope, not a heightMask), maximizing normalized cross-correlation
+// between the pattern's fill boundary and that groove outline (same registration
+// as ver2 — ver1 and ver2 share plate dimensions).
+const PATTERN_RED = {
+  enabled: true,
+  blend: 1.0,             // 1 = solid fill within the pattern, on the revealed relief
+  color: 0xff3300,
+};
+const PATTERN_MASK = {
+  offset: [-0.0564, 0.0001],
+  repeat: [1.0560, 0.9981],
+  softness: 0.06,         // antialiasing width across the mask edge, in mask-value units
+};
+
 const ASSETS = './assets/';
 
 // DEFAULT = the user's model (ver1/bakes/* produced by scripts/bake_levels.py).
@@ -252,6 +276,14 @@ uniform sampler2D tBake2;
 uniform sampler2D tPlaster;
 uniform vec2 uPlasterScale;
 uniform sampler2D tNormalMap;    // camera-space normals + height mask (bake)
+uniform sampler2D tPatternMask;  // rasterized original SVG pattern, fit to plate UV
+uniform vec2 uPatternOffset;
+uniform vec2 uPatternRepeat;
+uniform float uPatternSoftness;
+uniform float uPatternMaskLoaded; // 0 until the mask image has actually loaded
+uniform vec3 uPatternRedColor;
+uniform float uPatternRedBlend;
+uniform float uPatternRedEnabled;
 uniform float uMetalness;        // 0 = plaster only, 1 = full metal on revealed relief
 uniform vec2 uCursorPos;         // eased cursor, uv space y-up (drives the metal light)
 uniform float uLightRadius;      // wild.plus: 1.5
@@ -397,6 +429,13 @@ void main(){
   float metalMask = clamp(extrude, 0.0, 1.0) * max(reliefWeight, raisedWeight) * uMetalness;
   color = mix(color, clamp(metallicColor, 0.0, 1.0), metalMask);
 
+  // --- pattern-masked red fill: the original SVG artwork, not a normals guess ---
+  float patternRaw = texture2D(tPatternMask, vUv * uPatternRepeat + uPatternOffset).r;
+  float patternMask = smoothstep(0.5 - uPatternSoftness, 0.5 + uPatternSoftness, patternRaw);
+  float patternPlaceWeight = mix(max(reliefWeight, raisedWeight), patternMask, uPatternMaskLoaded);
+  float patternRedMask = clamp(extrude, 0.0, 1.0) * patternPlaceWeight * uPatternRedEnabled;
+  color = mix(color, uPatternRedColor, patternRedMask * uPatternRedBlend);
+
   vec3 dFdxPos = dFdx(vEye);
   vec3 dFdyPos = dFdy(vEye);
   vec3 normal = normalize(cross(dFdxPos, dFdyPos));
@@ -500,6 +539,23 @@ tFluidBlack.needsUpdate = true;
 const tFlatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1);
 tFlatNormal.needsUpdate = true;   // flat "up" normal → metal layer is a no-op until bound
 
+// original pattern SVG (../Pattern filled (4).svg), rasterized 1:1 onto plate UV —
+// see PATTERN_MASK/PATTERN_RED above. uPatternMaskLoaded flips to 1 only once it's
+// actually decoded, so every wall section falls back to the old geometric mask
+// (reliefWeight/raisedWeight) until then.
+const uPatternMaskLoaded = { value: 0 };
+const tPatternMask = texLoader.load('./pattern-mask.png', () => { uPatternMaskLoaded.value = 1; });
+tPatternMask.wrapT = THREE.RepeatWrapping;         // matches bake/normal: vertically periodic
+// unlike bake1/bake2/normalMap (a single non-repeating panel render, correctly
+// clamped), pattern-mask.png IS a repeating tile — and PATTERN_MASK.repeat/offset
+// (needed to register it against the real geometry) push sampled u slightly below
+// 0 near the plate's left edge. Clamping there smeared one repeated texture column
+// across that sliver, and because that column sits right at the mask's threshold,
+// it flickered between red and gray — the reported glitchy half-red/half-gray
+// border. RepeatWrapping samples real (tileable) content there instead.
+tPatternMask.wrapS = THREE.RepeatWrapping;
+tPatternMask.colorSpace = THREE.NoColorSpace;      // raw mask value, not a color to decode
+
 // shared uniforms
 const uTime = { value: 0 };
 const uResolution = { value: new THREE.Vector2() };
@@ -562,6 +618,14 @@ function makeWallMaterial(bake1, bake2) {
       tPlaster: { value: tPlaster },
       uPlasterScale: { value: new THREE.Vector2(10, 10) },   // site value; custom mode overrides
       tNormalMap: { value: tFlatNormal },                    // custom mode binds the baked normal map
+      tPatternMask: { value: tPatternMask },
+      uPatternOffset: { value: new THREE.Vector2(...PATTERN_MASK.offset) },
+      uPatternRepeat: { value: new THREE.Vector2(...PATTERN_MASK.repeat) },
+      uPatternSoftness: { value: PATTERN_MASK.softness },
+      uPatternMaskLoaded,
+      uPatternRedColor: { value: new THREE.Color().setHex(PATTERN_RED.color, THREE.LinearSRGBColorSpace) },
+      uPatternRedBlend: { value: PATTERN_RED.blend },
+      uPatternRedEnabled: { value: PATTERN_RED.enabled ? 1 : 0 },
       uMetalness: { value: 0 },                              // metal off unless custom mode enables it
       uCursorPos: { value: flowmap.mouse },                  // shared, eased — updates live
       uLightRadius: { value: METAL.lightRadius },

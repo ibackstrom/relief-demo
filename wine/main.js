@@ -578,7 +578,14 @@ const tPatternMask = texLoader.load('./pattern-mask.png', () => {
   if (PATTERN_MASK.enabled) uPatternMaskLoaded.value = 1;
 });
 tPatternMask.wrapT = THREE.RepeatWrapping;         // matches bake/normal: vertically periodic
-tPatternMask.wrapS = THREE.ClampToEdgeWrapping;
+// unlike bake1/bake2/normalMap (a single non-repeating panel render, correctly
+// clamped), pattern-mask.png IS a repeating tile — and PATTERN_MASK.repeat/offset
+// (needed to register it against the real geometry) push sampled u slightly below
+// 0 near the plate's left edge. Clamping there smeared one repeated texture column
+// across that sliver, and because that column sits right at the mask's threshold,
+// it flickered between red and gray — the reported glitchy half-red/half-gray
+// border. RepeatWrapping samples real (tileable) content there instead.
+tPatternMask.wrapS = THREE.RepeatWrapping;
 tPatternMask.colorSpace = THREE.NoColorSpace;      // raw mask value, not a color to decode
 
 // shared uniforms
