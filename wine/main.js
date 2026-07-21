@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ---------------------------------------------------------------- config (site values)
 const CONFIG = {
@@ -64,6 +65,29 @@ const WINE = {
   grooveGray: [0.02, 0.12],      // smoothstep range on relief slope: below = flat wall (wine red shows),
                                   // above = the carved relief itself (stays gray — its own baked shading
                                   // + the metallic specular ride on top, unpainted so the relief detail reads)
+};
+
+// athens-26 metallic sheen (week.wild.plus/athens-26), layered ON TOP of the wine
+// above: a cursor-following point light Blinn-Phongs the baked normals, the metal
+// zone settles toward ambient and base-tinted highlights sweep with the cursor.
+// Because it runs after the wine mix, `metalBase = color * tint` picks up the wine
+// red as its body — a red metal, not a chrome overlay. That's why `tint` is
+// neutral here where ver1 (whose base is grey plaster) has to tint it red itself.
+// Note WINE already carries its own cursor highlight (metallic/roughness/intensity);
+// the two stack. If the highlight reads too hot, lower WINE.intensity first — it's
+// the softer of the two — before touching lightIntensity here.
+const METAL = {
+  enabled: true,         // ← master switch for the metallic layer
+  tint: 0xffffff,        // neutral: keep the wine hue underneath (ver1 uses 0xd42a10)
+  strength: 0.85,        // wild: metallic — also the layer's blend weight
+  roughness: 0.55,       // 0 = mirror-tight glint … 1 = broad satin sheen. Shapes and
+                          // dims the highlight independently of `strength`; 0.55 matches
+                          // the site's fixed spec exponent of 16, so it is the neutral value
+  lightIntensity: 0.4,   // wild: lightIntensity
+  lightRadius: 1.5,      // wild: lightRadius (aspect-corrected screen units)
+  ambient: 0.75,         // wild used .25 against grey plaster; raised here so the
+                          // layer doesn't crush the wine (which has its own .55 floor)
+  lightColor: 0xffffff,  // wild: lightColor
 };
 
 // Where the wine color is allowed to show is no longer guessed from the baked
@@ -291,6 +315,19 @@ uniform sampler2D tBake2;
 uniform sampler2D tPlaster;
 uniform vec2 uPlasterScale;
 uniform sampler2D tNormalMap;    // camera-space normals + height mask (bake)
+uniform vec2 uNormalMapTexel;    // 1/width, 1/height of tNormalMap
+uniform float uNormalBlurRadius; // blur radius in texels, 0 = off
+uniform float uWallUvOffset;     // texels to step walls inward off the outline sliver
+uniform float uReliefHeight;     // object-space height of the relief (vPos.z max)
+uniform float uShadowFloor;      // cast-shadow darkness below this is haze, cut to nothing
+uniform float uShadowStrength;   // overall darkness of the (cleaned) cast shadow
+uniform float uMetalRoughness;   // 0 = mirror-tight metal glint, 1 = broad satin sheen
+uniform float uMetalness;        // 0 = wine only, 1 = full athens-26 metal on the relief
+uniform vec3 uMetalTint;         // metal body tint (white = keep the wine hue)
+uniform vec3 uLightColor;
+uniform float uLightIntensity;
+uniform float uLightRadius;
+uniform float uMetalAmbient;
 uniform sampler2D tPatternMask;  // rasterized original SVG pattern, fit to plate UV
 uniform vec2 uPatternOffset;
 uniform vec2 uPatternRepeat;
@@ -382,6 +419,23 @@ vec3 ContrastSaturationBrightness(vec3 color, float brt, float sat, float con){
   vec3 conColor = mix(AvgLumin, satColor, con);
   return conColor;
 }
+// thin, sparsely-tessellated swept ribbon pieces bake visible per-facet banding
+// into EVERY Cycles render pass (color levels and normals alike) — a small
+// tent-filter blur across neighboring bake texels softens that residual
+// variation at runtime without needing a rebake. 3x3 tent: center 4, edge 2,
+// corner 1 (sum 16).
+vec4 blurTex(sampler2D tex, vec2 uv, vec2 texel){
+  vec4 s = texture2D(tex, uv) * 4.0;
+  s += texture2D(tex, uv + vec2(texel.x, 0.0)) * 2.0;
+  s += texture2D(tex, uv - vec2(texel.x, 0.0)) * 2.0;
+  s += texture2D(tex, uv + vec2(0.0, texel.y)) * 2.0;
+  s += texture2D(tex, uv - vec2(0.0, texel.y)) * 2.0;
+  s += texture2D(tex, uv + texel) * 1.0;
+  s += texture2D(tex, uv - texel) * 1.0;
+  s += texture2D(tex, uv + vec2(texel.x, -texel.y)) * 1.0;
+  s += texture2D(tex, uv + vec2(-texel.x, texel.y)) * 1.0;
+  return s / 16.0;
+}
 void main(){
   vec3 color = vec3(0);
   float alpha = 1.0;
@@ -393,8 +447,40 @@ void main(){
   float fastScrollExtrude = fastScrollNoise.r * SCROLL_EXTRUDE_STRENGTH;
   extrude = mix(extrude, fastScrollExtrude, uFastScroll) * uOpacity;
   float gradient = mix(1.0, 0.5, length(uvScreen - vec2(0.0, 0.8)));
-  vec3 bake1 = sRGB_OETF(texture2D(tBake1, vUv)).rgb;
-  vec3 bake2 = sRGB_OETF(texture2D(tBake2, vUv)).rgb;
+
+  // ---- side-wall UV rescue --------------------------------------------------
+  // The bakes and the pattern mask are FRONTAL projections, sampled through a
+  // planar UV built from base X,Y. The relief's side walls are extruded straight
+  // along +Z from the outline, so a wall's top and bottom vertices share
+  // IDENTICAL X,Y — their UV area is exactly zero (measured: half the triangles,
+  // ~50% of the surface). Every fragment down a wall therefore samples the same
+  // 1-D sliver of texture: the outline itself, which is the highest-contrast
+  // line in the bake (lit top face meeting cast shadow) and the red/grey
+  // boundary in the mask. Smeared down the wall that reads as vertical stripes
+  // and a grey/red mixture instead of one solid surface.
+  //
+  // Fix: for wall fragments, step the sample point a few texels back along the
+  // wall's own outward normal, into the top face the wall belongs to, so the
+  // wall inherits that face's tone and mask instead of the boundary sliver.
+  // vEye is built from the UNdisplaced position, so this normal describes the
+  // fully-extruded shape and stays stable as the reveal animates.
+  vec3 gNormal = normalize(cross(dFdx(vEye), dFdy(vEye)));
+  if (dot(gNormal, vEye) > 0.0) gNormal = -gNormal;      // resolve winding: face the camera
+  float wallness = 1.0 - clamp(abs(gNormal.z), 0.0, 1.0); // 0 = top face, 1 = edge-on wall
+  vec2 wallDir = length(gNormal.xy) > 1e-4 ? normalize(gNormal.xy) : vec2(0.0);
+  vec2 uvSurface = vUv - wallDir * uNormalMapTexel * uWallUvOffset * wallness;
+
+  // Purely geometric "is this fragment part of the raised relief, or the flat
+  // base plate" — a wall (steep) or anything standing proud of the plate. Both
+  // signals are registered by construction, unlike the pattern texture. Computed
+  // once here because two very different things need it: keeping the plaster
+  // clean (just below) and driving the wine/metal coverage (further down).
+  float raisedGeo = smoothstep(0.12, 0.45, vPos.z / max(uReliefHeight, 1e-4));
+  float reliefGeo = max(smoothstep(0.35, 0.7, wallness), raisedGeo);
+
+  vec2 bakeTexel = uNormalMapTexel * uNormalBlurRadius;   // all bake passes share one resolution
+  vec3 bake1 = sRGB_OETF(blurTex(tBake1, uvSurface, bakeTexel)).rgb;
+  vec3 bake2 = sRGB_OETF(blurTex(tBake2, uvSurface, bakeTexel)).rgb;
   float level0 = bake2.b;
   float level1 = bake2.g;
   float level2 = bake2.r;
@@ -408,6 +494,25 @@ void main(){
   o = mix(o, level3, smoothstep(0.4, 0.6, extrude));
   o = mix(o, level4, smoothstep(0.6, 0.8, extrude));
   o = mix(o, level5, smoothstep(0.8, 1.0, extrude));
+  // The baked levels carry the relief's cast shadow onto the flat base plate.
+  // The shadow itself is wanted — it's what sits the relief on the wall — but the
+  // bake's soft sun (20 deg key + a very broad 60 deg fill) spreads a wide, faint,
+  // low-contrast haze around the dark core, and the reveal's soft blob edge smears
+  // that further. The haze is what reads as dirt, not the shadow.
+  //
+  // So SHAPE the shadow rather than removing it: measure how much darker than
+  // clean plaster this fragment is, cut everything below a floor (that faint tail
+  // IS the dirt), then rescale what survives back to full range. A gamma was
+  // tried first and was wrong — it dims the mid-tones along with the haze, so the
+  // shadow reads as washed out. Floor-and-rescale deletes the haze while the real
+  // shadow keeps its strength. Only the flat plate is touched; the relief keeps
+  // its full baked shading.
+  float plateMask = 1.0 - clamp(reliefGeo, 0.0, 1.0);
+  float plasterBase = 0.54504;                                   // what flat wall bakes to
+  float shade = clamp((plasterBase - o) / plasterBase, 0.0, 1.0); // 0 = clean, 1 = black
+  float shadeClean = clamp((shade - uShadowFloor) / max(1.0 - uShadowFloor, 1e-4), 0.0, 1.0);
+  shadeClean *= uShadowStrength;
+  o = mix(o, plasterBase * (1.0 - shadeClean), plateMask);
   color += vec3(o);
   vec2 uvPlaster = vPos.xy / uPlasterScale;
   float plaster = texture2D(tPlaster, uvPlaster).g;
@@ -421,8 +526,8 @@ void main(){
   // --- WINE material (ver2 spec) ---------------------------------------------
   // body = pure hue, shading only modulates value (ambient floor → 1.0), so the
   // wine hue is never washed out by light
-  vec4 nSample = texture2D(tNormalMap, vUv);
-  vec3 nFull = nSample.xyz * 2.0 - 1.0;
+  vec4 nSample = blurTex(tNormalMap, uvSurface, bakeTexel);
+  vec3 nFull = normalize(nSample.xyz * 2.0 - 1.0);
   float heightMask = nSample.a;                                   // 0 = wall plate, 1 = raised element
   float squash = mix(0.05, 1.0, extrude);
   // normalStrength exaggerates the bump before lighting — independent of roughness,
@@ -465,12 +570,44 @@ void main(){
   // vector artwork the OIT-baked relief was built from, so its silhouette is a much
   // cleaner stencil than guessing from normals/height. Geometric weight stays only
   // as a fallback so the layer degrades gracefully if the mask texture is missing.
-  float patternRaw = texture2D(tPatternMask, vUv * uPatternRepeat + uPatternOffset).r;
+  float patternRaw = texture2D(tPatternMask, uvSurface * uPatternRepeat + uPatternOffset).r;
   float patternMask = smoothstep(0.5 - uPatternSoftness, 0.5 + uPatternSoftness, patternRaw);
   float geoWeight = max(reliefWeight, raisedWeight);
   float placeWeight = mix(geoWeight, patternMask, uPatternMaskLoaded);
+  // The pattern texture alone is not enough to say where the wine belongs. A side
+  // wall's own UV is the degenerate outline sliver, and the inward step that
+  // rescues it overshoots on thin strands, landing outside the shape again — the
+  // wall then reads unmasked, i.e. grey. The mask is also registered to the
+  // geometry only approximately, so at a silhouette it falls short of the real
+  // edge and leaves a thin grey rim. reliefGeo answers both from the geometry
+  // itself: a wall exists ONLY where a shape was extruded, and anything standing
+  // proud of the plate is extruded pattern. The flat plate stays untouched.
+  placeWeight = max(placeWeight, reliefGeo);
   float wineMask = clamp(extrude, 0.0, 1.0) * placeWeight * uWineEnabled;
   color = mix(color, clamp(wineColor, 0.0, 1.0), wineMask * uWineBlend);
+
+  // --- athens-26 metallic sheen, layered on top of the wine ------------------
+  // Runs AFTER the wine mix on purpose: metalBase reads the already-wine-coloured
+  // color, so this reads as red metal rather than a chrome overlay. Reuses the
+  // cursor light vectors the wine block already built (lightDir/halfVec/lightDist)
+  // and the same placeWeight, so the sheen covers the displaced geometry exactly
+  // as the wine does — walls, edges and caps included, no second coverage rule.
+  // roughness shapes AND dims the metal highlight, independently of how metallic
+  // it is — same split as the wine layer above. The site's fixed exponent of 16
+  // sits around roughness 0.55, so that stays the neutral value here.
+  float mRough = clamp(uMetalRoughness, 0.02, 1.0);
+  float mSpecExp = mix(64.0, 6.0, mRough);        // smooth → tight glint, rough → broad sheen
+  float mSpecStrength = pow(1.0 - mRough, 1.3);   // rough surfaces catch a dimmer, not absent, highlight
+  float cursorDiff = max(dot(nRel, lightDir), 0.0);
+  float cursorSpecMtl = pow(max(dot(nRel, halfVec), 0.0), mSpecExp) * mSpecStrength;
+  float cursorAtten = 1.0 - smoothstep(0.0, uLightRadius, lightDist);
+  float effMetalSpec = cursorSpecMtl * uLightIntensity * 2.0 * cursorAtten;
+  float effMetalDiff = cursorDiff * uLightIntensity * 0.25 * cursorAtten;
+  vec3 metalBase = color * uMetalTint;
+  vec3 metalHighlight = mix(uLightColor * effMetalSpec, metalBase * effMetalSpec, 0.75);
+  vec3 metallicColor = metalBase * (uMetalAmbient + effMetalDiff) + metalHighlight;
+  float metalMask = clamp(extrude, 0.0, 1.0) * placeWeight * uMetalness;
+  color = mix(color, clamp(metallicColor, 0.0, 1.0), metalMask);
 
   vec3 dFdxPos = dFdx(vEye);
   vec3 dFdyPos = dFdy(vEye);
@@ -646,6 +783,16 @@ function makeWallMaterial(bake1, bake2) {
   return new THREE.ShaderMaterial({
     vertexShader: WALL_VERT,
     fragmentShader: WALL_FRAG,
+    // was DoubleSide: with mixed-winding source geometry, FrontSide culled
+    // backward pieces and revealed the background through them (gray streaks).
+    // DoubleSide fixed that but rendered the wrongly-facing "interior" pieces
+    // too, which then z-fight the correct front wall at full extrusion —
+    // vertical stripes that scale with reveal depth. Now that the SVG source
+    // and sweep produce consistent winding, try FrontSide again: it should
+    // just cull the (hopefully now rare/absent) bad pieces cleanly instead of
+    // rendering-and-fighting them. If background gaps reappear, revert to
+    // DoubleSide — that means winding is still inconsistent somewhere.
+    side: THREE.FrontSide,
     uniforms: {
       uTime,
       uResolution,
@@ -656,6 +803,25 @@ function makeWallMaterial(bake1, bake2) {
       tPlaster: { value: tPlaster },
       uPlasterScale: { value: new THREE.Vector2(10, 10) },   // site value; custom mode overrides
       tNormalMap: { value: tFlatNormal },                    // custom mode binds the baked normal map
+      uNormalMapTexel: { value: new THREE.Vector2(1, 1) },   // set once the real map loads
+      uNormalBlurRadius: { value: 2.5 },
+      // ~6 texels clears the outline's antialiased boundary and lands on solid
+      // top face. Too large overshoots the thinner ribbon strands entirely and
+      // washes them out, so this wants to stay just past the edge, not deep in.
+      uWallUvOffset: { value: 6.0 },
+      uReliefHeight: { value: 1.0 },   // real value bound once the model's bounds are known
+      // cast shadow on the plaster. floor = where haze ends and shadow begins:
+      // raise it if the plaster still looks grubby, lower it toward 0 for the raw
+      // bake. strength scales what survives — push past 1 for a heavier shadow.
+      uShadowFloor: { value: 0.07 },
+      uShadowStrength: { value: 1.15 },
+      uMetalRoughness: { value: METAL.roughness },
+      uMetalness: { value: 0 },        // metal off unless custom mode enables it
+      uMetalTint: { value: new THREE.Color().setHex(METAL.tint, THREE.LinearSRGBColorSpace) },
+      uLightColor: { value: new THREE.Color().setHex(METAL.lightColor, THREE.LinearSRGBColorSpace) },
+      uLightIntensity: { value: METAL.lightIntensity },
+      uLightRadius: { value: METAL.lightRadius },
+      uMetalAmbient: { value: METAL.ambient },
       tPatternMask: { value: tPatternMask },
       uPatternOffset: { value: new THREE.Vector2(...PATTERN_MASK.offset) },
       uPatternRepeat: { value: new THREE.Vector2(...PATTERN_MASK.repeat) },
@@ -729,6 +895,17 @@ if (USE_CUSTOM) {
     let geometry = null;
     gltf.scene.traverse((o) => { if (o.geometry && !geometry) geometry = o.geometry; });
     if (!geometry) return failLoading(new Error('no mesh in custom model'));
+    // the export splits a vertex into duplicates (same position, different
+    // normal/uv) at every hard-shaded edge — normal and glTF-standard, and
+    // harmless for shading here (color comes from the baked 2D textures via a
+    // planar UV we recompute below, never from vertex normals). But at full
+    // relief extrusion a duplicate can sit a hair off from its twin and open a
+    // visible crack — thin bright tears cutting across the red fill, background
+    // showing through. Drop normal/uv (unused) and weld by position only so
+    // adjacent triangles actually share vertices again.
+    geometry.deleteAttribute('normal');
+    geometry.deleteAttribute('uv');
+    geometry = mergeVertices(geometry, 1e-3);
     // source: plate in XZ, relief depth on +Y → rotate depth onto +Z (toward camera),
     // then amplify to the bake's depth ratio (meta.json keeps them in sync)
     geometry.rotateX(Math.PI / 2);
@@ -762,7 +939,12 @@ if (USE_CUSTOM) {
       // exactly one plaster tile per panel → texture is continuous across seams
       mesh.material.uniforms.uPlasterScale.value.set(rowSpacing, rowSpacing);
       mesh.material.uniforms.tNormalMap.value = normalMap;
+      if (meta.res) mesh.material.uniforms.uNormalMapTexel.value.set(1 / meta.res[0], 1 / meta.res[1]);
+      // geometry was translated to min.z = 0, so b.max.z IS the relief height —
+      // lets the shader read vPos.z as a normalized "how raised is this fragment"
+      mesh.material.uniforms.uReliefHeight.value = b.max.z;
       mesh.material.uniforms.uWineEnabled.value = WINE.enabled ? 1 : 0;
+      mesh.material.uniforms.uMetalness.value = METAL.enabled ? METAL.strength : 0;
       sections.push(mesh);
       wallGroup.add(mesh);
     }

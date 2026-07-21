@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ---------------------------------------------------------------- config (site values)
 const CONFIG = {
@@ -69,7 +70,7 @@ const METAL = {
 // version reads at a plain 1:1 UV with a clean background fill for the sliver
 // the source raster didn't cover.
 const PATTERN_RED = {
-  enabled: true,
+  enabled: false,
   blend: 1.0,             // 1 = solid fill within the pattern, on the revealed relief
   color: 0xff3300,
 };
@@ -279,6 +280,13 @@ uniform sampler2D tBake2;
 uniform sampler2D tPlaster;
 uniform vec2 uPlasterScale;
 uniform sampler2D tNormalMap;    // camera-space normals + height mask (bake)
+uniform vec2 uNormalMapTexel;    // 1/width, 1/height of tNormalMap
+uniform float uNormalBlurRadius; // blur radius in texels, 0 = off
+uniform float uWallUvOffset;     // texels to step walls inward off the outline sliver
+uniform float uReliefHeight;     // object-space height of the relief (vPos.z max)
+uniform float uShadowFloor;      // cast-shadow darkness below this is haze, cut to nothing
+uniform float uShadowStrength;   // overall darkness of the (cleaned) cast shadow
+uniform float uEdgeMatchWall;    // 1 = relief edges take the flat wall's own tone
 uniform sampler2D tPatternMask;  // rasterized original SVG pattern, fit to plate UV
 uniform vec2 uPatternOffset;
 uniform vec2 uPatternRepeat;
@@ -368,6 +376,23 @@ vec3 ContrastSaturationBrightness(vec3 color, float brt, float sat, float con){
   vec3 conColor = mix(AvgLumin, satColor, con);
   return conColor;
 }
+// thin, sparsely-tessellated swept ribbon pieces bake visible per-facet banding
+// into EVERY Cycles render pass (color levels and normals alike) — a small
+// tent-filter blur across neighboring bake texels softens that residual
+// variation at runtime without needing a rebake. 3x3 tent: center 4, edge 2,
+// corner 1 (sum 16).
+vec4 blurTex(sampler2D tex, vec2 uv, vec2 texel){
+  vec4 s = texture2D(tex, uv) * 4.0;
+  s += texture2D(tex, uv + vec2(texel.x, 0.0)) * 2.0;
+  s += texture2D(tex, uv - vec2(texel.x, 0.0)) * 2.0;
+  s += texture2D(tex, uv + vec2(0.0, texel.y)) * 2.0;
+  s += texture2D(tex, uv - vec2(0.0, texel.y)) * 2.0;
+  s += texture2D(tex, uv + texel) * 1.0;
+  s += texture2D(tex, uv - texel) * 1.0;
+  s += texture2D(tex, uv + vec2(texel.x, -texel.y)) * 1.0;
+  s += texture2D(tex, uv + vec2(-texel.x, texel.y)) * 1.0;
+  return s / 16.0;
+}
 void main(){
   vec3 color = vec3(0);
   float alpha = 1.0;
@@ -379,8 +404,35 @@ void main(){
   float fastScrollExtrude = fastScrollNoise.r * SCROLL_EXTRUDE_STRENGTH;
   extrude = mix(extrude, fastScrollExtrude, uFastScroll) * uOpacity;
   float gradient = mix(1.0, 0.5, length(uvScreen - vec2(0.0, 0.8)));
-  vec3 bake1 = sRGB_OETF(texture2D(tBake1, vUv)).rgb;
-  vec3 bake2 = sRGB_OETF(texture2D(tBake2, vUv)).rgb;
+  // ---- side-wall UV rescue --------------------------------------------------
+  // The bakes and the pattern mask are FRONTAL projections, sampled through a
+  // planar UV built from base X,Y. The relief's side walls are extruded straight
+  // along +Z from the outline, so a wall's top and bottom vertices share
+  // IDENTICAL X,Y — their UV area is exactly zero (measured: half the triangles,
+  // ~50% of the surface). Every fragment down a wall therefore samples the same
+  // 1-D sliver of texture: the outline itself, which is the highest-contrast
+  // line in the bake (lit top face meeting cast shadow). Smeared down the wall
+  // that reads as vertical stripes instead of one solid surface.
+  //
+  // Fix: for wall fragments, step the sample point a few texels back along the
+  // wall's own outward normal, into the top face the wall belongs to, so the
+  // wall inherits that face's tone instead of the boundary sliver.
+  vec3 gNormal = normalize(cross(dFdx(vEye), dFdy(vEye)));
+  if (dot(gNormal, vEye) > 0.0) gNormal = -gNormal;      // resolve winding: face the camera
+  float wallness = 1.0 - clamp(abs(gNormal.z), 0.0, 1.0); // 0 = top face, 1 = edge-on wall
+  vec2 wallDir = length(gNormal.xy) > 1e-4 ? normalize(gNormal.xy) : vec2(0.0);
+  vec2 uvSurface = vUv - wallDir * uNormalMapTexel * uWallUvOffset * wallness;
+
+  // Purely geometric "is this fragment part of the raised relief, or the flat
+  // base plate" — a wall (steep) or anything standing proud of the plate. Both
+  // signals are registered by construction, unlike the pattern texture. Computed
+  // once here because several things downstream need it.
+  float raisedGeo = smoothstep(0.12, 0.45, vPos.z / max(uReliefHeight, 1e-4));
+  float reliefGeo = max(smoothstep(0.35, 0.7, wallness), raisedGeo);
+
+  vec2 bakeTexel = uNormalMapTexel * uNormalBlurRadius;   // all bake passes share one resolution
+  vec3 bake1 = sRGB_OETF(blurTex(tBake1, uvSurface, bakeTexel)).rgb;
+  vec3 bake2 = sRGB_OETF(blurTex(tBake2, uvSurface, bakeTexel)).rgb;
   float level0 = bake2.b;
   float level1 = bake2.g;
   float level2 = bake2.r;
@@ -394,6 +446,28 @@ void main(){
   o = mix(o, level3, smoothstep(0.4, 0.6, extrude));
   o = mix(o, level4, smoothstep(0.6, 0.8, extrude));
   o = mix(o, level5, smoothstep(0.8, 1.0, extrude));
+  // The baked levels carry the relief's cast shadow onto the flat base plate.
+  // The shadow itself is wanted — it's what sits the relief on the wall — but the
+  // bake's soft sun (20 deg key + a very broad 60 deg fill) spreads a wide, faint,
+  // low-contrast haze around the dark core, and the reveal's soft blob edge smears
+  // that further. The haze is what reads as dirt, not the shadow. So cut the faint
+  // tail and rescale what survives back to full strength: the haze goes, the real
+  // shadow keeps its weight. Only the flat plate is touched.
+  float plateMask = 1.0 - clamp(reliefGeo, 0.0, 1.0);
+  float plasterBase = 0.54504;                                   // what flat wall bakes to
+  float shade = clamp((plasterBase - o) / plasterBase, 0.0, 1.0); // 0 = clean, 1 = black
+  float shadeClean = clamp((shade - uShadowFloor) / max(1.0 - uShadowFloor, 1e-4), 0.0, 1.0);
+  shadeClean *= uShadowStrength;
+  o = mix(o, plasterBase * (1.0 - shadeClean), plateMask);
+
+  // The relief is the SAME plaster as the wall, so its edges should not read as a
+  // separate tone. The extrusion walls are the worst offenders: their own UV is
+  // the degenerate outline sliver, and even after the rescue step they inherit the
+  // top face's shading, which sits at a different level than the surrounding wall.
+  // Pull the walls back toward the flat wall's own tone so the relief reads as one
+  // continuous material catching light, not an object pasted onto a background.
+  float edgeBlend = smoothstep(0.35, 0.75, wallness) * uEdgeMatchWall;
+  o = mix(o, plasterBase, edgeBlend);
   color += vec3(o);
   vec2 uvPlaster = vPos.xy / uPlasterScale;
   float plaster = texture2D(tPlaster, uvPlaster).g;
@@ -409,8 +483,8 @@ void main(){
   // to ambient inside the metal zone and broad base-tinted speculars sweep over
   // it as the cursor moves. (Their values: metallic .85, intensity .4, radius 1.5,
   // spec pow 16 ×2, highlight 75% tinted by base, ambient .06 + cursorAmbient .19.)
-  vec4 nSample = texture2D(tNormalMap, vUv);
-  vec3 nFull = nSample.xyz * 2.0 - 1.0;
+  vec4 nSample = blurTex(tNormalMap, uvSurface, bakeTexel);
+  vec3 nFull = normalize(nSample.xyz * 2.0 - 1.0);
   float heightMask = nSample.a;                                   // 0 = wall plate, 1 = raised element
   float squash = mix(0.05, 1.0, extrude);
   vec3 nRel = normalize(vec3(nFull.xy * (squash / max(nFull.z, 0.15)), 1.0));
@@ -429,13 +503,20 @@ void main(){
   vec3 metallicColor = metalBase * (uMetalAmbient + effMetalDiff) + metalHighlight;
   float reliefWeight = smoothstep(0.02, 0.18, 1.0 - nFull.z);     // sloped surfaces
   float raisedWeight = smoothstep(0.15, 0.6, heightMask);         // whole raised elements (ribbons)
-  float metalMask = clamp(extrude, 0.0, 1.0) * max(reliefWeight, raisedWeight) * uMetalness;
+  float metalMask = clamp(extrude, 0.0, 1.0) * max(max(reliefWeight, raisedWeight), reliefGeo) * uMetalness;
   color = mix(color, clamp(metallicColor, 0.0, 1.0), metalMask);
 
   // --- pattern-masked red fill: the original SVG artwork, not a normals guess ---
-  float patternRaw = texture2D(tPatternMask, vUv * uPatternRepeat + uPatternOffset).r;
+  float patternRaw = texture2D(tPatternMask, uvSurface * uPatternRepeat + uPatternOffset).r;
   float patternMask = smoothstep(0.5 - uPatternSoftness, 0.5 + uPatternSoftness, patternRaw);
   float patternPlaceWeight = mix(max(reliefWeight, raisedWeight), patternMask, uPatternMaskLoaded);
+  // The pattern texture alone is not enough to say where the fill belongs. A side
+  // wall's own UV is the degenerate outline sliver, and the inward step that
+  // rescues it overshoots on thin strands, landing outside the shape again. The
+  // mask is also registered to the geometry only approximately, so at a silhouette
+  // it falls short of the real edge and leaves a thin rim. reliefGeo answers both
+  // from the geometry itself. The flat plate stays untouched.
+  patternPlaceWeight = max(patternPlaceWeight, reliefGeo);
   float patternRedMask = clamp(extrude, 0.0, 1.0) * patternPlaceWeight * uPatternRedEnabled;
   color = mix(color, uPatternRedColor, patternRedMask * uPatternRedBlend);
 
@@ -609,6 +690,16 @@ function makeWallMaterial(bake1, bake2) {
   return new THREE.ShaderMaterial({
     vertexShader: WALL_VERT,
     fragmentShader: WALL_FRAG,
+    // was DoubleSide: with mixed-winding source geometry, FrontSide culled
+    // backward pieces and revealed the background through them (gray streaks).
+    // DoubleSide fixed that but rendered the wrongly-facing "interior" pieces
+    // too, which then z-fight the correct front wall at full extrusion —
+    // vertical stripes that scale with reveal depth. Now that the SVG source
+    // and sweep produce consistent winding, try FrontSide again: it should
+    // just cull the (hopefully now rare/absent) bad pieces cleanly instead of
+    // rendering-and-fighting them. If background gaps reappear, revert to
+    // DoubleSide — that means winding is still inconsistent somewhere.
+    side: THREE.FrontSide,
     uniforms: {
       uTime,
       uResolution,
@@ -619,6 +710,21 @@ function makeWallMaterial(bake1, bake2) {
       tPlaster: { value: tPlaster },
       uPlasterScale: { value: new THREE.Vector2(10, 10) },   // site value; custom mode overrides
       tNormalMap: { value: tFlatNormal },                    // custom mode binds the baked normal map
+      uNormalMapTexel: { value: new THREE.Vector2(1, 1) },   // set once the real map loads
+      uNormalBlurRadius: { value: 2.5 },
+      // ~6 texels clears the outline's antialiased boundary and lands on solid
+      // top face. Too large overshoots the thinner ribbon strands entirely and
+      // washes them out, so this wants to stay just past the edge, not deep in.
+      uWallUvOffset: { value: 6.0 },
+      uReliefHeight: { value: 1.0 },   // real value bound once the model's bounds are known
+      // cast shadow on the plaster. floor = where haze ends and shadow begins:
+      // raise it if the plaster still looks grubby, lower it toward 0 for the raw
+      // bake. strength scales what survives — push past 1 for a heavier shadow.
+      uShadowFloor: { value: 0.07 },
+      uShadowStrength: { value: 1.15 },
+      // relief edges take the flat wall's own tone, so the relief reads as the
+      // same plaster the wall is made of rather than a separate object on it.
+      uEdgeMatchWall: { value: 1.0 },
       tPatternMask: { value: tPatternMask },
       uPatternOffset: { value: new THREE.Vector2(...PATTERN_MASK.offset) },
       uPatternRepeat: { value: new THREE.Vector2(...PATTERN_MASK.repeat) },
@@ -688,6 +794,17 @@ if (USE_CUSTOM) {
     let geometry = null;
     gltf.scene.traverse((o) => { if (o.geometry && !geometry) geometry = o.geometry; });
     if (!geometry) return failLoading(new Error('no mesh in custom model'));
+    // the export splits a vertex into duplicates (same position, different
+    // normal/uv) at every hard-shaded edge — normal and glTF-standard, and
+    // harmless for shading here (color comes from the baked 2D textures via a
+    // planar UV we recompute below, never from vertex normals). But at full
+    // relief extrusion a duplicate can sit a hair off from its twin and open a
+    // visible crack — thin bright tears cutting across the red fill, background
+    // showing through. Drop normal/uv (unused) and weld by position only so
+    // adjacent triangles actually share vertices again.
+    geometry.deleteAttribute('normal');
+    geometry.deleteAttribute('uv');
+    geometry = mergeVertices(geometry, 1e-3);
     // source: plate in XZ, relief depth on +Y → rotate depth onto +Z (toward camera),
     // then amplify to the bake's depth ratio (meta.json keeps them in sync)
     geometry.rotateX(Math.PI / 2);
@@ -721,6 +838,10 @@ if (USE_CUSTOM) {
       // exactly one plaster tile per panel → texture is continuous across seams
       mesh.material.uniforms.uPlasterScale.value.set(rowSpacing, rowSpacing);
       mesh.material.uniforms.tNormalMap.value = normalMap;
+      if (meta.res) mesh.material.uniforms.uNormalMapTexel.value.set(1 / meta.res[0], 1 / meta.res[1]);
+      // geometry was translated to min.z = 0, so b.max.z IS the relief height —
+      // lets the shader read vPos.z as a normalized "how raised is this fragment"
+      mesh.material.uniforms.uReliefHeight.value = b.max.z;
       mesh.material.uniforms.uMetalness.value = METAL.enabled ? METAL.strength : 0;
       sections.push(mesh);
       wallGroup.add(mesh);

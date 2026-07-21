@@ -7,6 +7,8 @@
     2048,
     1258
   ],
-  "gain": 0.2911,
-  "sourceGltf": "output.gltf"
+  "gain": 0.2905,
+  "sourceGltf": "output.gltf",
+  "sourceExported": "2026-07-21T21:14:22",
+  "baked": "2026-07-21T22:59:38"
 }
