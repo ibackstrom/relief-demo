@@ -287,6 +287,7 @@ uniform float uReliefHeight;     // object-space height of the relief (vPos.z ma
 uniform float uShadowFloor;      // cast-shadow darkness below this is haze, cut to nothing
 uniform float uShadowStrength;   // overall darkness of the (cleaned) cast shadow
 uniform float uEdgeMatchWall;    // 1 = relief edges take the flat wall's own tone
+uniform float uReliefFlatten;    // pulls the relief's tone toward the wall's (0 = full contrast)
 uniform sampler2D tPatternMask;  // rasterized original SVG pattern, fit to plate UV
 uniform vec2 uPatternOffset;
 uniform vec2 uPatternRepeat;
@@ -468,6 +469,16 @@ void main(){
   // continuous material catching light, not an object pasted onto a background.
   float edgeBlend = smoothstep(0.35, 0.75, wallness) * uEdgeMatchWall;
   o = mix(o, plasterBase, edgeBlend);
+
+  // The relief's top faces bake BRIGHTER than the flat wall — they face the key
+  // light more directly, while the wall is calibrated to plasterBase. That gap is
+  // why the relief reads as a bright silhouette against its own background, and
+  // why a step is still visible where a lit top face meets the wall-toned edge.
+  // Pull the whole relief's tonal range toward the wall's own value: this is a
+  // contrast compression about plasterBase, so highlights come down, shadows come
+  // up, and the relief settles into the same material as the wall instead of
+  // sitting on top of it. 0 = full baked contrast, 1 = completely flat.
+  o = mix(o, plasterBase, clamp(reliefGeo, 0.0, 1.0) * uReliefFlatten);
   color += vec3(o);
   vec2 uvPlaster = vPos.xy / uPlasterScale;
   float plaster = texture2D(tPlaster, uvPlaster).g;
@@ -725,6 +736,9 @@ function makeWallMaterial(bake1, bake2) {
       // relief edges take the flat wall's own tone, so the relief reads as the
       // same plaster the wall is made of rather than a separate object on it.
       uEdgeMatchWall: { value: 1.0 },
+      // how far the relief's tone is pulled toward the wall's. Raise it to blend
+      // the relief further into the background; lower it for more modelled form.
+      uReliefFlatten: { value: 0.70 },
       tPatternMask: { value: tPatternMask },
       uPatternOffset: { value: new THREE.Vector2(...PATTERN_MASK.offset) },
       uPatternRepeat: { value: new THREE.Vector2(...PATTERN_MASK.repeat) },
