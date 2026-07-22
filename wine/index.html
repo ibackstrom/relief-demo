@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>ver2 — wine relief</title>
+<title>ver2 — relief reveal</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #b7b7b7; touch-action: none; overscroll-behavior: none; }
@@ -30,8 +30,11 @@
 </head>
 <body>
 <div id="loading">loading model…</div>
-<div id="hint">move the cursor over the wall — scroll to zoom · ver2 wine</div>
-<script type="module" src="./main.js?v=20260721233224"></script>
+<div id="hint">move the cursor over the wall — scroll to zoom</div>
+<!-- dev: import with a timestamp so an edit to main.js is never masked by Chrome's
+     module cache (a plain src="./main.js" gets revalidated as 304 and the browser
+     keeps running the old build). The packaged build stamps this properly. -->
+<script type="module" src="./main.js?v=20260722224646"></script>
 </body>
 </html>
 

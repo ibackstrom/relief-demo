@@ -8,6 +8,13 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ---------------------------------------------------------------- config (site values)
+// The reveal brush is stamped in SCREEN space, so by default zooming in magnifies
+// the wall under a brush that stays the same size on screen — the revealed patch
+// shrinks against the plate as you zoom. With this on, the screen-space radius is
+// scaled by camera.zoom, which is exactly the magnification, so the brush covers a
+// constant patch OF THE WALL at any zoom. Set false for the site's own behaviour.
+const BRUSH_TRACKS_ZOOM = true;
+
 const CONFIG = {
   flowmap: { mouseEase: 0.4, dissipation: 0.953, falloff: 0.38, alpha: 1 },
   extrude: { textureStrength: 1, gradientStrength: 0.17 },
@@ -15,16 +22,99 @@ const CONFIG = {
 };
 const ROW_SPACING = 9.995;          // Ei
 const FOV_FIT = 1.33;               // $o  → worldHeight = 1.33 * (Ei - .1) / aspect
-const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-const BRIGHTNESS_FACTOR = IS_MOBILE ? 0.5 : 0.6;   // site: mobile .5 / desktop .6
-const BRIGHTNESS_OFFSET = IS_MOBILE ? 0.6 : 0.4;   // site: mobile .6 / desktop .4
+const BRIGHTNESS_FACTOR = 0.6;      // desktop (mobile: .5)
+const BRIGHTNESS_OFFSET = 0.4;      // desktop (mobile: .6)
 // scroll → zoom (decomposed from aurora-botanique.com):
 // fixed full-screen visual; scroll progress smoothed by a spring
 // (stiffness 80, damping 22, mass .7) drives scale 1 → 1.35 from screen center.
 const ZOOM = {
-  max: 2.4,                                     // 4× the aurora zoom amount (aurora: 1.35)
+  max: 1.6,                                     // scroll-in target (was 2.4)
   screens: 6,                                   // scroll distance for full zoom, in viewport heights (aurora: ~17)
   spring: { stiffness: 80, damping: 22, mass: 0.7 },
+};
+
+// how far the relief physically pops out of the wall at full reveal, as a
+// fraction of the model's baked depth. 1 = the geometry's own depth (what the
+// bakes were lit at), 0.5 = half. Applied to the vertex displacement AND to the
+// normal squash that shades it, so lighting follows the flattened shape.
+const DISPLACEMENT = 0.5;
+
+// FAST-SCROLL MODE — the site's second reveal, the one that isn't the cursor.
+// Scroll quickly on immersive-g.com and the wall stops following the pointer and
+// starts extruding from an animated noise field instead: relief surfaces in
+// organic patches all over the screen at once, drifting as you keep scrolling,
+// and the whole image grades brighter and flatter while it lasts.
+//
+// The mechanism was already ported verbatim and has been sitting dormant in the
+// shaders since the first commit — getFastScrollNoise (two counter-drifting noise
+// fetches dotted against a rotating color triple, per SCROLL_EXTRUDE_*), the
+// `mix(extrude, fastScrollExtrude, uFastScroll)` in both stages, and the
+// ContrastSaturationBrightness(2, 1, .08) + .3 grade in the fragment. Nothing
+// ever drove uFastScroll, so it stayed 0. This block is that driver.
+//
+// One thing cannot be 1:1: on the site scrolling TRAVELS the wall, and the noise
+// field is anchored to the wall through uScreenScroll (scene.position.y scaled by
+// fastModeZoom). Here scrolling zooms instead — the wall never moves — so
+// uScreenScroll is fed from accumulated scroll distance directly. Same drift, same
+// direction, driven by the same input.
+// AMBIENT REVEAL — relief surfacing on its own, away from the cursor.
+//
+// This rides the flow-map's SECOND stamp, which has been in the shader from the
+// start and which nothing drove (the spec notes it as "unused on home"). It is not
+// a copy of the cursor stamp: `stamp2.rg *= 0.0` throws away the flow velocity and
+// keeps only the extrude channels, at 3x weight, modulated by the slower of the two
+// noise fields. In other words it is a "reveal a blob HERE" stamp with no direction
+// and no pointer attached — exactly what an ambient reveal needs, which is why it
+// exists. Blobs then live and melt on the flow-map's own dissipation, so they decay
+// identically to cursor reveals; nothing here touches the wall shader.
+// Values below are read straight out of the live bundle's `triggerRandomMouseMovement`
+// / `loopRandomMouseMovement` (assets/default.*.js), not invented here. The shape of it:
+//   velocity2 is pinned to (1,1) — |v|*50 saturates `magnitude`, so every stamp is
+//   full strength — and mouse2 is TWEENED across the screen in 1-3 segments, each
+//   0.7-1.0s, between points on a circle of radius .7-.9 in [-1,1] space (so it
+//   works the outer part of the frame, not the middle). Each axis is tweened
+//   separately with GSAP's rough() ease, which is what makes it quiver instead of
+//   gliding. Then mouse2 parks at (-1,-1) — far outside the falloff, so it stops
+//   stamping without needing to touch velocity2 — and after 1-3s it goes again.
+const AMBIENT = {
+  enabled: true,
+  pause: [6, 14],             // seconds of stillness between passes (site: lerp(1,3) —
+                              //   that ran a pass roughly half the time, which read as
+                              //   constant activity; this makes it an occasional event)
+  segments: [1, 3],           // site: floor(random*3)+1
+  durMid: [0.8, 1.0],         // site: lerp(.8,1) for a segment that is followed by more
+  durLast: [0.7, 0.8],        // site: lerp(.7,.8) for the closing segment
+  radius: [0.7, 0.9],         // site: lerp(.7,.9), in [-1,1] space → uv = v/2 + .5
+  // The site's own roughness is 3 / 2 with 12 sample points per second, which reads
+  // as a hard jitter. Toned down here on request: smaller deviations, fewer of them,
+  // and the jittered curve is mixed back toward the clean travel so what is left is
+  // a drift rather than a shake. Set roughBlend to 1 with 3 / 2 / 12 to get the
+  // site's exact nervousness back.
+  roughMid: 1.0,              // site: 3   (rough strength, mid-pass segments)
+  roughLast: 0.7,             // site: 2   (closing segment)
+  roughPoints: 5,             // site: 12  (sample points per second of travel)
+  roughBlend: 0.35,           // 0 = perfectly smooth travel, 1 = the full rough curve
+  chroma: true,               // let the pass take the red mask too (false = reveal only)
+};
+
+// index.html?fast pins fast-scroll mode on; ?amb runs the ambient reveal back to back
+// with no pause and reports each pass in the tab title, so it can be judged without
+// waiting out a 6-14s gap
+const FORCE_FAST = new URLSearchParams(location.search).has('fast');
+const FORCE_AMBIENT = new URLSearchParams(location.search).has('amb');
+const FAST = {
+  enabled: true,
+  // Speeds are px of scroll per 60fps frame. These have to sit ABOVE ordinary
+  // scrolling or the mode fires constantly: one wheel notch is ~100-120px, and a
+  // normal continuous scroll runs 100-400px per frame. Only a deliberate flick
+  // clears 700. (First pass used 8/45 — every touch of the wheel slammed it to
+  // full, which is what made the view lurch.)
+  onSpeed: 250,      // where the noise reveal starts appearing
+  fullSpeed: 700,    // ... and where it fully replaces the cursor reveal
+  attack: 0.14,      // rise rate per frame (fast: it should feel immediate)
+  release: 0.035,    // fall rate per frame (slow: the site eases back out, not a cut)
+  zoom: 0.6,         // site's camera.fastModeZoom (1 = no pull-back). slowModeZoom = 1
+  drift: 0.6,        // how far the noise field travels per screen of scroll
 };
 
 // metallic layer, ported 1:1 from week.wild.plus/athens-26: a cursor-following
@@ -32,99 +122,57 @@ const ZOOM = {
 // and base-tinted highlights sweep with the cursor. Values = their defaults.
 // chromatic sheen (the original site's yellow/red iridescent hues along revealed
 // relief edges where the cursor has passed). The shading is the site's verbatim
-// applyFluidEffect; we feed it a slow-fading cursor trail instead of their full
-// Navier-Stokes fluid sim.
+// applyFluidEffect (hueShift -0.52 → yellow/orange on flats, red on slopes); we
+// feed it a slow-fading cursor trail instead of their full Navier-Stokes fluid sim.
+// The site derives this color per-facet from the surface normal (their hueShift
+// -0.52 → a yellow that tips through orange into red). That was ported here and
+// rejected in review: red sits at the hue wheel's wrap point, so the same swing
+// that keeps yellow inside "yellow-ish" throws red out into magenta on the steep
+// ribbon strands and yellow on the shallow ones. This is a flat CHROMA.color
+// instead — one red, no hue variation.
 const CHROMA = {
-  enabled: false,        // ← master switch for the chromatic layer
+  enabled: true,         // ← master switch for the chromatic layer
   color: 0xff3300,       // the mask color (fixed red)
+  saturation: 0.6,       // pulls that color toward its own gray. 1 = the raw hex,
+                         //   0 = no color at all. Luminance-preserving, so lowering it
+                         //   softens the red without making it darker or lighter.
   ground: 0.25,          // how much the flat ground takes the color (0 = relief only)
   falloff: 0.55,         // trail width (screen fraction ×0.5)
   dissipation: 0.975,    // trail lifetime (a touch longer than the reveal)
   boost: 8,              // HDR accumulation cap — drives the site's fluid.b * 0.15 range
 };
 
-// ver2 WINE material (per spec):
-// — body = PURE hue, never washed out by light: shading only modulates value
-//   around 1.0 (ambient floor 0.55 → 1.0 via a fixed directional light)
-// — semi-matte finish with a light metallic sheen: metallic 0.34
-//   (0 = matte ink, 1 = steel glint) drives Blinn-Phong exponent 48 → 14
-//   and the highlight color (lightened wine → white)
-// — the highlight is a cursor-bound point light, radius ~0.6 screen, intensity 1
-const WINE = {
-  enabled: true,
-  blend: 0.5,                    // 0 = pure ver1 plaster look … 1 = full wine material
-  color: 0x650003,               // Wine
-  metallic: 0.34,                // 0 = матовые чернила … 1 = стальной блик (tints the highlight hue)
-  roughness: 0.7,                // 0 = mirror-smooth … 1 = fully matte (shapes/dims the highlight itself)
-  normalStrength: 1.6,           // amplifies the baked normal's xy before lighting — a second, roughness-
-                                  // independent lever for how visible the relief-driven shading reads
-  lightDir: [0.35, 0.55, 0.75],  // fixed directional light: top-right-front
-  ambient: 0.55,                 // shadow floor (нижний порог тени)
-  lightRadius: 0.6,              // cursor highlight falloff (screens)
-  intensity: 1.3,                // cursor highlight strength
-  grooveGray: [0.02, 0.12],      // smoothstep range on relief slope: below = flat wall (wine red shows),
-                                  // above = the carved relief itself (stays gray — its own baked shading
-                                  // + the metallic specular ride on top, unpainted so the relief detail reads)
-};
-
-// athens-26 metallic sheen (week.wild.plus/athens-26), layered ON TOP of the wine
-// above: a cursor-following point light Blinn-Phongs the baked normals, the metal
-// zone settles toward ambient and base-tinted highlights sweep with the cursor.
-// Because it runs after the wine mix, `metalBase = color * tint` picks up the wine
-// red as its body — a red metal, not a chrome overlay. That's why `tint` is
-// neutral here where ver1 (whose base is grey plaster) has to tint it red itself.
-// Note WINE already carries its own cursor highlight (metallic/roughness/intensity);
-// the two stack. If the highlight reads too hot, lower WINE.intensity first — it's
-// the softer of the two — before touching lightIntensity here.
 const METAL = {
-  enabled: true,         // ← master switch for the metallic layer
-  tint: 0xffffff,        // neutral: keep the wine hue underneath (ver1 uses 0xd42a10)
-  strength: 0.85,        // wild: metallic — also the layer's blend weight
-  roughness: 0.55,       // 0 = mirror-tight glint … 1 = broad satin sheen. Shapes and
-                          // dims the highlight independently of `strength`; 0.55 matches
-                          // the site's fixed spec exponent of 16, so it is the neutral value
+  enabled: false,        // ← master switch for the whole metallic layer
+  strength: 0.85,        // wild: metallic
   lightIntensity: 0.4,   // wild: lightIntensity
   lightRadius: 1.5,      // wild: lightRadius (aspect-corrected screen units)
-  ambient: 0.75,         // wild used .25 against grey plaster; raised here so the
-                          // layer doesn't crush the wine (which has its own .55 floor)
+  ambient: 0.25,         // wild: ambientLight .06 + cursorAmbient .19
   lightColor: 0xffffff,  // wild: lightColor
 };
 
-// Where the wine color is allowed to show is no longer guessed from the baked
-// normals (reliefWeight/raisedWeight) — it's read straight from the original
-// vector artwork (../../Pattern filled (4).svg), rasterized onto the plate's UV
-// space (pattern-mask.webp, white = inside the pattern). Registered against
-// normal.webp's actual slope/edge signal (the real geometry's groove outline —
-// normal.webp has no alpha channel, so heightMask was always a no-op; this is
-// ground truth instead) by maximizing normalized cross-correlation between the
-// pattern's fill boundary and that groove outline — needed both a scale and an
-// offset correction, not just translation.
-// That correction is now baked directly INTO pattern-mask.webp (a one-time affine
-// resample), not applied at sample time: doing it as a runtime repeat/offset
-// pushed sampled UV outside [0,1] near the plate's left edge, and this texture
-// isn't tileable (its own left/right edges don't match — solid black vs solid
-// white), so RepeatWrapping there drew a hard seam right across the plate. The
-// baked version reads at a plain 1:1 UV with a clean, stable background fill for
-// the sliver the source raster didn't cover, so no wrap mode has to do anything
-// clever, and ClampToEdge is safe again.
-const PATTERN_MASK = {
-  enabled: true,
-  offset: [0, 0],
-  repeat: [1, 1],
-  softness: 0.06,          // antialiasing width across the mask edge, in mask-value units
+// CHROMA.color desaturated toward its own luminance (Rec.709 weights, in the linear
+// working space three converts the hex into) — so only the colorfulness changes and
+// the mask keeps the same weight against the plaster.
+const chromaColor = () => {
+  const c = new THREE.Color(CHROMA.color);
+  const lum = c.r * 0.2125 + c.g * 0.7154 + c.b * 0.0721;
+  return c.lerp(new THREE.Color(lum, lum, lum), 1 - CHROMA.saturation);
 };
 
 const ASSETS = './assets/';
+// meta.json is fetched uncached and its bake timestamp versions every asset URL,
+// so a rebake busts the browser cache on its own — no hard reload needed
+const BAKE_VERSION = Date.now();
 
 // DEFAULT = the user's model (ver1/bakes/* produced by scripts/bake_levels.py).
 // Open ver1/index.html?site to see the original immersive-g wall for comparison.
 const USE_CUSTOM = true; // packaged build: custom model only
-// ver2 has its own bakes — produced by .\rebake2.ps1
 const CUSTOM = {
-  model: './bakes/model.glb',
+  model: './bakes/model.glb',   // welded copy written by scripts/bake_levels.py — NOT output.gltf
   bake1: './bakes/bake1.webp',
   bake2: './bakes/bake2.webp',
-  meta: './bakes/meta.json',
+  meta: './bakes/meta.json',    // depthMult etc. — written by the bake, no manual sync
   depthMult: 6.25,              // fallback if meta.json is missing
 };
 
@@ -216,9 +264,7 @@ class Flowmap {
     this.scene = new THREE.Scene();
     this.uniform = { value: null };
     const opts = {
-      // HalfFloat everywhere: float textures are not linearly filterable on many
-      // iOS GPUs — sampling them returns (0,0,0,1), which reads as "fully revealed"
-      type: THREE.HalfFloatType,
+      type: /(iPad|iPhone|iPod)/g.test(navigator.userAgent) ? THREE.FloatType : THREE.HalfFloatType,
       depthBuffer: false,
     };
     this.read = new THREE.WebGLRenderTarget(size, size, opts);
@@ -278,6 +324,7 @@ uniform float uScreenScroll;
 uniform float uScrollSpeed;
 uniform float uFastScroll;
 uniform float uOpacity;
+uniform float uDisplacement;     // global scale on how far the relief pops out
 varying vec2 vUv;
 varying vec3 vPos;
 varying vec3 vEye;
@@ -293,7 +340,7 @@ void main(){
     vec4(SCROLL_EXTRUDE_SPEED, SCROLL_EXTRUDE_NOISE_SIZE, SCROLL_EXTRUDE_MASK));
   float fastScrollExtrude = fastScrollNoise.r * SCROLL_EXTRUDE_STRENGTH;
   extrude = mix(extrude, fastScrollExtrude, uFastScroll) * uOpacity;
-  pos.z *= mix(0.05, 1.0, extrude);
+  pos.z *= mix(0.05, 1.0, extrude) * uDisplacement;
   pos.xy *= 1.004;
   vec4 mPos = modelMatrix * pos;
   vec4 mvPos = viewMatrix * mPos;
@@ -315,36 +362,16 @@ uniform sampler2D tBake2;
 uniform sampler2D tPlaster;
 uniform vec2 uPlasterScale;
 uniform sampler2D tNormalMap;    // camera-space normals + height mask (bake)
-uniform vec2 uNormalMapTexel;    // 1/width, 1/height of tNormalMap
-uniform float uNormalBlurRadius; // blur radius in texels, 0 = off
-uniform float uWallUvOffset;     // texels to step walls inward off the outline sliver
-uniform float uReliefHeight;     // object-space height of the relief (vPos.z max)
-uniform float uShadowFloor;      // cast-shadow darkness below this is haze, cut to nothing
-uniform float uShadowStrength;   // overall darkness of the (cleaned) cast shadow
-uniform float uMetalRoughness;   // 0 = mirror-tight metal glint, 1 = broad satin sheen
-uniform float uMetalness;        // 0 = wine only, 1 = full athens-26 metal on the relief
-uniform vec3 uMetalTint;         // metal body tint (white = keep the wine hue)
+uniform vec2 uNormalMapTexel;    // 1/width, 1/height of the bake passes
+uniform float uNormalBlurRadius; // bake blur radius in texels, 0 = off
+uniform float uWallUvOffset;     // texels to step side walls off the outline sliver
+uniform float uDisplacement;     // must match the vertex shader's
+uniform float uMetalness;        // 0 = plaster only, 1 = full metal on revealed relief
+uniform vec2 uCursorPos;         // eased cursor, uv space y-up (drives the metal light)
+uniform float uLightRadius;      // wild.plus: 1.5
+uniform float uLightIntensity;   // wild.plus: 0.4
+uniform float uMetalAmbient;     // wild.plus: ambient .06 + cursorAmbient .19
 uniform vec3 uLightColor;
-uniform float uLightIntensity;
-uniform float uLightRadius;
-uniform float uMetalAmbient;
-uniform sampler2D tPatternMask;  // rasterized original SVG pattern, fit to plate UV
-uniform vec2 uPatternOffset;
-uniform vec2 uPatternRepeat;
-uniform float uPatternSoftness;
-uniform float uPatternMaskLoaded; // 0 until the mask image has actually loaded
-uniform float uWineEnabled;      // 0 = plaster only, 1 = wine material on revealed relief
-uniform float uWineBlend;        // 0 = pure ver1 plaster … 1 = full wine
-uniform vec2 uCursorPos;         // eased cursor, uv space y-up (drives the highlight)
-uniform vec3 uWineColor;         // #650003
-uniform float uWineMetallic;     // 0.34: 0 = matte ink, 1 = steel glint (highlight hue)
-uniform float uWineRoughness;    // 0.95: 0 = mirror-smooth, 1 = fully matte (highlight shape/strength)
-uniform float uWineNormalStrength; // amplifies baked-normal xy before lighting
-uniform vec2 uGrooveGrayRange;   // slope smoothstep: below = flat (red), above = relief (stays gray)
-uniform vec3 uWineLightDir;      // fixed directional light (0.35, 0.55, 0.75)
-uniform float uWineAmbient;      // 0.55 shadow floor
-uniform float uWineLightRadius;  // 0.6 screens
-uniform float uWineIntensity;    // 1.0
 uniform float uScreenScroll;
 uniform float uTextureStrength;
 uniform float uGradientStrength;
@@ -352,7 +379,7 @@ uniform float uOpacity;
 uniform float uSwitchColorTransition;
 uniform float uFastScroll;
 uniform sampler2D tFluidFlowmap;
-uniform vec3 uChromaColor;       // fixed mask color (site derives hue from normals)
+uniform vec3 uChromaColor;       // the mask color, painted flat
 uniform float uChromaGround;     // how much flat ground takes the color
 uniform float uBrightnessFactor;
 uniform float uBrightnessOffset;
@@ -395,8 +422,12 @@ vec3 applyFluidEffect(FluidEffectConfig config, vec3 color, vec4 fluid, vec2 uv,
   uvLines.y = sin(uvLines.y * 50.0 * config.linesWaveLength) * 20.0 / config.linesScale;
   float lines = smoothstep(-1.0, 0.5, sin(uvLines.x + uvLines.y));
   lines = mix(1.0, lines, config.linesStrength);
-  // (site derives the hue from the normal — hueShift -0.52 → yellow/red family;
-  //  we use a fixed color instead, with a hint of normal-based shading kept)
+  // The site derives the hue from the normal itself (hueShift -0.52 → a yellow
+  // that tips through orange into red across facets). That was tried here and
+  // rejected: aimed at red, red sits at the wheel's wrap point, so the same swing
+  // fell out into magenta and yellow instead of reading as one red. So this paints
+  // CHROMA.color flat, exactly as the approved build did — only a slight
+  // normal-driven shade is kept so the relief still models under the paint.
   vec3 normalVector = normal;
   normalVector.z *= config.colorRange;
   normalVector = normalize(normalVector);
@@ -419,11 +450,10 @@ vec3 ContrastSaturationBrightness(vec3 color, float brt, float sat, float con){
   vec3 conColor = mix(AvgLumin, satColor, con);
   return conColor;
 }
-// thin, sparsely-tessellated swept ribbon pieces bake visible per-facet banding
-// into EVERY Cycles render pass (color levels and normals alike) — a small
-// tent-filter blur across neighboring bake texels softens that residual
-// variation at runtime without needing a rebake. 3x3 tent: center 4, edge 2,
-// corner 1 (sum 16).
+// The thin, sparsely-tessellated ribbon pieces bake visible per-facet banding
+// into every Cycles pass (levels and normals alike). A 3x3 tent filter across
+// neighbouring texels softens that at runtime without a rebake.
+// center 4, edge 2, corner 1 (sum 16).
 vec4 blurTex(sampler2D tex, vec2 uv, vec2 texel){
   vec4 s = texture2D(tex, uv) * 4.0;
   s += texture2D(tex, uv + vec2(texel.x, 0.0)) * 2.0;
@@ -449,34 +479,24 @@ void main(){
   float gradient = mix(1.0, 0.5, length(uvScreen - vec2(0.0, 0.8)));
 
   // ---- side-wall UV rescue --------------------------------------------------
-  // The bakes and the pattern mask are FRONTAL projections, sampled through a
-  // planar UV built from base X,Y. The relief's side walls are extruded straight
-  // along +Z from the outline, so a wall's top and bottom vertices share
-  // IDENTICAL X,Y — their UV area is exactly zero (measured: half the triangles,
-  // ~50% of the surface). Every fragment down a wall therefore samples the same
-  // 1-D sliver of texture: the outline itself, which is the highest-contrast
-  // line in the bake (lit top face meeting cast shadow) and the red/grey
-  // boundary in the mask. Smeared down the wall that reads as vertical stripes
-  // and a grey/red mixture instead of one solid surface.
+  // The bakes are FRONTAL projections sampled through a planar UV built from base
+  // X,Y. The relief's side walls are extruded straight along +Z from the outline,
+  // so a wall's top and bottom vertices share IDENTICAL X,Y — their UV area is
+  // exactly zero (measured: half the triangles, ~50% of the surface). Every
+  // fragment down a wall therefore samples the same 1-D sliver: the outline, which
+  // is the highest-contrast line in the bake (lit top face meeting cast shadow).
+  // Smeared down the wall, that reads as the vertical stripes.
   //
   // Fix: for wall fragments, step the sample point a few texels back along the
-  // wall's own outward normal, into the top face the wall belongs to, so the
-  // wall inherits that face's tone and mask instead of the boundary sliver.
-  // vEye is built from the UNdisplaced position, so this normal describes the
-  // fully-extruded shape and stays stable as the reveal animates.
+  // wall's own outward normal, into the top face the wall belongs to, so the wall
+  // inherits that face's tone instead of the boundary sliver. vEye is built from
+  // the UNdisplaced position, so this normal describes the fully-extruded shape
+  // and stays stable as the reveal animates.
   vec3 gNormal = normalize(cross(dFdx(vEye), dFdy(vEye)));
-  if (dot(gNormal, vEye) > 0.0) gNormal = -gNormal;      // resolve winding: face the camera
-  float wallness = 1.0 - clamp(abs(gNormal.z), 0.0, 1.0); // 0 = top face, 1 = edge-on wall
+  if (dot(gNormal, vEye) > 0.0) gNormal = -gNormal;        // resolve winding: face the camera
+  float wallness = 1.0 - clamp(abs(gNormal.z), 0.0, 1.0);  // 0 = top face, 1 = edge-on wall
   vec2 wallDir = length(gNormal.xy) > 1e-4 ? normalize(gNormal.xy) : vec2(0.0);
   vec2 uvSurface = vUv - wallDir * uNormalMapTexel * uWallUvOffset * wallness;
-
-  // Purely geometric "is this fragment part of the raised relief, or the flat
-  // base plate" — a wall (steep) or anything standing proud of the plate. Both
-  // signals are registered by construction, unlike the pattern texture. Computed
-  // once here because two very different things need it: keeping the plaster
-  // clean (just below) and driving the wine/metal coverage (further down).
-  float raisedGeo = smoothstep(0.12, 0.45, vPos.z / max(uReliefHeight, 1e-4));
-  float reliefGeo = max(smoothstep(0.35, 0.7, wallness), raisedGeo);
 
   vec2 bakeTexel = uNormalMapTexel * uNormalBlurRadius;   // all bake passes share one resolution
   vec3 bake1 = sRGB_OETF(blurTex(tBake1, uvSurface, bakeTexel)).rgb;
@@ -494,25 +514,6 @@ void main(){
   o = mix(o, level3, smoothstep(0.4, 0.6, extrude));
   o = mix(o, level4, smoothstep(0.6, 0.8, extrude));
   o = mix(o, level5, smoothstep(0.8, 1.0, extrude));
-  // The baked levels carry the relief's cast shadow onto the flat base plate.
-  // The shadow itself is wanted — it's what sits the relief on the wall — but the
-  // bake's soft sun (20 deg key + a very broad 60 deg fill) spreads a wide, faint,
-  // low-contrast haze around the dark core, and the reveal's soft blob edge smears
-  // that further. The haze is what reads as dirt, not the shadow.
-  //
-  // So SHAPE the shadow rather than removing it: measure how much darker than
-  // clean plaster this fragment is, cut everything below a floor (that faint tail
-  // IS the dirt), then rescale what survives back to full range. A gamma was
-  // tried first and was wrong — it dims the mid-tones along with the haze, so the
-  // shadow reads as washed out. Floor-and-rescale deletes the haze while the real
-  // shadow keeps its strength. Only the flat plate is touched; the relief keeps
-  // its full baked shading.
-  float plateMask = 1.0 - clamp(reliefGeo, 0.0, 1.0);
-  float plasterBase = 0.54504;                                   // what flat wall bakes to
-  float shade = clamp((plasterBase - o) / plasterBase, 0.0, 1.0); // 0 = clean, 1 = black
-  float shadeClean = clamp((shade - uShadowFloor) / max(1.0 - uShadowFloor, 1e-4), 0.0, 1.0);
-  shadeClean *= uShadowStrength;
-  o = mix(o, plasterBase * (1.0 - shadeClean), plateMask);
   color += vec3(o);
   vec2 uvPlaster = vPos.xy / uPlasterScale;
   float plaster = texture2D(tPlaster, uvPlaster).g;
@@ -523,95 +524,34 @@ void main(){
   // --- metallic layer: matcap on the revealed relief, using baked normals ---
   // baked normal is at FULL extrusion; the normal for the current squash follows
   // from scaling the height field: n' ∝ (s·nx/nz, s·ny/nz, 1)
-  // --- WINE material (ver2 spec) ---------------------------------------------
-  // body = pure hue, shading only modulates value (ambient floor → 1.0), so the
-  // wine hue is never washed out by light
+  // metallic shading ported from week.wild.plus/athens-26: a point light that
+  // follows the cursor does Blinn-Phong on the baked normals — the base darkens
+  // to ambient inside the metal zone and broad base-tinted speculars sweep over
+  // it as the cursor moves. (Their values: metallic .85, intensity .4, radius 1.5,
+  // spec pow 16 ×2, highlight 75% tinted by base, ambient .06 + cursorAmbient .19.)
   vec4 nSample = blurTex(tNormalMap, uvSurface, bakeTexel);
-  vec3 nFull = normalize(nSample.xyz * 2.0 - 1.0);
+  vec3 nFull = nSample.xyz * 2.0 - 1.0;
   float heightMask = nSample.a;                                   // 0 = wall plate, 1 = raised element
-  float squash = mix(0.05, 1.0, extrude);
-  // normalStrength exaggerates the bump before lighting — independent of roughness,
-  // this is the second lever for how visible the relief-driven shading reads
-  vec3 nRel = normalize(vec3(nFull.xy * uWineNormalStrength * (squash / max(nFull.z, 0.15)), 1.0));
-
-  // slope signal, kept only as the geometric fallback mask further down (used
-  // when the pattern texture hasn't loaded yet) — no longer excludes the carved
-  // relief from the wine color: red is back across the whole revealed pattern,
-  // raised groove included.
-  float grooveWeight = smoothstep(uGrooveGrayRange.x, uGrooveGrayRange.y, 1.0 - nFull.z);
-
-  // fixed directional light: diffuse light/shadow across the relief
-  float wineDiff = max(dot(nRel, normalize(uWineLightDir)), 0.0);
-  vec3 wineBody = uWineColor * mix(uWineAmbient, 1.0, wineDiff);
-
-  // cursor-bound Blinn-Phong highlight. Two independent knobs, standard PBR split:
-  // metallic tints the highlight hue (matte ink → warm steel), roughness shapes and
-  // dims it (mirror-tight spike → wide, faint sheen) regardless of metallic. Not
-  // gated by grooveWeight — the highlight rides over both the red fill and the
-  // gray relief, since the relief is where the real normal variation (and so the
-  // most visible sheen) actually lives.
+  float squash = mix(0.05, 1.0, extrude) * uDisplacement;         // matches the vertex displacement
+  vec3 nRel = normalize(vec3(nFull.xy * (squash / max(nFull.z, 0.15)), 1.0));
   vec2 arVec = vec2(uResolution.x / uResolution.y, 1.0);
   vec2 lightDelta = uCursorPos * arVec - uvScreen * arVec;
   float lightDist = length(lightDelta);
   vec3 lightDir = normalize(vec3(lightDelta, 0.4));
   vec3 halfVec = normalize(lightDir + vec3(0.0, 0.0, 1.0));
-  float rough = clamp(uWineRoughness, 0.02, 1.0);
-  float specExp = mix(96.0, 6.0, rough);              // smooth → tight spike; rough → broad, soft
-  float specStrength = pow(1.0 - rough, 1.3);         // rough surfaces catch a dimmer, not absent, highlight
-  float spec = pow(max(dot(nRel, halfVec), 0.0), specExp) * specStrength;
-  float atten = 1.0 - smoothstep(0.0, uWineLightRadius, lightDist);
-  vec3 lightenedWine = mix(uWineColor, vec3(1.0), 0.6);
-  vec3 specColor = mix(lightenedWine, vec3(1.0), uWineMetallic);  // 0.34 → warm steel
-  vec3 wineColor = wineBody + specColor * spec * uWineIntensity * atten;
-
-  float reliefWeight = grooveWeight;                              // sloped surfaces (fallback)
-  float raisedWeight = smoothstep(0.15, 0.6, heightMask);         // whole raised elements (fallback)
-  // the pattern SVG is the ground truth for *where* wine shows — it's the original
-  // vector artwork the OIT-baked relief was built from, so its silhouette is a much
-  // cleaner stencil than guessing from normals/height. Geometric weight stays only
-  // as a fallback so the layer degrades gracefully if the mask texture is missing.
-  float patternRaw = texture2D(tPatternMask, uvSurface * uPatternRepeat + uPatternOffset).r;
-  float patternMask = smoothstep(0.5 - uPatternSoftness, 0.5 + uPatternSoftness, patternRaw);
-  float geoWeight = max(reliefWeight, raisedWeight);
-  float placeWeight = mix(geoWeight, patternMask, uPatternMaskLoaded);
-  // The pattern texture alone is not enough to say where the wine belongs. A side
-  // wall's own UV is the degenerate outline sliver, and the inward step that
-  // rescues it overshoots on thin strands, landing outside the shape again — the
-  // wall then reads unmasked, i.e. grey. The mask is also registered to the
-  // geometry only approximately, so at a silhouette it falls short of the real
-  // edge and leaves a thin grey rim. reliefGeo answers both from the geometry
-  // itself: a wall exists ONLY where a shape was extruded, and anything standing
-  // proud of the plate is extruded pattern. The flat plate stays untouched.
-  placeWeight = max(placeWeight, reliefGeo);
-  float wineMask = clamp(extrude, 0.0, 1.0) * placeWeight * uWineEnabled;
-  color = mix(color, clamp(wineColor, 0.0, 1.0), wineMask * uWineBlend);
-
-  // --- athens-26 metallic sheen, layered on top of the wine ------------------
-  // Runs AFTER the wine mix on purpose: metalBase reads the already-wine-coloured
-  // color, so this reads as red metal rather than a chrome overlay. Reuses the
-  // cursor light vectors the wine block already built (lightDir/halfVec/lightDist)
-  // and the same placeWeight, so the sheen covers the displaced geometry exactly
-  // as the wine does — walls, edges and caps included, no second coverage rule.
-  // roughness shapes AND dims the metal highlight, independently of how metallic
-  // it is — same split as the wine layer above. The site's fixed exponent of 16
-  // sits around roughness 0.55, so that stays the neutral value here.
-  float mRough = clamp(uMetalRoughness, 0.02, 1.0);
-  float mSpecExp = mix(64.0, 6.0, mRough);        // smooth → tight glint, rough → broad sheen
-  float mSpecStrength = pow(1.0 - mRough, 1.3);   // rough surfaces catch a dimmer, not absent, highlight
   float cursorDiff = max(dot(nRel, lightDir), 0.0);
-  float cursorSpecMtl = pow(max(dot(nRel, halfVec), 0.0), mSpecExp) * mSpecStrength;
+  float cursorSpecMtl = pow(max(dot(nRel, halfVec), 0.0), 16.0);
   float cursorAtten = 1.0 - smoothstep(0.0, uLightRadius, lightDist);
   float effMetalSpec = cursorSpecMtl * uLightIntensity * 2.0 * cursorAtten;
   float effMetalDiff = cursorDiff * uLightIntensity * 0.25 * cursorAtten;
-  vec3 metalBase = color * uMetalTint;
-  vec3 metalHighlight = mix(uLightColor * effMetalSpec, metalBase * effMetalSpec, 0.75);
-  vec3 metallicColor = metalBase * (uMetalAmbient + effMetalDiff) + metalHighlight;
-  float metalMask = clamp(extrude, 0.0, 1.0) * placeWeight * uMetalness;
+  vec3 metalHighlight = mix(uLightColor * effMetalSpec, color * effMetalSpec, 0.75);
+  vec3 metallicColor = color * (uMetalAmbient + effMetalDiff) + metalHighlight;
+  float reliefWeight = smoothstep(0.02, 0.18, 1.0 - nFull.z);     // sloped surfaces
+  float raisedWeight = smoothstep(0.15, 0.6, heightMask);         // whole raised elements (ribbons)
+  float metalMask = clamp(extrude, 0.0, 1.0) * max(reliefWeight, raisedWeight) * uMetalness;
   color = mix(color, clamp(metallicColor, 0.0, 1.0), metalMask);
 
-  vec3 dFdxPos = dFdx(vEye);
-  vec3 dFdyPos = dFdy(vEye);
-  vec3 normal = normalize(cross(dFdxPos, dFdyPos));
+  vec3 normal = gNormal;
   float fresnelFactor = abs(dot(normal, vec3(0., 0., 1.)));
   float inversefresnelFactor = 1.0 - fresnelFactor;
   inversefresnelFactor = 1. - pow(inversefresnelFactor, CHROMATIC_FRESNEL_SHARPNESS);
@@ -712,22 +652,6 @@ tFluidBlack.needsUpdate = true;
 const tFlatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1);
 tFlatNormal.needsUpdate = true;   // flat "up" normal → metal layer is a no-op until bound
 
-// original pattern SVG (../Pattern filled (4).svg), rasterized 1:1 onto plate UV —
-// see PATTERN_MASK above. uPatternMaskLoaded flips to 1 only once it's actually
-// decoded, so every wall section falls back to the old geometric mask until then.
-const uPatternMaskLoaded = { value: 0 };
-const tPatternMask = texLoader.load('./pattern-mask.webp', () => {
-  if (PATTERN_MASK.enabled) uPatternMaskLoaded.value = 1;
-});
-tPatternMask.wrapT = THREE.RepeatWrapping;         // matches bake/normal: vertically periodic
-// the registration offset/scale is now baked into the texture itself (see
-// PATTERN_MASK above), sampled at a plain 1:1 UV — so, like bake1/bake2/
-// normalMap, this is safe to clamp: it's the source raster's own edges we'd hit,
-// not an out-of-[0,1] runtime transform, and the uncovered sliver was filled
-// with a clean background value rather than mismatched wrapped content.
-tPatternMask.wrapS = THREE.ClampToEdgeWrapping;
-tPatternMask.colorSpace = THREE.NoColorSpace;      // raw mask value, not a color to decode
-
 // shared uniforms
 const uTime = { value: 0 };
 const uResolution = { value: new THREE.Vector2() };
@@ -740,9 +664,6 @@ const uTextureStrength = { value: CONFIG.extrude.textureStrength };
 const uGradientStrength = { value: CONFIG.extrude.gradientStrength };
 
 const flowmap = new Flowmap(renderer, {
-  size: 512,      // was the class default (256) — vertex-level displacement samples this
-                   // directly, and at the plate's fine detail + up to 2.4x camera zoom, 256px
-                   // texels were visible as blocky/jaggy steps in the revealed edge ("glitchy")
   falloff: CONFIG.flowmap.falloff,
   alpha: CONFIG.flowmap.alpha,
   dissipation: CONFIG.flowmap.dissipation,
@@ -783,15 +704,9 @@ function makeWallMaterial(bake1, bake2) {
   return new THREE.ShaderMaterial({
     vertexShader: WALL_VERT,
     fragmentShader: WALL_FRAG,
-    // was DoubleSide: with mixed-winding source geometry, FrontSide culled
-    // backward pieces and revealed the background through them (gray streaks).
-    // DoubleSide fixed that but rendered the wrongly-facing "interior" pieces
-    // too, which then z-fight the correct front wall at full extrusion —
-    // vertical stripes that scale with reveal depth. Now that the SVG source
-    // and sweep produce consistent winding, try FrontSide again: it should
-    // just cull the (hopefully now rare/absent) bad pieces cleanly instead of
-    // rendering-and-fighting them. If background gaps reappear, revert to
-    // DoubleSide — that means winding is still inconsistent somewhere.
+    // the source SVG's ring winding is normalized, so FrontSide cleanly culls the
+    // few inverted pieces instead of rendering them to z-fight the real front wall
+    // (which was its own vertical-stripe artifact at full extrusion)
     side: THREE.FrontSide,
     uniforms: {
       uTime,
@@ -803,44 +718,19 @@ function makeWallMaterial(bake1, bake2) {
       tPlaster: { value: tPlaster },
       uPlasterScale: { value: new THREE.Vector2(10, 10) },   // site value; custom mode overrides
       tNormalMap: { value: tFlatNormal },                    // custom mode binds the baked normal map
-      uNormalMapTexel: { value: new THREE.Vector2(1, 1) },   // set once the real map loads
+      uNormalMapTexel: { value: new THREE.Vector2(1, 1) },   // real value bound once the bake loads
       uNormalBlurRadius: { value: 2.5 },
-      // ~6 texels clears the outline's antialiased boundary and lands on solid
-      // top face. Too large overshoots the thinner ribbon strands entirely and
-      // washes them out, so this wants to stay just past the edge, not deep in.
+      // ~6 texels clears the outline's antialiased boundary and lands on solid top
+      // face. Larger overshoots the thinner ribbon strands entirely and washes them
+      // out, so this wants to sit just past the edge, not deep in.
       uWallUvOffset: { value: 6.0 },
-      uReliefHeight: { value: 1.0 },   // real value bound once the model's bounds are known
-      // cast shadow on the plaster. floor = where haze ends and shadow begins:
-      // raise it if the plaster still looks grubby, lower it toward 0 for the raw
-      // bake. strength scales what survives — push past 1 for a heavier shadow.
-      uShadowFloor: { value: 0.07 },
-      uShadowStrength: { value: 1.15 },
-      uMetalRoughness: { value: METAL.roughness },
-      uMetalness: { value: 0 },        // metal off unless custom mode enables it
-      uMetalTint: { value: new THREE.Color().setHex(METAL.tint, THREE.LinearSRGBColorSpace) },
-      uLightColor: { value: new THREE.Color().setHex(METAL.lightColor, THREE.LinearSRGBColorSpace) },
-      uLightIntensity: { value: METAL.lightIntensity },
-      uLightRadius: { value: METAL.lightRadius },
-      uMetalAmbient: { value: METAL.ambient },
-      tPatternMask: { value: tPatternMask },
-      uPatternOffset: { value: new THREE.Vector2(...PATTERN_MASK.offset) },
-      uPatternRepeat: { value: new THREE.Vector2(...PATTERN_MASK.repeat) },
-      uPatternSoftness: { value: PATTERN_MASK.softness },
-      uPatternMaskLoaded,
-      uWineEnabled: { value: 0 },                            // wine off unless custom mode enables it
-      uWineBlend: { value: WINE.blend },
+      uDisplacement: { value: DISPLACEMENT },
+      uMetalness: { value: 0 },                              // metal off unless custom mode enables it
       uCursorPos: { value: flowmap.mouse },                  // shared, eased — updates live
-      // setHex with LinearSRGB = keep raw values: our shader works in display
-      // space, and default color management would darken #650003 to near-black
-      uWineColor: { value: new THREE.Color().setHex(WINE.color, THREE.LinearSRGBColorSpace) },
-      uWineMetallic: { value: WINE.metallic },
-      uWineRoughness: { value: WINE.roughness },
-      uWineNormalStrength: { value: WINE.normalStrength },
-      uGrooveGrayRange: { value: new THREE.Vector2(...WINE.grooveGray) },
-      uWineLightDir: { value: new THREE.Vector3(...WINE.lightDir) },
-      uWineAmbient: { value: WINE.ambient },
-      uWineLightRadius: { value: WINE.lightRadius },
-      uWineIntensity: { value: WINE.intensity },
+      uLightRadius: { value: METAL.lightRadius },
+      uLightIntensity: { value: METAL.lightIntensity },
+      uMetalAmbient: { value: METAL.ambient },
+      uLightColor: { value: new THREE.Color(METAL.lightColor) },
       uScreenScroll,
       uScrollSpeed,
       uTextureStrength,
@@ -849,7 +739,7 @@ function makeWallMaterial(bake1, bake2) {
       uSwitchColorTransition,
       uFastScroll,
       tFluidFlowmap: fluidmap ? fluidmap.uniform : { value: tFluidBlack },
-      uChromaColor: { value: new THREE.Color(CHROMA.color) },
+      uChromaColor: { value: chromaColor() },
       uChromaGround: { value: CHROMA.ground },
       uBrightnessFactor: { value: BRIGHTNESS_FACTOR },
       uBrightnessOffset: { value: BRIGHTNESS_OFFSET },
@@ -874,12 +764,12 @@ const failLoading = (err) => {
 
 if (USE_CUSTOM) {
   // ---- user's model + baked levels from scripts/bake_levels.py
-  // meta.json is fetched uncached; its bake timestamp versions every asset URL, so
-  // a rebake automatically busts the browser cache — no hard reload needed
   const metaPromise = fetch(CUSTOM.meta, { cache: 'no-store' })
     .then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
   metaPromise.then((meta) => {
-  const v = '?v=' + encodeURIComponent(meta.baked || Date.now());
+  // the bake's own timestamp versions every asset URL, so the assets stay
+  // cacheable between visits but a rebake invalidates them on its own
+  const v = '?v=' + encodeURIComponent(meta.baked || BAKE_VERSION);
   const bake1 = loadTex(CUSTOM.bake1 + v);
   const bake2 = loadTex(CUSTOM.bake2 + v);
   for (const t of [bake1, bake2]) {
@@ -895,14 +785,13 @@ if (USE_CUSTOM) {
     let geometry = null;
     gltf.scene.traverse((o) => { if (o.geometry && !geometry) geometry = o.geometry; });
     if (!geometry) return failLoading(new Error('no mesh in custom model'));
-    // the export splits a vertex into duplicates (same position, different
-    // normal/uv) at every hard-shaded edge — normal and glTF-standard, and
-    // harmless for shading here (color comes from the baked 2D textures via a
-    // planar UV we recompute below, never from vertex normals). But at full
-    // relief extrusion a duplicate can sit a hair off from its twin and open a
-    // visible crack — thin bright tears cutting across the red fill, background
-    // showing through. Drop normal/uv (unused) and weld by position only so
-    // adjacent triangles actually share vertices again.
+    // The export splits a vertex into duplicates (same position, different
+    // normal/uv) at every hard-shaded edge — normal and glTF-standard, and harmless
+    // for shading here (color comes from the baked 2D textures via the planar UV
+    // recomputed below, never from vertex normals). But at full extrusion a
+    // duplicate can sit a hair off from its twin and open a visible crack — thin
+    // bright tears cutting across the fill. Drop normal/uv (unused) and weld by
+    // position only, so adjacent triangles actually share vertices again.
     geometry.deleteAttribute('normal');
     geometry.deleteAttribute('uv');
     geometry = mergeVertices(geometry, 1e-3);
@@ -940,10 +829,6 @@ if (USE_CUSTOM) {
       mesh.material.uniforms.uPlasterScale.value.set(rowSpacing, rowSpacing);
       mesh.material.uniforms.tNormalMap.value = normalMap;
       if (meta.res) mesh.material.uniforms.uNormalMapTexel.value.set(1 / meta.res[0], 1 / meta.res[1]);
-      // geometry was translated to min.z = 0, so b.max.z IS the relief height —
-      // lets the shader read vPos.z as a normalized "how raised is this fragment"
-      mesh.material.uniforms.uReliefHeight.value = b.max.z;
-      mesh.material.uniforms.uWineEnabled.value = WINE.enabled ? 1 : 0;
       mesh.material.uniforms.uMetalness.value = METAL.enabled ? METAL.strength : 0;
       sections.push(mesh);
       wallGroup.add(mesh);
@@ -977,21 +862,28 @@ if (USE_CUSTOM) {
 }, undefined, failLoading);
 }
 
-// ---------------------------------------------------------------- scroll → zoom
+// ---------------------------------------------------------------- scroll → zoom + fast mode
 let scrollPx = 0;                       // accumulated scroll, clamped to the zoom range
+let scrollRaw = 0;                      // the same input UNclamped — see below
+let scrollDelta = 0;                    // this frame's scroll, consumed by the frame loop
 const zoomSpring = { x: 0, v: 0 };      // sprung zoom progress 0..1
-const clampScroll = () => {
-  scrollPx = Math.max(0, Math.min(ZOOM.screens * innerHeight, scrollPx));
+// Zoom saturates after ZOOM.screens of scrolling, but fast mode is about the ACT of
+// scrolling, not the position. Reading speed off the clamped value would kill the
+// noise reveal exactly when someone is scrolling hardest at the end of the range, so
+// speed and drift come off the raw accumulation instead.
+const addScroll = (dy) => {
+  scrollPx = Math.max(0, Math.min(ZOOM.screens * innerHeight, scrollPx + dy));
+  scrollRaw += dy;
+  scrollDelta += dy;
 };
-addEventListener('wheel', (e) => { scrollPx += e.deltaY; clampScroll(); }, { passive: true });
+addEventListener('wheel', (e) => { addScroll(e.deltaY); }, { passive: true });
 let dragY = null;
 addEventListener('pointerdown', (e) => { dragY = e.clientY; });
 addEventListener('pointerup', () => { dragY = null; });
 addEventListener('pointermove', (e) => {
   if (dragY !== null && e.pointerType !== 'mouse') {
-    scrollPx += (dragY - e.clientY) * 2;
+    addScroll((dragY - e.clientY) * 2);
     dragY = e.clientY;
-    clampScroll();
   }
 });
 
@@ -1012,6 +904,117 @@ function resize() {
 }
 addEventListener('resize', resize);
 resize();
+
+// ---------------------------------------------------------------- ambient reveal
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+// GSAP's rough() ease, reimplemented — the site tweens mouse2 with
+// rough({strength, points: floor(duration*12), template, taper: none,
+// randomize: true, clamp: true}), and that ease IS the movement's character: it
+// scatters `points` random samples around the template curve, deviating by
+// `strength`, then walks between them linearly. So the blob doesn't glide from A
+// to B, it shivers along the way. Ported rather than smoothed over, because a
+// plain ease here looks like a completely different effect.
+const roughEase = (points, strength, template, blend) => {
+  const base = template || ((t) => t);
+  const pts = [];
+  for (let i = 0; i < points; i++) {
+    // GSAP randomizes the sample POSITIONS too (randomize: true). Two of them can
+    // then land almost on top of each other with very different values, which is a
+    // cliff — measured at up to a full path-length jump in one frame, and that is
+    // the twitch rather than the deviation size. Evenly spaced samples bound the
+    // slope at deviation/spacing while keeping the wander random.
+    const x = (i + 1) / (points + 1);
+    let y = base(x);
+    y += Math.random() * strength - strength * 0.5;           // taper: none → gap = strength
+    pts.push({ x, y: Math.max(0, Math.min(1, y)) });           // clamp: true
+  }
+  pts.push({ x: 0, y: 0 }, { x: 1, y: 1 });
+  pts.sort((a, b) => a.x - b.x);
+  return (t) => {
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    let i = 1;
+    while (i < pts.length - 1 && pts[i].x < t) i++;
+    const a = pts[i - 1], b = pts[i];
+    const span = b.x - a.x;
+    // GSAP walks between the samples linearly, which corners at every one of them.
+    // Smoothstep across the gap instead: same samples, no velocity discontinuity —
+    // this is most of what takes the shake out.
+    let k = span > 1e-6 ? (t - a.x) / span : 0;
+    k = k * k * (3 - 2 * k);
+    const rough = a.y + (b.y - a.y) * k;
+    return base(t) + (rough - base(t)) * blend;               // mix back toward clean travel
+  };
+};
+const power2Out = (t) => 1 - Math.pow(1 - t, 2);
+
+// site: createRandomDirections — successive points sit on a circle of radius .7-.9,
+// each at a random angle off the previous one (±0.8π), so a pass wanders rather than
+// crossing straight over
+function ambientDirections(prev) {
+  const start = prev || { x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2 };
+  const angle = Math.atan2(start.y, start.x) + (Math.random() - 0.5) * 2 * Math.PI * 0.8;
+  const len = rnd(AMBIENT.radius[0], AMBIENT.radius[1]);
+  return { start, end: { x: Math.cos(angle) * len, y: Math.sin(angle) * len } };
+}
+
+function buildAmbientPass() {
+  const count = Math.floor(Math.random() * (AMBIENT.segments[1] - AMBIENT.segments[0] + 1)) + AMBIENT.segments[0];
+  const segs = [];
+  let prev = null;
+  for (let i = 0; i < count; i++) {
+    const more = i !== count - 1 && Math.random() < 0.7;      // site's own 0.7 coin flip
+    const dur = more ? rnd(AMBIENT.durMid[0], AMBIENT.durMid[1]) : rnd(AMBIENT.durLast[0], AMBIENT.durLast[1]);
+    const d = ambientDirections(prev);
+    const pts = Math.max(2, Math.round(dur * AMBIENT.roughPoints));
+    const strength = more ? AMBIENT.roughMid : AMBIENT.roughLast;
+    const template = more ? power2Out : null;
+    segs.push({
+      dur, d,
+      // x and y get separate ease instances on the site (two tween calls), so they
+      // drift independently — that is what keeps it from reading as one moving line
+      ex: roughEase(pts, strength, template, AMBIENT.roughBlend),
+      ey: roughEase(pts, strength, template, AMBIENT.roughBlend),
+    });
+    prev = d.end;
+  }
+  return { segs, i: 0, t: 0 };
+}
+
+let ambientCount = 0;
+let ambientPass = null;
+let ambientWait = FORCE_AMBIENT ? 0 : rnd(AMBIENT.pause[0], AMBIENT.pause[1]);
+
+function updateAmbient(delta) {
+  if (!AMBIENT.enabled) return;
+  // site pins this once and leaves it: |(1,1)|*50 saturates getStamp's magnitude
+  flowmap.velocity2.set(1, 1);
+  if (!ambientPass) {
+    ambientWait -= delta;
+    if (ambientWait > 0) { flowmap.mouse2.set(-1, -1); return; }   // parked, outside falloff
+    ambientPass = buildAmbientPass();
+    ambientCount++;
+    if (FORCE_AMBIENT) document.title = 'ambient pass ' + ambientCount + ' — ' + ambientPass.segs.length + ' seg(s)';
+  }
+  const seg = ambientPass.segs[ambientPass.i];
+  ambientPass.t += delta;
+  const p = Math.min(1, ambientPass.t / seg.dur);
+  // [-1,1] → uv, exactly as the site does it (x/2 + .5)
+  flowmap.mouse2.set(
+    (seg.d.start.x + (seg.d.end.x - seg.d.start.x) * seg.ex(p)) / 2 + 0.5,
+    (seg.d.start.y + (seg.d.end.y - seg.d.start.y) * seg.ey(p)) / 2 + 0.5,
+  );
+  if (p >= 1) {
+    ambientPass.i++;
+    ambientPass.t = 0;
+    if (ambientPass.i >= ambientPass.segs.length) {
+      ambientPass = null;
+      ambientWait = FORCE_AMBIENT ? 0 : rnd(AMBIENT.pause[0], AMBIENT.pause[1]);
+      flowmap.mouse2.set(-1, -1);
+    }
+  }
+}
 
 // ---------------------------------------------------------------- frame loop (site order)
 const tracker = new MouseTracker();
@@ -1035,18 +1038,62 @@ function frame(now) {
     zoomSpring.v += accel * dtS;
     zoomSpring.x += zoomSpring.v * dtS;
   }
-  camera.zoom = 1 + (ZOOM.max - 1) * zoomSpring.x;
+  // ---- fast-scroll mode -----------------------------------------------------
+  // Scroll speed in px per 60fps-equivalent frame, so the thresholds mean the same
+  // thing on a 144Hz screen as on a 60Hz one.
+  const framesThis = Math.max(deltaMs, 1) / 16.667;
+  const speed = Math.abs(scrollDelta) / framesThis;
+  // site: uScrollSpeed += (scrollDelta * 5 - uScrollSpeed) * 0.04
+  uScrollSpeed.value += (scrollDelta * 5 - uScrollSpeed.value) * 0.04;
+  if (FORCE_FAST) {
+    uFastScroll.value = 1;                       // ?fast — pins the mode on, to judge it
+    uScreenScroll.value += delta * FAST.drift * 0.35;
+  } else if (FAST.enabled) {
+    const t = Math.max(0, Math.min(1, (speed - FAST.onSpeed) / (FAST.fullSpeed - FAST.onSpeed)));
+    const target = t * t * (3 - 2 * t);                      // smoothstep
+    const rate = target > uFastScroll.value ? FAST.attack : FAST.release;
+    // rate*framesThis MUST stay ≤ 1: a long frame otherwise overshoots the target and
+    // the value oscillates outside [0,1], which the shader reads as an extrapolation
+    // of the fast-mode grade — the screen blows out to white, then to black.
+    uFastScroll.value += (target - uFastScroll.value) * Math.min(1, rate * framesThis);
+    uFastScroll.value = Math.max(0, Math.min(1, uFastScroll.value));
+    // the noise field travels with the scroll, as it does on the site (there via the
+    // wall's own translation); one screen of scrolling moves it FAST.drift of a screen
+    uScreenScroll.value = (scrollRaw / innerHeight) * FAST.drift;
+  }
+  scrollDelta = 0;
+
+  // The site's fast mode also pulls the camera back (fastModeZoom .6). It can afford
+  // that because its wall tiles horizontally — ours is a single plate that only just
+  // fills the frame at zoom 1, so an unclamped .6 pulls back past the plate's left and
+  // right edges and shows background down both sides. Clamping at 1 keeps the pull-back
+  // wherever the user has already zoomed in, and simply does nothing at rest.
+  const fastZoom = 1 + (FAST.zoom - 1) * uFastScroll.value;
+  camera.zoom = Math.max(1, (1 + (ZOOM.max - 1) * zoomSpring.x) * fastZoom);
   camera.updateProjectionMatrix();
+
+  // brush radius follows the magnification, so the revealed patch stays the same
+  // size ON THE WALL at any zoom (uFalloff is a screen-space radius; the material
+  // pre-halves it, hence the same 0.5 the constructor applies)
+  if (BRUSH_TRACKS_ZOOM) {
+    flowmap.material.uniforms.uFalloff.value = CONFIG.flowmap.falloff * 0.5 * camera.zoom;
+    if (fluidmap) fluidmap.material.uniforms.uFalloff.value = CHROMA.falloff * 0.5 * camera.zoom;
+  }
 
   // flow-map feed (exact site order & factors; wall no longer travels → no scroll offset)
   flowmap.mouse.lerp(tracker.normalFlip, CONFIG.flowmap.mouseEase);
   flowmap.velocity.lerp(tracker.velocity, tracker.velocity.length() ? 0.1 : 0.04);
+  updateAmbient(delta);
   flowmap.setDeltaMult(Math.min(deltaMs, 32) / 16);
   flowmap.update(0);
   if (fluidmap) {
     fluidmap.aspect = flowmap.aspect;
     fluidmap.mouse.copy(flowmap.mouse);
     fluidmap.velocity.copy(flowmap.velocity);
+    if (AMBIENT.chroma) {
+      fluidmap.mouse2.copy(flowmap.mouse2);
+      fluidmap.velocity2.copy(flowmap.velocity2);
+    }
     fluidmap.setDeltaMult(Math.min(deltaMs, 32) / 16);
     fluidmap.update(0);
   }
