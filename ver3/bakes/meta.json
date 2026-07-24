@@ -1,0 +1,14 @@
+{
+  "depthMult": 4.6587,
+  "plateWidth": 17.5799,
+  "plateHeight": 10.8,
+  "reliefDepth": 0.2,
+  "res": [
+    2048,
+    1258
+  ],
+  "gain": 0.2905,
+  "sourceGltf": "output.gltf",
+  "sourceExported": "2026-07-21T21:14:22",
+  "baked": "2026-07-21T23:00:43"
+}
