@@ -32,6 +32,9 @@ const SHADOW = {
                   //   inside the ribbon creases.
   range: 0.5,     // how far up the tonal scale the lift reaches before it fades out.
                   //   Raise it and the midtones start flattening too.
+  edge: 0.85,     // how much the revealed relief's vertical EDGES (side walls) are
+                  //   lifted toward the flat-wall tone. 0 = raw (dark edges),
+                  //   1 = edges fully match the wall. Fixes "borders are dark".
 };
 
 const AMBIENT = {
@@ -323,6 +326,7 @@ uniform float uBrightnessFactor;
 uniform float uBrightnessOffset;
 uniform float uShadowLift;
 uniform float uShadowRange;
+uniform float uEdgeLift;
 varying vec2 vUv;
 varying vec3 vPos;
 varying vec3 vEye;
@@ -433,6 +437,11 @@ void main(){
   o = mix(o, level5, smoothstep(0.8, 1.0, extrude));
   float lift = uShadowLift * (1.0 - smoothstep(0.0, uShadowRange, o));
   o = 1.0 - (1.0 - o) * (1.0 - lift);
+  // The revealed relief's vertical EDGES (side walls) sample the dark boundary
+  // groove and read darker than the shape faces. Lift wall-facing fragments
+  // toward the flat-wall base tone (0.54504) by how wall-facing they are, so
+  // edges match the wall. max() only brightens — never darkens a lit face.
+  o = mix(o, max(o, 0.54504), clamp(wallness, 0.0, 1.0) * uEdgeLift);
   color += vec3(o);
   vec2 uvPlaster = vPos.xy / uPlasterScale;
   float plaster = texture2D(tPlaster, uvPlaster).g;
@@ -622,7 +631,8 @@ function makeWallMaterial(bake1, bake2) {
       tNormalMap: { value: tFlatNormal },
       uNormalMapTexel: { value: new THREE.Vector2(1, 1) },
       uNormalBlurRadius: { value: 2.5 },
-      uWallUvOffset: { value: 6.0 },   // texels to step side walls off the outline sliver
+      uWallUvOffset: { value: 14.0 },  // texels to step side walls off the outline sliver
+                                       //   onto the bright top, so edges read like the wall
       uDisplacement: { value: DISPLACEMENT },
       uMetalness: { value: 0 },
       uCursorPos: { value: flowmap.mouse },
@@ -641,6 +651,7 @@ function makeWallMaterial(bake1, bake2) {
       uChromaColor: { value: chromaColor() },
       uShadowLift: { value: SHADOW.lift },
       uShadowRange: { value: SHADOW.range },
+      uEdgeLift: { value: SHADOW.edge },
       uChromaLum: { value: chromaLum() },
       uChromaTint: { value: CHROMA.tint },
       uChromaLightness: { value: CHROMA.lightness },
