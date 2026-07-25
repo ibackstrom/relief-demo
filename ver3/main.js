@@ -70,7 +70,7 @@ const FAST = {
 };
 
 const CHROMA = {
-  enabled: true,         // master switch for the chromatic layer
+  enabled: false,        // master switch for the chromatic layer
   color: 0xff3300,       // the mask color
   saturation: 0.6,       // pulls that color toward its own gray. 1 = the raw hex,
                          //   0 = no color. Luminance-preserving.
