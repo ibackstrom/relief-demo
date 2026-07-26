@@ -32,9 +32,19 @@ const SHADOW = {
                   //   inside the ribbon creases.
   range: 0.5,     // how far up the tonal scale the lift reaches before it fades out.
                   //   Raise it and the midtones start flattening too.
-  edge: 0.85,     // how much the revealed relief's vertical EDGES (side walls) are
-                  //   lifted toward the flat-wall tone. 0 = raw (dark edges),
-                  //   1 = edges fully match the wall. Fixes "borders are dark".
+  edge: 0.0,      // how much the revealed relief's vertical EDGES (side walls) are
+                  //   lifted toward the flat-wall tone. MUST be 0: any value here
+                  //   shades edges by a different rule than the rest of the geometry,
+                  //   which is exactly what we don't want. At 0.85 the walls lost all
+                  //   shading and read as white outlines. With this at 0 and
+                  //   uWallUvOffset at 0, a wall fragment is lit by the bake at its
+                  //   own UV — the same light, from the same Blender render, as every
+                  //   shape face. That is what Original/ver1 does.
+
+  bakeBlur: 2.5,  // texel radius of the blur on the BAKE samples. Original/ver1 uses
+                  //   a plain texture2D (i.e. 0). The blur is tone-blind, so at the
+                  //   wall/face boundary it bleeds one into the other and can leave a
+                  //   faint halo along an edge. Drop to 0 to match Original exactly.
 };
 
 const AMBIENT = {
@@ -73,8 +83,21 @@ const FAST = {
 };
 
 const CHROMA = {
-  enabled: false,        // master switch for the chromatic layer
+  enabled: true,         // master switch for the chromatic layer
   color: 0xff3300,       // the mask color
+
+  // WHERE the color lands. The fluid trail only paints where this mask is open,
+  // and the mask has two sources: the relief's side walls (fresnel) and its
+  // shadowed creases. Weighted toward the walls, the red reads as a hard rim
+  // outlining every edge — that was the "edges too sharp / standing out" note.
+  // Softening the rim and opening the creases spreads the color into the shape.
+  edgeSharpness: 10.0,   // how tightly the rim hugs the steepest walls. Was 35 (a
+                         //   razor line); lower = a wider, softer band down the wall.
+  edgeOpacity: 0.6,      // how hard the rim reaches full color. Was 0.98 (saturated).
+  shadowRange: [0.2, 0.42], // the tonal band of the bake counted as "crease"
+  shadowOpacity: 0.4,    // how much color the creases take. Was 0.25; raising it
+                         //   moves the balance off the rim and into the relief.
+
   saturation: 0.6,       // pulls that color toward its own gray. 1 = the raw hex,
                          //   0 = no color. Luminance-preserving.
   tint: 0.75,            // 0 = flat paint, 1 = the fill fully takes the plaster's
@@ -287,10 +310,10 @@ void main(){
 }`;
 
 const WALL_FRAG = GLSL_SCROLL_EXTRUDE_DEFINES + /* glsl */`
-#define CHROMATIC_FRESNEL_SHARPNESS 35.0
-#define CHROMATIC_FRESNEL_OPACITY 0.98
-#define CHROMATIC_SHADOW_RANGE vec2(0.2, 0.42)
-#define CHROMATIC_SHADOW_OPACITY 0.25
+uniform float uChromaEdgeSharpness;
+uniform float uChromaEdgeOpacity;
+uniform vec2 uChromaShadowRange;
+uniform float uChromaShadowOpacity;
 uniform float uTime;
 uniform vec2 uResolution;
 uniform sampler2D tMaskNoise;
@@ -302,6 +325,7 @@ uniform vec2 uPlasterScale;
 uniform sampler2D tNormalMap;
 uniform vec2 uNormalMapTexel;
 uniform float uNormalBlurRadius;
+uniform float uBakeBlurRadius;
 uniform float uWallUvOffset;
 uniform float uDisplacement;
 uniform float uMetalness;
@@ -419,7 +443,7 @@ void main(){
   vec2 wallDir = length(gNormal.xy) > 1e-4 ? normalize(gNormal.xy) : vec2(0.0);
   vec2 uvSurface = vUv - wallDir * uNormalMapTexel * uWallUvOffset * wallness;
 
-  vec2 bakeTexel = uNormalMapTexel * uNormalBlurRadius;
+  vec2 bakeTexel = uNormalMapTexel * uBakeBlurRadius;
   vec3 bake1 = sRGB_OETF(blurTex(tBake1, uvSurface, bakeTexel)).rgb;
   vec3 bake2 = sRGB_OETF(blurTex(tBake2, uvSurface, bakeTexel)).rgb;
   float level0 = bake2.b;
@@ -449,7 +473,7 @@ void main(){
   color += gradient * 0.7 * uGradientStrength;
   color = color * uBrightnessFactor + uBrightnessOffset;
 
-  vec4 nSample = blurTex(tNormalMap, uvSurface, bakeTexel);
+  vec4 nSample = blurTex(tNormalMap, uvSurface, uNormalMapTexel * uNormalBlurRadius);
   vec3 nFull = nSample.xyz * 2.0 - 1.0;
   float heightMask = nSample.a;
   float squash = mix(0.05, 1.0, extrude) * uDisplacement;
@@ -474,10 +498,10 @@ void main(){
   vec3 normal = gNormal;
   float fresnelFactor = abs(dot(normal, vec3(0., 0., 1.)));
   float inversefresnelFactor = 1.0 - fresnelFactor;
-  inversefresnelFactor = 1. - pow(inversefresnelFactor, CHROMATIC_FRESNEL_SHARPNESS);
+  inversefresnelFactor = 1. - pow(inversefresnelFactor, uChromaEdgeSharpness);
   float waveMask = max(
-    smoothstep(1., 0.1, mix(inversefresnelFactor, 1., 1. - CHROMATIC_FRESNEL_OPACITY)),
-    smoothstep(CHROMATIC_SHADOW_RANGE.y, CHROMATIC_SHADOW_RANGE.x, level5) * CHROMATIC_SHADOW_OPACITY) * uOpacity;
+    smoothstep(1., 0.1, mix(inversefresnelFactor, 1., 1. - uChromaEdgeOpacity)),
+    smoothstep(uChromaShadowRange.y, uChromaShadowRange.x, level5) * uChromaShadowOpacity) * uOpacity;
   waveMask = max(waveMask, uChromaGround * uOpacity);
   vec4 fluid = texture2D(tFluidFlowmap, uvScreen);
   fluid += mix(0., fastScrollNoise.g * 2., uFastScroll);
@@ -631,7 +655,16 @@ function makeWallMaterial(bake1, bake2) {
       tNormalMap: { value: tFlatNormal },
       uNormalMapTexel: { value: new THREE.Vector2(1, 1) },
       uNormalBlurRadius: { value: 2.5 },
-      uWallUvOffset: { value: 14.0 },  // texels to step side walls off the outline sliver
+      uBakeBlurRadius: { value: SHADOW.bakeBlur },
+      uWallUvOffset: { value: 0.0 },   // texels to step side walls off their own bake pixel.
+                                       //   MUST be 0. The bakes are rendered in Blender from
+                                       //   the displaced model, so a side wall's own UV already
+                                       //   holds that wall lit by the same light as the shape
+                                       //   faces (this is what Original/ver1 relies on — it
+                                       //   samples plain vUv everywhere). Any offset makes the
+                                       //   wall read a neighbouring pixel instead, which is why
+                                       //   edges came out arbitrarily darker or lighter than
+                                       //   the geometry. 6 and 14 both did this.
                                        //   onto the bright top, so edges read like the wall
       uDisplacement: { value: DISPLACEMENT },
       uMetalness: { value: 0 },
@@ -656,6 +689,10 @@ function makeWallMaterial(bake1, bake2) {
       uChromaTint: { value: CHROMA.tint },
       uChromaLightness: { value: CHROMA.lightness },
       uChromaGround: { value: CHROMA.ground },
+      uChromaEdgeSharpness: { value: CHROMA.edgeSharpness },
+      uChromaEdgeOpacity: { value: CHROMA.edgeOpacity },
+      uChromaShadowRange: { value: new THREE.Vector2(...CHROMA.shadowRange) },
+      uChromaShadowOpacity: { value: CHROMA.shadowOpacity },
       uBrightnessFactor: { value: BRIGHTNESS_FACTOR },
       uBrightnessOffset: { value: BRIGHTNESS_OFFSET },
     },
