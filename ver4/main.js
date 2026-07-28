@@ -16,24 +16,14 @@ const ROW_SPACING = 9.995;          // Ei
 const FOV_FIT = 1.33;               // $o  → worldHeight = 1.33 * (Ei - .1) / aspect
 const BRIGHTNESS_FACTOR = 0.6;      // desktop (mobile: .5)
 const BRIGHTNESS_OFFSET = 0.4;      // desktop (mobile: .6)
-// Whole-scene brightness. 1 = Original. Applied as a final multiply on both the wall
-// and the background, so it scales everything uniformly: (color*FACTOR + OFFSET) * B.
-// There is no tone mapping, so anything over 1.0 clips flat to white — the flat wall
-// lands near 0.77 at B=1, which means B≈1.30 puts it at the ceiling and highlights
-// start blowing out. Below ~1.25 is safe; above that, lower BRIGHTNESS_FACTOR too.
-const BRIGHTNESS = 1.1;
+const BRIGHTNESS = 1.1;             // whole-scene multiply, 1 = Original. No tone mapping:
+                                    //   the flat wall sits at ~0.77, so >1.25 clips to white
 const SCROLL_WHEEL_MULT = 0.00045;  // wheel px → rows (feel-tuned, site uses its own smooth-scroll rig)
 const SCROLL_SMOOTH = 0.035;
 
-// ---------------------------------------------------------------- zoom (ported from ver3)
-// Scroll drives a spring-damped camera zoom: raw scroll pixels are clamped to
-// ZOOM.screens viewport heights, normalised to 0..1, and chased by a spring so the
-// zoom settles rather than tracking the wheel frame-for-frame.
-// Matching ver3: the wheel ONLY zooms, it does not travel the wall. ver3 never moves
-// wallGroup, so with this false the whole travel path idles — scroll stays 0, the wall
-// sits still, uScreenScroll stays 0 and the flow-map gets no scroll offset, which is
-// exactly ver3's `flowmap.update(0)`. Set true for Original's infinite vertical travel.
-const SCROLL_TRAVELS = false;
+// ---------------------------------------------------------------- zoom
+// Scroll drives a spring-damped camera zoom instead of travelling the wall.
+const SCROLL_TRAVELS = false;     // true = Original's infinite vertical travel instead
 const BRUSH_TRACKS_ZOOM = true;   // brush radius scales with zoom, so the revealed
                                   //   patch stays a constant size on the wall.
                                   //   false = the site's own screen-space behaviour
@@ -42,6 +32,24 @@ const ZOOM = {
   screens: 6,                                   // scroll distance for full zoom, in viewport heights
   spring: { stiffness: 80, damping: 22, mass: 0.7 },
 };
+
+// ---------------------------------------------------------------- ambient pass
+// Idle motion: a second cursor wanders the wall on its own, stamping the flow-map's
+// second channel (mouse2 → .a). ?amb runs passes back to back with a title counter.
+// Values below are the tamed set; the site's own are 3 / 2 / 12 at blend 1, pause [1,3].
+const AMBIENT = {
+  enabled: true,
+  pause: [6, 14],             // seconds of stillness between passes (site: [1, 3])
+  segments: [1, 3],           // site: floor(random*3)+1
+  durMid: [0.8, 1.0],         // site: lerp(.8,1) for a segment followed by more
+  durLast: [0.7, 0.8],        // site: lerp(.7,.8) for the closing segment
+  radius: [0.7, 0.9],         // site: lerp(.7,.9), in [-1,1] space → uv = v/2 + .5
+  roughMid: 1.0,              // site: 3   (rough strength, mid-pass segments)
+  roughLast: 0.7,             // site: 2   (closing segment)
+  roughPoints: 5,             // site: 12  (sample points per second of travel)
+  roughBlend: 0.35,           // 0 = perfectly smooth travel, 1 = the full rough curve
+};
+const FORCE_AMBIENT = new URLSearchParams(location.search).has('amb');
 
 const ASSETS = './assets/';
 
@@ -55,23 +63,10 @@ const CUSTOM = {
   bake2: './bakes/bake2.webp',
   meta: './bakes/meta.json',    // depthMult etc. — written by the bake, no manual sync
   depthMult: 6.25,              // fallback if meta.json is missing
-  // Original's ground drifts toward the camera as the relief reveals. That is not a
-  // shader effect — it falls out of where the flat plate sits in the mesh. The reveal
-  // is `pos.z *= mix(0.05, 1.0, extrude)` (WALL_VERT), which scales about z=0, so a
-  // plate lying AT z=0 is pinned and cannot move. Original's plate covers 100% of the
-  // plate area at z=0.75 of the relief depth (relief elements sit both below it at
-  // 0.067/0.25/0.50 and above it at 0.933/1.0), so it travels 0.95*0.75*depth on a
-  // full reveal. This mesh is flat-bottomed — plate at z=0.00, ribbons at z=1.00 — so
-  // it is lifted here to restore the same travel. 0 = plate pinned (no ground shift).
-  // Travel on a full reveal = 0.95 * groundLift * (depthMult * reliefDepth). Because
-  // it scales with depth, the two depth halvings (ratio 0.03 -> 0.0075) cut the
-  // background's motion to a quarter, so matching Original's ABSOLUTE travel needs
-  // 3.0 — but that was tried and read as the wall swimming toward the camera: the
-  // scale is multiplicative about z=0, so the sheet's motion (0.95*L*depth) grows
-  // while the relief's pop above it (0.95*depth) does not. At 3.0 the sheet moves 3x
-  // more than the relief pops. Known points: 0.75 (Original's own geometric ratio)
-  // reads clean, 1.5 reads "a bit disconnected", 3.0 swims badly. 1.1 is the midpoint
-  // of the clean/bad bracket. Raise the relief itself with -DepthRatio, not this.
+  // How far the flat plate sits above the reveal's scale origin, as a fraction of
+  // relief depth — the reveal scales z about 0, so a plate at 0 is pinned and cannot
+  // drift. Travel = 0.95 * groundLift * depthMult * reliefDepth.
+  // 0 = pinned, 0.75 = Original's own ratio, 1.5+ starts reading as the wall swimming.
   groundLift: 1.1,
 };
 
@@ -457,9 +452,7 @@ const loadTex = (url, wrap) => {
   if (wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 };
-// Original's own plaster: the shared ../reference/plaster.jpg was swapped for ver3's
-// 4K marble, so ver4 names the untouched copy explicitly (byte-identical to
-// Original/reference/plaster.jpg) — ver4 must look like Original, geometry aside.
+// Original's plaster — the shared plaster.jpg is ver3's 4K marble, a different look
 const tPlaster = loadTex(ASSETS + 'plaster_orig_backup.webp', true);
 const tMaskNoiseWall = loadTex(ASSETS + 'rgb-attenuation-0,9.webp', true);  // fast-scroll noise
 const tFlowNoise = loadTex(ASSETS + 'mask-noise.webp', true);               // flowmap stamp noise
@@ -526,7 +519,6 @@ function makeWallMaterial(bake1, bake2) {
       uSwitchColorTransition,
       uFastScroll,
       tFluidFlowmap: { value: tFluidBlack },
-      // both scaled by BRIGHTNESS: (color*F + O) * B  ==  color*(F*B) + O*B
       uBrightnessFactor: { value: BRIGHTNESS_FACTOR * BRIGHTNESS },
       uBrightnessOffset: { value: BRIGHTNESS_OFFSET * BRIGHTNESS },
     },
@@ -570,8 +562,7 @@ if (USE_CUSTOM) {
     geometry.scale(1, 1, depthMult);
     geometry.computeBoundingBox();
     const bb = geometry.boundingBox;
-    // z: seat the plate at CUSTOM.groundLift of the relief depth above the scale
-    // origin, so the reveal carries the ground with it the way Original's did
+    // z: seat the plate at CUSTOM.groundLift of the relief depth above the origin
     const reliefDepth = bb.max.z - bb.min.z;
     geometry.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2,
                        -bb.min.z + CUSTOM.groundLift * reliefDepth);
@@ -635,8 +626,7 @@ if (USE_CUSTOM) {
 // ---------------------------------------------------------------- scroll
 let scrollTarget = 0;
 let scroll = 0;
-// zoom input (ver3): raw scroll pixels, clamped to the zoom range. Kept separate from
-// the travel input above so either can be tuned or switched off on its own.
+// zoom input: raw scroll pixels, clamped to the zoom range
 let scrollPx = 0;
 const zoomSpring = { x: 0, v: 0 };
 const addZoomScroll = (dy) => {
@@ -652,7 +642,7 @@ addEventListener('pointerup', () => { dragY = null; });
 addEventListener('pointermove', (e) => {
   if (dragY !== null && e.pointerType !== 'mouse') {
     if (SCROLL_TRAVELS) scrollTarget += (dragY - e.clientY) * 0.004;
-    addZoomScroll((dragY - e.clientY) * 2);   // ver3's touch-drag factor
+    addZoomScroll((dragY - e.clientY) * 2);   // touch-drag → zoom
     dragY = e.clientY;
   }
 });
@@ -675,6 +665,99 @@ function resize() {
 addEventListener('resize', resize);
 resize();
 
+// ---------------------------------------------------------------- ambient pass
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+// Eased 0..1 curve with random wobble; blend mixes clean template vs rough curve
+const roughEase = (points, strength, template, blend) => {
+  const base = template || ((t) => t);
+  const pts = [];
+  for (let i = 0; i < points; i++) {
+    const x = (i + 1) / (points + 1);
+    let y = base(x);
+    y += (Math.random() - 0.5) * strength * (4 * x * (1 - x));   // taper the wobble to 0 at both ends
+    pts.push({ x, y: Math.max(0, Math.min(1, y)) });
+  }
+  pts.push({ x: 0, y: 0 }, { x: 1, y: 1 });
+  pts.sort((a, b) => a.x - b.x);
+  return (t) => {
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    let i = 1;
+    while (i < pts.length - 1 && pts[i].x < t) i++;
+    const a = pts[i - 1], b = pts[i];
+    const span = b.x - a.x;
+    let k = span > 1e-6 ? (t - a.x) / span : 0;
+    k = k * k * (3 - 2 * k);
+    const rough = a.y + (b.y - a.y) * k;
+    return base(t) + (rough - base(t)) * blend;
+  };
+};
+const power2Out = (t) => 1 - Math.pow(1 - t, 2);
+
+// Each segment starts where the last ended, turning by up to ±0.8π
+function ambientDirections(prev) {
+  const start = prev || { x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2 };
+  const angle = Math.atan2(start.y, start.x) + (Math.random() - 0.5) * 2 * Math.PI * 0.8;
+  const len = rnd(AMBIENT.radius[0], AMBIENT.radius[1]);
+  return { start, end: { x: Math.cos(angle) * len, y: Math.sin(angle) * len } };
+}
+
+function buildAmbientPass() {
+  const count = Math.floor(Math.random() * (AMBIENT.segments[1] - AMBIENT.segments[0] + 1)) + AMBIENT.segments[0];
+  const segs = [];
+  let prev = null;
+  for (let i = 0; i < count; i++) {
+    const isLast = i === count - 1;
+    const more = !isLast && Math.random() < 0.7;             // site's own 0.7 coin flip
+    const dur = more ? rnd(AMBIENT.durMid[0], AMBIENT.durMid[1]) : rnd(AMBIENT.durLast[0], AMBIENT.durLast[1]);
+    const d = ambientDirections(prev);
+    const pts = Math.max(2, Math.round(dur * AMBIENT.roughPoints));
+    const strength = more ? AMBIENT.roughMid : AMBIENT.roughLast;
+    const template = isLast ? power2Out : null;              // the closing segment decelerates
+    segs.push({
+      dur, d,
+      ex: roughEase(pts, strength, template, AMBIENT.roughBlend),
+      ey: roughEase(pts, strength, template, AMBIENT.roughBlend),
+    });
+    prev = d.end;
+  }
+  return { segs, i: 0, t: 0 };
+}
+
+let ambientCount = 0;
+let ambientPass = null;
+let ambientWait = FORCE_AMBIENT ? 0 : rnd(AMBIENT.pause[0], AMBIENT.pause[1]);
+
+function updateAmbient(delta) {
+  if (!AMBIENT.enabled) return;
+  flowmap.velocity2.set(1, 1);
+  if (!ambientPass) {
+    ambientWait -= delta;
+    // park the second cursor off-screen while idle so it stamps nothing
+    if (ambientWait > 0) { flowmap.mouse2.set(-1, -1); return; }
+    ambientPass = buildAmbientPass();
+    ambientCount++;
+    if (FORCE_AMBIENT) document.title = 'ambient pass ' + ambientCount + ' — ' + ambientPass.segs.length + ' seg(s)';
+  }
+  const seg = ambientPass.segs[ambientPass.i];
+  ambientPass.t += delta;
+  const p = Math.min(1, ambientPass.t / seg.dur);
+  flowmap.mouse2.set(
+    (seg.d.start.x + (seg.d.end.x - seg.d.start.x) * seg.ex(p)) / 2 + 0.5,
+    (seg.d.start.y + (seg.d.end.y - seg.d.start.y) * seg.ey(p)) / 2 + 0.5,
+  );
+  if (p >= 1) {
+    ambientPass.i++;
+    ambientPass.t = 0;
+    if (ambientPass.i >= ambientPass.segs.length) {
+      ambientPass = null;
+      ambientWait = FORCE_AMBIENT ? 0 : rnd(AMBIENT.pause[0], AMBIENT.pause[1]);
+      flowmap.mouse2.set(-1, -1);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- frame loop (site order)
 const tracker = new MouseTracker();
 let scrollLast = 0;
@@ -690,8 +773,8 @@ function frame(now) {
   uTime.value += delta;
   tracker.tick(deltaMs);
 
-  // zoom spring (ver3): scroll position → camera.zoom. dtS is clamped so a stalled
-  // frame cannot blow the integrator up.
+  // zoom spring: scroll position → camera.zoom (dtS clamped so a stalled frame
+  // cannot blow the integrator up)
   {
     const progressTarget = Math.max(0, Math.min(1, scrollPx / (ZOOM.screens * innerHeight)));
     const { stiffness, damping, mass } = ZOOM.spring;
@@ -703,7 +786,6 @@ function frame(now) {
   camera.zoom = Math.max(1, 1 + (ZOOM.max - 1) * zoomSpring.x);
   camera.updateProjectionMatrix();
   if (BRUSH_TRACKS_ZOOM) {
-    // matches what the Flowmap constructor stored (falloff * 0.5) at zoom 1
     flowmap.material.uniforms.uFalloff.value = CONFIG.flowmap.falloff * 0.5 * camera.zoom;
   }
 
@@ -727,6 +809,7 @@ function frame(now) {
   scrollLast = uScreenScroll.value;
   flowmap.mouse.lerp(tracker.normalFlip, CONFIG.flowmap.mouseEase);
   flowmap.velocity.lerp(tracker.velocity, tracker.velocity.length() ? 0.1 : 0.04);
+  updateAmbient(delta);                        // drives mouse2/velocity2
   flowmap.setDeltaMult(Math.min(deltaMs, 32) / 16);
   flowmap.update(-scrollDelta);
   uScrollSpeed.value += (scrollDelta * 5 - uScrollSpeed.value) * 0.04;
