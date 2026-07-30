@@ -48,8 +48,86 @@ const AMBIENT = {
   roughLast: 0.7,             // site: 2   (closing segment)
   roughPoints: 5,             // site: 12  (sample points per second of travel)
   roughBlend: 0.35,           // 0 = perfectly smooth travel, 1 = the full rough curve
+  chroma: false,              // let the pass take the red mask too (false = reveal only)
 };
 const FORCE_AMBIENT = new URLSearchParams(location.search).has('amb');
+
+// ---------------------------------------------------------------- red mask
+// The cursor drags a coloured trail (its own flow-map) that only paints where the
+// relief's walls and creases open the mask up.
+const CHROMA = {
+  enabled: true,
+  // The colour is GENERATED from the surface normal, as the site does it: the normal
+  // is encoded as a colour, converted to HSV and its hue rotated. That is what makes
+  // it shimmer across the relief instead of reading as flat paint. Only the HUE of
+  // `color` is used — brightness comes from the normal, which is why it stays visible
+  // on a near-white wall where a dark hex could not.
+  color: 0x650003,          // hue source (its own darkness is irrelevant here)
+  hueRange: 0.15,           // width of the hue swing across the surface. 1 = the site's
+                            //   full swing, which sends side walls right round to green
+                            //   and blue; 0.35 reaches orange and magenta; 0.15 stays
+                            //   red throughout (340-16deg); 0 = one flat colour
+  colorRange: 2.0,          // site value: z exaggeration before the normal is recoloured
+  saturation: 1.0,          // multiplies the generated saturation
+  value: 1.0,               // multiplies the generated brightness
+  normalMap: 1.0,           // how much the BAKED normal map drives where the colour
+                            //   lands and how it is shaded. 0 = geometry normals only,
+                            //   which only see the mesh's own vertical walls.
+  ground: 0.08,             // how much the flat ground takes the colour (0 = relief only)
+
+  // WHERE the colour lands. Site values throughout — a crisp saturated rim on the
+  // steep walls, plus the shadowed creases.
+  // The site keys the rim off a fresnel exponent, which needs surfaces that go nearly
+  // edge-on. This relief is 1% of plate width deep, so it never gets there: measured
+  // on the bake, the most tilted 1% of the frame is only |nz| 0.73, where the exponent
+  // wants below 0.02 — the rim was landing on ~0% of the frame at any sharpness.
+  // So the rim ramps directly over the tilt instead, calibrated to these normals:
+  // 0.02-0.20 covers the 12.5% of the frame that is genuinely sloped.
+  width: -2.0,              // THE THICKNESS CONTROL, in bake texels (2048 across the
+                            //   plate). Negative erodes the band — thinner; positive
+                            //   dilates — thicker; 0 leaves it as the geometry gives it.
+                            //   A real width: independent of how steep the relief is,
+                            //   so it keeps working where tiltRange would collapse.
+  tiltRange: [0.12, 0.28],  // which slopes count as rim at all. Measured on this bake:
+                            //   [0.02,0.20] paints 12.5% of the frame, [0.12,0.28] 6.8%,
+                            //   [0.16,0.32] 4.0%, and past ~[0.20,0.36] it collapses to
+                            //   0.1% — the relief has no steeper surface left to catch.
+                            //   Use `width` for thickness; leave this as the selector.
+  edgeOpacity: 0.98,        // how hard the rim reaches full colour
+  revealGate: [0.30, 0.80], // extrude range over which the colour is allowed in, so it
+                            //   stays inside the revealed contour. Raise the pair to
+                            //   keep it further inside and thinner; [0, 0] = no gate.
+                            //   Unlike tiltRange this thins by reveal depth, not by
+                            //   surface slope, so it does not hit the relief's limit.
+  shadowRange: [0.2, 0.42], // tonal band of the bake counted as "crease"
+  shadowOpacity: 0.25,      // how much colour the creases take (ver3 used 0.4)
+  relief: 0,                // OFF: this reads the height mask from normal.webp's alpha,
+                            //   and the bake cannot currently produce one — the height
+                            //   pass returns a constant z, so the mask came out uniform
+                            //   and the map now ships as RGB. With no mask, alpha reads
+                            //   as 1 and any value here would flood the whole revealed
+                            //   patch, floor included. Re-enable once the bake's height
+                            //   pass is fixed. The rim (tiltRange) carries the relief
+                            //   for now.
+
+  // HOW STRONG. Both were hardcoded in the shader; site values kept.
+  amplitude: 0.57,          // master opacity of the whole fill
+  fluidMagnitude: 0.15,     // how fast the trail saturates to full colour
+
+  falloff: 0.35,            // trail width (screen fraction ×0.5), against the reveal's
+                            //   own 0.38. Do NOT shrink this to thin the colour down:
+                            //   a narrow trail accumulates less density, so the effect
+                            //   comes out smaller AND weaker. Thin it with tiltRange.
+  dissipation: 0.975,       // trail lifetime
+  boost: 8,                 // HDR accumulation cap
+};
+
+// only the hue is taken from CHROMA.color; the effect generates its own S and V
+const chromaHue = () => {
+  const hsl = { h: 0, s: 0, l: 0 };
+  new THREE.Color(CHROMA.color).getHSL(hsl, THREE.SRGBColorSpace);
+  return hsl.h;
+};
 
 const ASSETS = './assets/';
 
@@ -61,6 +139,7 @@ const CUSTOM = {
   model: './bakes/model.glb',   // welded copy written by scripts/bake_levels.py — NOT output.gltf
   bake1: './bakes/bake1.webp',
   bake2: './bakes/bake2.webp',
+  normal: './bakes/normal.webp', // camera-space normals + height mask in alpha
   meta: './bakes/meta.json',    // depthMult etc. — written by the bake, no manual sync
   depthMult: 6.25,              // fallback if meta.json is missing
   // How far the flat plate sits above the reveal's scale origin, as a fraction of
@@ -114,6 +193,7 @@ uniform vec2 uMouse;
 uniform vec2 uVelocity;
 uniform vec2 uMouse2;
 uniform vec2 uVelocity2;
+uniform float uClampMax;
 uniform sampler2D tNoise;
 uniform float uTime;
 varying vec2 vUv;
@@ -141,7 +221,7 @@ void main(){
   stamp2.a = stamp2.b;
   stamp2.rg *= 0.0;
   data += stamp2 * noise * uDeltaMult;
-  data = min(data, vec4(1));
+  data = min(data, vec4(uClampMax));
   data.rgb = max(data.rgb, vec3(-1));
   gl_FragColor = data;
 }`;
@@ -151,7 +231,7 @@ varying vec2 vUv;
 void main(){ vUv = uv; gl_Position = vec4(position, 1.0); }`;
 
 class Flowmap {
-  constructor(renderer, { size = 256, falloff = 0.5, alpha = 0.3, dissipation = 0.98, tNoise, uTime }) {
+  constructor(renderer, { size = 256, falloff = 0.5, alpha = 0.3, dissipation = 0.98, clampMax = 1, tNoise, uTime }) {
     this.renderer = renderer;
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.scene = new THREE.Scene();
@@ -184,6 +264,7 @@ class Flowmap {
         uVelocity: { value: this.velocity },
         uMouse2: { value: this.mouse2 },
         uVelocity2: { value: this.velocity2 },
+        uClampMax: { value: clampMax },
         uOffset: { value: 0 },
       },
       depthTest: false,
@@ -240,10 +321,6 @@ void main(){
 }`;
 
 const WALL_FRAG = GLSL_SCROLL_EXTRUDE_DEFINES + /* glsl */`
-#define CHROMATIC_FRESNEL_SHARPNESS 35.0
-#define CHROMATIC_FRESNEL_OPACITY 0.98
-#define CHROMATIC_SHADOW_RANGE vec2(0.2, 0.42)
-#define CHROMATIC_SHADOW_OPACITY 0.25
 uniform float uTime;
 uniform vec2 uResolution;
 uniform sampler2D tMaskNoise;
@@ -259,6 +336,24 @@ uniform float uOpacity;
 uniform float uSwitchColorTransition;
 uniform float uFastScroll;
 uniform sampler2D tFluidFlowmap;
+uniform sampler2D tNormalMap;
+uniform float uChromaHue;
+uniform float uChromaHueRange;
+uniform float uChromaColorRange;
+uniform float uChromaSaturation;
+uniform float uChromaValue;
+uniform float uChromaNormalMap;
+uniform float uChromaGround;
+uniform vec2 uChromaTiltRange;
+uniform vec2 uChromaRevealGate;
+uniform vec2 uNormalMapTexel;
+uniform float uChromaWidth;
+uniform float uChromaEdgeOpacity;
+uniform vec2 uChromaShadowRange;
+uniform float uChromaShadowOpacity;
+uniform float uChromaRelief;
+uniform float uChromaAmplitude;
+uniform float uChromaFluidMag;
 uniform float uBrightnessFactor;
 uniform float uBrightnessOffset;
 varying vec2 vUv;
@@ -293,22 +388,35 @@ vec3 rgb2hsv(vec3 c){
   float e = 1.0e-10;
   return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
 }
+// the rim mask at one point: how sloped the relief is there, at the current reveal
+float chromaRim(vec2 uv, float squash){
+  vec3 nF = texture2D(tNormalMap, uv).xyz * 2.0 - 1.0;
+  vec3 nR = normalize(vec3(nF.xy * (squash / max(nF.z, 0.15)), 1.0));
+  return smoothstep(uChromaTiltRange.x, uChromaTiltRange.y, 1.0 - abs(nR.z));
+}
 vec3 applyFluidEffect(FluidEffectConfig config, vec3 color, vec4 fluid, vec2 uv, float time, float mask, vec3 normal){
-  float fluidEdges = smoothstep(0.0, 1.0, fluid.b * config.fluidMagnitude);
+  float fluidEdges = smoothstep(0.0, 1.0, fluid.b * uChromaFluidMag);
   vec2 uvLines = uv + time * 0.01 * config.linesSpeed;
   uvLines.x = uvLines.x * 1000.0 / config.linesScale;
   uvLines.y = sin(uvLines.y * 50.0 * config.linesWaveLength) * 20.0 / config.linesScale;
   float lines = smoothstep(-1.0, 0.5, sin(uvLines.x + uvLines.y));
   lines = mix(1.0, lines, config.linesStrength);
   vec3 normalVector = normal;
-  normalVector.z *= config.colorRange;
+  normalVector.z *= uChromaColorRange;
   normalVector = normalize(normalVector);
   vec3 normalColor = (normalVector + 1.) / 2.;
-  normalColor = rgb2hsv(normalColor);
-  normalColor.r = fract(normalColor.r + config.hueShift);
-  normalColor = hsv2rgb(normalColor);
-  vec3 effectColor = normalColor;
-  color = mix(color, effectColor, mask * fluidEdges * lines * config.amplitude);
+  vec3 hsv = rgb2hsv(normalColor);
+  // The site rotates this hue to a gold band. Here the band is re-centred on the
+  // chosen hue and its width scaled: 0.6667 is the hue a camera-facing normal
+  // produces, so it is the pivot the swing opens around. The distance from the pivot
+  // is measured the short way round the wheel — a plain subtraction sends hues past
+  // the wrap point off in the wrong direction.
+  float dHue = fract(hsv.x - 0.6667 + 0.5) - 0.5;
+  hsv.x = fract(uChromaHue + dHue * uChromaHueRange);
+  hsv.y = clamp(hsv.y * uChromaSaturation, 0.0, 1.0);
+  hsv.z = clamp(hsv.z * uChromaValue, 0.0, 1.0);
+  vec3 effectColor = hsv2rgb(hsv);
+  color = mix(color, effectColor, mask * fluidEdges * lines * uChromaAmplitude);
   return color;
 }
 const FluidEffectConfig effectConfig = FluidEffectConfig(
@@ -360,15 +468,48 @@ void main(){
   vec3 dFdxPos = dFdx(vEye);
   vec3 dFdyPos = dFdy(vEye);
   vec3 normal = normalize(cross(dFdxPos, dFdyPos));
-  float fresnelFactor = abs(dot(normal, vec3(0., 0., 1.)));
-  float inversefresnelFactor = 1.0 - fresnelFactor;
-  inversefresnelFactor = 1. - pow(inversefresnelFactor, CHROMATIC_FRESNEL_SHARPNESS);
-  float waveMask = max(
-    smoothstep(1., 0.1, mix(inversefresnelFactor, 1., 1. - CHROMATIC_FRESNEL_OPACITY)),
-    smoothstep(CHROMATIC_SHADOW_RANGE.y, CHROMATIC_SHADOW_RANGE.x, level5) * CHROMATIC_SHADOW_OPACITY) * uOpacity;
+  // The geometry normal only knows the mesh's own vertical walls, so the colour can
+  // only catch there. The baked normal map carries the relief's real surface — on the
+  // raised shapes AND on the floor — but it is baked at full extrusion, so squash its
+  // xy by the current reveal before use (same analytic squash the bake assumes).
+  vec4 nSample = texture2D(tNormalMap, vUv);
+  vec3 nFull = nSample.xyz * 2.0 - 1.0;
+  float squash = mix(0.05, 1.0, extrude);
+  vec3 nRel = normalize(vec3(nFull.xy * (squash / max(nFull.z, 0.15)), 1.0));
+  vec3 chromaNormal = normalize(mix(normal, nRel, uChromaNormalMap));
+  float rimHere = chromaRim(vUv, squash);
+  // Thickness, in bake texels: erode the band to thin it, dilate to widen it. Unlike
+  // the tilt thresholds this is a real width — it does not depend on how steep the
+  // relief gets, so it keeps working where raising tiltRange would collapse the band.
+  float rw = abs(uChromaWidth);
+  if (rw > 0.001) {
+    vec2 tx = uNormalMapTexel * rw;
+    float s1 = chromaRim(vUv + vec2( tx.x, 0.0), squash);
+    float s2 = chromaRim(vUv + vec2(-tx.x, 0.0), squash);
+    float s3 = chromaRim(vUv + vec2(0.0,  tx.y), squash);
+    float s4 = chromaRim(vUv + vec2(0.0, -tx.y), squash);
+    if (uChromaWidth < 0.0) {
+      rimHere = min(rimHere, min(min(s1, s2), min(s3, s4)));   // erode → thinner
+    } else {
+      rimHere = max(rimHere, max(max(s1, s2), max(s3, s4)));   // dilate → thicker
+    }
+  }
+  float rim = rimHere * uChromaEdgeOpacity;
+  float waveMask = max(rim,
+    smoothstep(uChromaShadowRange.y, uChromaShadowRange.x, level5) * uChromaShadowOpacity) * uOpacity;
+  // the raised shapes themselves, from the height mask baked into normal.webp's alpha,
+  // faded in with the reveal so flat wall stays clean
+  float raised = smoothstep(0.15, 0.6, nSample.a) * clamp(extrude, 0.0, 1.0);
+  waveMask = max(waveMask, raised * uChromaRelief * uOpacity);
+  waveMask = max(waveMask, uChromaGround * uOpacity);
+  // Confine the colour to the revealed contour. The crease term reads the full-
+  // extrusion bake and the ground term is constant, so neither knows whether the
+  // relief is actually out — without this gate the red spreads wherever the trail
+  // has been, including flat wall, and the red trail outlives the reveal trail.
+  waveMask *= smoothstep(uChromaRevealGate.x, uChromaRevealGate.y, extrude);
   vec4 fluid = texture2D(tFluidFlowmap, uvScreen);
   fluid += mix(0., fastScrollNoise.g * 2., uFastScroll);
-  color = applyFluidEffect(effectConfig, color, fluid, vUv, uTime, waveMask, normal);
+  color = applyFluidEffect(effectConfig, color, fluid, vUv, uTime, waveMask, chromaNormal);
   vec3 fastModeColor = ContrastSaturationBrightness(color, 2., 1., 0.08);
   fastModeColor += 0.3;
   vec3 whiteRender = mix(color, fastModeColor, uFastScroll);
@@ -458,6 +599,9 @@ const tMaskNoiseWall = loadTex(ASSETS + 'rgb-attenuation-0,9.webp', true);  // f
 const tFlowNoise = loadTex(ASSETS + 'mask-noise.webp', true);               // flowmap stamp noise
 const tFluidBlack = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
 tFluidBlack.needsUpdate = true;
+// stand-in until bakes/normal.webp loads: (0,0,1) facing the camera, height 0
+const tFlatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 0]), 1, 1);
+tFlatNormal.needsUpdate = true;
 
 // shared uniforms
 const uTime = { value: 0 };
@@ -477,6 +621,17 @@ const flowmap = new Flowmap(renderer, {
   tNoise: { value: tFlowNoise },
   uTime,
 });
+
+// the red trail rides its own flow-map: wider, longer-lived, and allowed to
+// accumulate past 1 so overlapping strokes deepen instead of flattening
+const fluidmap = CHROMA.enabled ? new Flowmap(renderer, {
+  falloff: CHROMA.falloff,
+  alpha: 1,
+  dissipation: CHROMA.dissipation,
+  clampMax: CHROMA.boost,
+  tNoise: { value: tFlowNoise },
+  uTime,
+}) : null;
 
 // background
 const bg = new THREE.Mesh(
@@ -518,7 +673,25 @@ function makeWallMaterial(bake1, bake2) {
       uOpacity,
       uSwitchColorTransition,
       uFastScroll,
-      tFluidFlowmap: { value: tFluidBlack },
+      tFluidFlowmap: fluidmap ? fluidmap.uniform : { value: tFluidBlack },
+      tNormalMap: { value: tFlatNormal },   // replaced with bakes/normal.webp on load
+      uChromaHue: { value: chromaHue() },
+      uChromaHueRange: { value: CHROMA.hueRange },
+      uChromaColorRange: { value: CHROMA.colorRange },
+      uChromaSaturation: { value: CHROMA.saturation },
+      uChromaValue: { value: CHROMA.value },
+      uChromaNormalMap: { value: CHROMA.normalMap },
+      uChromaGround: { value: CHROMA.ground },
+      uChromaTiltRange: { value: new THREE.Vector2(...CHROMA.tiltRange) },
+      uChromaRevealGate: { value: new THREE.Vector2(...CHROMA.revealGate) },
+      uChromaWidth: { value: CHROMA.width },
+      uNormalMapTexel: { value: new THREE.Vector2(1 / 2048, 1 / 1258) },  // set from meta.res
+      uChromaEdgeOpacity: { value: CHROMA.edgeOpacity },
+      uChromaShadowRange: { value: new THREE.Vector2(...CHROMA.shadowRange) },
+      uChromaShadowOpacity: { value: CHROMA.shadowOpacity },
+      uChromaRelief: { value: CHROMA.relief },
+      uChromaAmplitude: { value: CHROMA.amplitude },
+      uChromaFluidMag: { value: CHROMA.fluidMagnitude },
       uBrightnessFactor: { value: BRIGHTNESS_FACTOR * BRIGHTNESS },
       uBrightnessOffset: { value: BRIGHTNESS_OFFSET * BRIGHTNESS },
     },
@@ -549,6 +722,10 @@ if (USE_CUSTOM) {
     t.wrapT = THREE.RepeatWrapping;          // bake is vertically periodic → filtering
     t.wrapS = THREE.ClampToEdgeWrapping;     //   at the seam samples the neighbor
   }
+  // raw vectors, not colour — must not be sRGB-decoded
+  const normalMap = loadTex(CUSTOM.normal);
+  normalMap.wrapT = THREE.RepeatWrapping;
+  normalMap.wrapS = THREE.ClampToEdgeWrapping;
   const metaPromise = fetch(CUSTOM.meta).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
   metaPromise.then((meta) => {
   const depthMult = meta.depthMult || CUSTOM.depthMult;
@@ -581,6 +758,9 @@ if (USE_CUSTOM) {
     sectionsPerLine = 1;
     for (let i = -1; i <= 1; i++) {           // 3 copies for the infinite vertical loop
       const mesh = new THREE.Mesh(geometry, makeWallMaterial(bake1, bake2));
+      mesh.material.uniforms.tNormalMap.value = normalMap;
+      // width is measured in bake texels, so it needs the bake's real resolution
+      if (meta.res) mesh.material.uniforms.uNormalMapTexel.value.set(1 / meta.res[0], 1 / meta.res[1]);
       mesh.position.y = i * rowSpacing;
       mesh.frustumCulled = false;
       // the shader's pos.xy *= 1.004 makes neighbouring clones overlap at nearly
@@ -787,6 +967,7 @@ function frame(now) {
   camera.updateProjectionMatrix();
   if (BRUSH_TRACKS_ZOOM) {
     flowmap.material.uniforms.uFalloff.value = CONFIG.flowmap.falloff * 0.5 * camera.zoom;
+    if (fluidmap) fluidmap.material.uniforms.uFalloff.value = CHROMA.falloff * 0.5 * camera.zoom;
   }
 
   // scroll smoothing
@@ -812,6 +993,19 @@ function frame(now) {
   updateAmbient(delta);                        // drives mouse2/velocity2
   flowmap.setDeltaMult(Math.min(deltaMs, 32) / 16);
   flowmap.update(-scrollDelta);
+  if (fluidmap) {
+    fluidmap.aspect = flowmap.aspect;
+    fluidmap.mouse.copy(flowmap.mouse);
+    fluidmap.velocity.copy(flowmap.velocity);
+    if (AMBIENT.chroma) {                      // let the idle pass paint too
+      fluidmap.mouse2.copy(flowmap.mouse2);
+      fluidmap.velocity2.copy(flowmap.velocity2);
+    } else {
+      fluidmap.mouse2.set(-1, -1);             // idle pass reveals, but leaves no red
+    }
+    fluidmap.setDeltaMult(Math.min(deltaMs, 32) / 16);
+    fluidmap.update(-scrollDelta);
+  }
   uScrollSpeed.value += (scrollDelta * 5 - uScrollSpeed.value) * 0.04;
 
   renderer.render(scene, camera);
