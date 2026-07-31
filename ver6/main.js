@@ -64,6 +64,19 @@ const AMBIENT = {
 };
 const FORCE_AMBIENT = new URLSearchParams(location.search).has('amb');
 
+// ---------------------------------------------------------------- A/B switches
+// Both default to the shipped build; add the query string to compare.
+//
+//   ?model=site   immersive-g's own relief GLB, with the bakes that ride inside its
+//                 materials, instead of the customer's model and our bakes
+//   ?mask=site    the sheen exactly as the site has it, instead of our tuned red
+//
+// The two are independent on purpose: the mask is identical across both models, so
+// ?model=site alone answers "is our replication 1:1?" without the colour changing
+// under you, and ?model=site&mask=site is the genuine article, end to end.
+const PARAMS = new URLSearchParams(location.search);
+const USE_CUSTOM = PARAMS.get('model') !== 'site';
+const SITE_MASK = PARAMS.get('mask') === 'site';
 // ---------------------------------------------------------------- chromatic sheen
 // The original's iridescent layer. Two halves:
 //
@@ -149,10 +162,35 @@ const CHROMATIC = {
   spread: 1.8,
 };
 
-// only the hue of CHROMATIC.color is taken; S and V are set above
+// ---------------------------------------------------------------- ?mask=site
+// Every OURS above, undone. This is the sheen exactly as immersive-g has it, with no
+// value of ours left anywhere in it — the reference to judge the replication against.
+//
+// hueRange 1.0 with this hue reproduces the site's single rotation exactly: our
+// formula is fract(hue + (h - 0.6667)) which, at hue = fract(0.6667 + hueShift),
+// collapses to the site's own fract(h + hueShift) with hueShift = -0.52.
+const CHROMATIC_SITE = {
+  shadowRange: [0.2, 0.42],
+  shadowOpacity: 0.25,
+  base: 0,                  // no floor: rim and crease only, as the site has it
+  spread: 0,                // colour stops where the shadow does
+  hueRange: 1.0,            // the full wheel — gold facing the camera, cyan and
+                            //   magenta on the walls
+  hue: 0.1467,              // = fract(0.6667 + hueShift), hueShift being the site's
+                            //   -0.52. Given as a number, not a hex: eyeballing a hex
+                            //   for a hue is how this preset first came out cyan.
+  normalSV: 1,              // S and V read off the normal again, speckle and all
+};
+
+// the mask actually in force
+const MASK = SITE_MASK ? { ...CHROMATIC, ...CHROMATIC_SITE } : { normalSV: 0, ...CHROMATIC };
+
+// The hue in force: MASK.hue outright if given, else the hue of MASK.color. Only the
+// hue is taken from the colour; S and V come from `normalSV` above.
 const chromaHue = () => {
+  if (MASK.hue !== undefined) return MASK.hue;
   const hsl = { h: 0, s: 0, l: 0 };
-  new THREE.Color(CHROMATIC.color).getHSL(hsl, THREE.SRGBColorSpace);
+  new THREE.Color(MASK.color).getHSL(hsl, THREE.SRGBColorSpace);
   return hsl.h;
 };
 
@@ -194,10 +232,6 @@ const FLUID = {
 
 const ASSETS = './assets/';
 
-// custom-model mode: open ver1/index.html?custom to use ../output.gltf with the
-// bakes produced by scripts/bake_levels.py (ver1/bakes/bake1.webp + bake2.webp).
-// DEPTH_MULT must match the --depth-mult used for the bake.
-const USE_CUSTOM = true; // packaged build: custom model only
 const CUSTOM = {
   model: './bakes/model.glb',   // welded copy written by scripts/bake_levels.py — NOT output.gltf
   bake1: './bakes/bake1.webp',
@@ -704,6 +738,8 @@ uniform float uChromaHue;
 uniform float uChromaHueRange;
 uniform float uChromaSaturation;
 uniform float uChromaValue;
+uniform float uChromaNormalSV;
+uniform float uChromaCreaseFull;
 uniform float uChromaSpread;
 uniform float uChromaBase;
 uniform float uBrightnessFactor;
@@ -733,9 +769,10 @@ vec3 rgb2hsv(vec3 c){
 // The wall's shading at a point, at the current reveal — the site's own six-level
 // mix, pulled out of main() so the crease mask can also sample it at neighbouring
 // texels (that is what CHROMATIC.spread does).
-float shadingAt(vec2 uv, float extrude){
+float shadingAt(vec2 uv, float extrude, out float level5){
   vec3 b1 = sRGB_OETF(texture2D(tBake1, uv)).rgb;
   vec3 b2 = sRGB_OETF(texture2D(tBake2, uv)).rgb;
+  level5 = b1.r;               // the shading at full extrusion — what the site's crease term reads
   float s = 0.54504;
   s = mix(s, b2.g, smoothstep(0.0, 0.2, extrude));
   s = mix(s, b2.r, smoothstep(0.2, 0.4, extrude));
@@ -782,15 +819,15 @@ vec3 applyFluidEffect(vec3 color, vec4 fluid, float mask, vec3 normal){
   // short way round (a plain subtraction sends hues past the wrap point backwards).
   float dHue = fract(hsv.x - 0.6667 + 0.5) - 0.5;
   hsv.x = fract(uChromaHue + dHue * uChromaHueRange);
-  // S and V are OURS and are CONSTANT, where the site takes both from the normal.
-  // Taking them from the normal is what produced the grey speckle: this normal comes
-  // from screen-space derivatives, so it is computed per 2x2 pixel quad and is noisy
-  // on thin geometry. Wherever its three components land near equal, the generated
-  // colour desaturates to grey; where they land low, it goes near black. Both flicker
-  // as the relief moves. The hue still comes from the normal — noise inside a 0.14
-  // hue band is invisible — so the shimmer survives without the speckle.
-  hsv.y = uChromaSaturation;
-  hsv.z = uChromaValue;
+  // S and V are OURS and are CONSTANT, where the site takes both from the normal
+  // (uChromaNormalSV 1 restores that). Taking them from the normal is what produced
+  // the grey speckle: this normal comes from screen-space derivatives, so it is
+  // computed per 2x2 pixel quad and is noisy on thin geometry. Wherever its three
+  // components land near equal the colour desaturates to grey; where they land low it
+  // goes near black. Both flicker as the relief moves. The hue still comes from the
+  // normal — noise inside a 0.05 hue band is invisible — so the shimmer survives.
+  hsv.y = mix(uChromaSaturation, hsv.y, uChromaNormalSV);
+  hsv.z = mix(uChromaValue, hsv.z, uChromaNormalSV);
   vec3 effectColor = hsv2rgb(hsv);
   return mix(color, effectColor, mask * fluidEdges * uChromaAmplitude);
 }
@@ -814,7 +851,8 @@ void main(){
   float fastScrollExtrude = fastScrollNoise.r * SCROLL_EXTRUDE_STRENGTH;
   extrude = mix(extrude, fastScrollExtrude, uFastScroll) * uOpacity;
   float gradient = mix(1.0, 0.5, length(uvScreen - vec2(0.0, 0.8)));
-  float o = shadingAt(vUv, extrude);
+  float level5;
+  float o = shadingAt(vUv, extrude, level5);
   color += vec3(o);
   vec2 uvPlaster = vPos.xy / uPlasterScale;
   float plaster = texture2D(tPlaster, uvPlaster).g;
@@ -849,7 +887,8 @@ void main(){
   }
   float waveMask = max(
     smoothstep(1., 0.1, mix(inversefresnelFactor, 1., 1. - uChromaFresnelOpacity)),
-    smoothstep(uChromaShadowRange.y, uChromaShadowRange.x, shade) * uChromaShadowOpacity
+    smoothstep(uChromaShadowRange.y, uChromaShadowRange.x,
+               mix(shade, level5, uChromaCreaseFull)) * uChromaShadowOpacity
   );
   // the base tint, over whatever the reveal has actually brought out
   waveMask = max(waveMask, uChromaBase * smoothstep(0.05, 0.45, extrude));
@@ -967,7 +1006,7 @@ const flowmap = new Flowmap(renderer, {
 });
 
 // the sheen rides a real fluid sim, as on the site
-const fluid = CHROMATIC.enabled ? new FluidSim(renderer, FLUID) : null;
+const fluid = MASK.enabled ? new FluidSim(renderer, FLUID) : null;
 
 // background
 const bg = new THREE.Mesh(
@@ -1010,19 +1049,21 @@ function makeWallMaterial(bake1, bake2) {
       uSwitchColorTransition,
       uFastScroll,
       tFluidFlowmap: fluid ? fluid.uniform : { value: tFluidBlack },
-      uChromaFresnelSharpness: { value: CHROMATIC.fresnelSharpness },
-      uChromaFresnelOpacity: { value: CHROMATIC.fresnelOpacity },
-      uChromaShadowRange: { value: new THREE.Vector2(...CHROMATIC.shadowRange) },
-      uChromaShadowOpacity: { value: CHROMATIC.shadowOpacity },
-      uChromaAmplitude: { value: CHROMATIC.amplitude },
-      uChromaFluidMag: { value: CHROMATIC.fluidMagnitude },
-      uChromaColorRange: { value: CHROMATIC.colorRange },
+      uChromaFresnelSharpness: { value: MASK.fresnelSharpness },
+      uChromaFresnelOpacity: { value: MASK.fresnelOpacity },
+      uChromaShadowRange: { value: new THREE.Vector2(...MASK.shadowRange) },
+      uChromaShadowOpacity: { value: MASK.shadowOpacity },
+      uChromaAmplitude: { value: MASK.amplitude },
+      uChromaFluidMag: { value: MASK.fluidMagnitude },
+      uChromaColorRange: { value: MASK.colorRange },
       uChromaHue: { value: chromaHue() },
-      uChromaHueRange: { value: CHROMATIC.hueRange },
-      uChromaSaturation: { value: CHROMATIC.saturation },
-      uChromaValue: { value: CHROMATIC.value },
-      uChromaSpread: { value: CHROMATIC.spread },
-      uChromaBase: { value: CHROMATIC.base },
+      uChromaHueRange: { value: MASK.hueRange },
+      uChromaSaturation: { value: MASK.saturation },
+      uChromaValue: { value: MASK.value },
+      uChromaSpread: { value: MASK.spread },
+      uChromaBase: { value: MASK.base },
+      uChromaNormalSV: { value: MASK.normalSV },
+      uChromaCreaseFull: { value: SITE_MASK ? 1 : 0 },
       uBrightnessFactor: { value: BRIGHTNESS_FACTOR * BRIGHTNESS },
       uBrightnessOffset: { value: BRIGHTNESS_OFFSET * BRIGHTNESS },
     },
