@@ -230,6 +230,24 @@ const FLUID = {
                             //   hard pink border. Library default is 1.5.
 };
 
+// ---------------------------------------------------------------- ?mask=site
+// The fluid untuned, back to WebGL-Fluid-Simulation's own defaults. This belongs to
+// the mask switch, not the model switch: the dye field is half of what the effect is,
+// so a "verbatim mask" running our tamed fluid would not be verbatim at all.
+//
+// Honest about provenance: the reference dump carries the site's fluid SHADERS
+// verbatim but not the JS that drives them, so these are the library's published
+// defaults, which the site is built on — not numbers read off immersive-g itself.
+const FLUID_SITE = {
+  densityDissipation: 0.985,
+  velocityDissipation: 0.99,
+  curl: 30,
+  splatRadius: 0.0025,
+  splatForce: 6000,
+  dyeAmount: 1.5,
+};
+const FLUID_ACTIVE = SITE_MASK ? { ...FLUID, ...FLUID_SITE } : FLUID;
+
 const ASSETS = './assets/';
 
 const CUSTOM = {
@@ -1006,7 +1024,7 @@ const flowmap = new Flowmap(renderer, {
 });
 
 // the sheen rides a real fluid sim, as on the site
-const fluid = MASK.enabled ? new FluidSim(renderer, FLUID) : null;
+const fluid = MASK.enabled ? new FluidSim(renderer, FLUID_ACTIVE) : null;
 
 // background
 const bg = new THREE.Mesh(
@@ -1377,7 +1395,9 @@ function frame(now) {
     if (v.lengthSq() > 1e-8) {
       fluid.splat(tracker.normalFlip.x, tracker.normalFlip.y, v.x, v.y);
     }
-    if (AMBIENT.chroma && flowmap.mouse2.x >= 0) {   // let the idle pass paint too
+    // the site lets its idle pass paint; we hold it back at the customer's request,
+    // so ?mask=site restores that too — otherwise the comparison is not the site's
+    if ((AMBIENT.chroma || SITE_MASK) && flowmap.mouse2.x >= 0) {
       fluid.splat(flowmap.mouse2.x, flowmap.mouse2.y, ambientVel.x, ambientVel.y);
     }
     fluid.update(Math.min(delta, 1 / 60));
