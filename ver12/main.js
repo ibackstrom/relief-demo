@@ -114,6 +114,10 @@ const ZOOM = {
 const AMBIENT = {
   enabled: true,
   pause: [6, 14],             // seconds of stillness between passes (site: [1, 3])
+  requireIdle: 1.5,           // seconds the POINTER must be still before a pass may start.
+                              //   Without this the countdown runs while the cursor is
+                              //   working and the wandering mask crosses live dye, which
+                              //   is what put red on it. See updateAmbient.
   segments: [1, 3],           // site: floor(random*3)+1
   durMid: [0.8, 1.0],         // site: lerp(.8,1) for a segment followed by more
   durLast: [0.7, 0.8],        // site: lerp(.7,.8) for the closing segment
@@ -1172,10 +1176,12 @@ class MouseTracker {
     this.lastNormalFlip = new THREE.Vector2(-1, -1);
     this.velocity = new THREE.Vector2();
     this.width = innerWidth; this.height = innerHeight;
+    this.lastMoveMs = -1e9;         // when the pointer last actually moved
     const update = (e) => {
       const x = e.changedTouches?.length ? e.changedTouches[0].pageX : e.pageX;
       const y = e.changedTouches?.length ? e.changedTouches[0].pageY : e.pageY;
       this.normalFlip.set(x / this.width, 1 - y / this.height);
+      this.lastMoveMs = performance.now();
     };
     addEventListener('pointermove', update);
     addEventListener('pointerdown', update);
@@ -1534,6 +1540,24 @@ function updateAmbient(delta) {
     ambientVel.set(0, 0);
   }
   ambientPrev.copy(flowmap.mouse2);
+  // OURS. The idle pass only runs when the pointer is actually idle.
+  //
+  // ambientWait counted down on its own, so a pass started every 6-14 seconds whether or
+  // not the cursor was busy — and a wandering mask crossing the wall WHILE the pointer is
+  // painting runs straight over live dye, which is where the red on it was coming from.
+  // Gating the colour cannot fix that case honestly: the two reveals share the flow map's
+  // channels (the idle stamp writes b and a both), so from the mask's side an idle reveal
+  // over fresh dye is indistinguishable from the cursor's own. Not running the pass while
+  // the cursor is working is both the real fix and what an idle animation should do; by
+  // the time one does start, the dye is seconds gone and the mask is grey on its own.
+  //
+  // ?amb bypasses it, or the pass could never be tested headlessly.
+  if (!FORCE_AMBIENT && (performance.now() - tracker.lastMoveMs) < AMBIENT.requireIdle * 1000) {
+    ambientPass = null;
+    ambientWait = rnd(AMBIENT.pause[0], AMBIENT.pause[1]);
+    flowmap.mouse2.set(-1, -1);
+    return;
+  }
   if (!ambientPass) {
     ambientWait -= delta;
     // park the second cursor off-screen while idle so it stamps nothing
