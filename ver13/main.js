@@ -942,6 +942,7 @@ uniform float uChromaBase;
 uniform vec2 uChromaBaseGate;
 uniform float uChromaBaseRadius;
 uniform float uChromaBaseDebug;
+uniform float uChromaCursorOnly;
 uniform float uChromaBaseGamma;
 uniform float uBrightnessFactor;
 uniform float uBrightnessOffset;
@@ -1103,6 +1104,8 @@ void main(){
     smoothstep(uChromaShadowRange.y, uChromaShadowRange.x,
                mix(shade, level5, uChromaCreaseFull)) * uChromaShadowOpacity
   );
+  // OURS. Colour belongs to the CURSOR's trail and to nothing else.
+  //
   waveMask *= uOpacity;
   vec4 fluid = texture2D(tFluidFlowmap, uvScreen);
   fluid += mix(0., fastScrollNoise.g * 2., uFastScroll);
@@ -1146,9 +1149,44 @@ void main(){
   // dev: ?dbg=field renders the blurred reveal itself, so the gate can be set against
   // what the field actually reaches instead of by trial.
   if (uChromaBaseDebug > 0.5) { gl_FragColor = vec4(vec3(washField), 1.0); return; }
+  // OURS. The wash belongs to the CURSOR's trail and to nothing else.
+  //
+  // The idle pass wanders a second cursor over the wall on its own and has never been
+  // meant to paint (AMBIENT.chroma) — but it came up in pink blobs, because the reveal is
+  // the one thing the two share. Its stamp writes the same channels the cursor's does
+  // (FLOWMAP_FRAG even sets stamp2.a = stamp2.b), so a wash blurred from the reveal reads
+  // the wandering mask as if the cursor had made it. Only the rim and crease terms were
+  // safe, and only because applyFluidEffect multiplies them by the dye.
+  //
+  // So the wash is multiplied by the dye too — as a presence test, at a threshold far
+  // below the level that would shape it. The dye is splatted by the real pointer and by
+  // nothing else, which makes it the honest answer to "was the cursor here". Two things
+  // that look like they should work and do not: keying on channel b (the idle stamp writes
+  // it), and keying on rg, which the idle stamp does zero but which is a VELOCITY and
+  // cancels itself where a path crosses back over itself — it cost the wash a third of its
+  // reach, 11.2% -> 7.2% of frame.
+  //
+  // ?mask=site turns this off, because on the site the idle pass does paint.
+  // Dilated to the wash's own scale before it is read. The wash is a blurred quantity and
+  // reaches further than the dye does, so testing the dye where it stands clips the outer
+  // trail off — 11.2% of frame down to 7.0%, and lowering the threshold does not recover it
+  // because it is the dye's EXTENT that runs out, not its level. A max over one ring
+  // carries the presence outward the way the blur carries the reveal.
+  float dyeNear = fluid.b;
+  {
+    float aspect = uResolution.x / uResolution.y;
+    for (int i = 0; i < 6; i++) {
+      float a = float(i) * 1.0471975 + 0.5;
+      vec2 off = vec2(cos(a), sin(a)) * uChromaBaseRadius * 0.75;
+      off.x /= aspect;
+      dyeNear = max(dyeNear, texture2D(tFluidFlowmap, uvScreen + off).b);
+    }
+  }
+  float cursorHere = mix(1.0, smoothstep(0.004, 0.150, dyeNear), uChromaCursorOnly);
   float wash = uChromaBase
              * pow(smoothstep(uChromaBaseGate.x, uChromaBaseGate.y, washField),
                    uChromaBaseGamma)
+             * cursorHere
              * uOpacity;
   color = applyFluidEffect(color, fluid, waveMask, wash, normal);
   vec3 fastModeColor = ContrastSaturationBrightness(color, 2., 1., 0.08);
@@ -1320,6 +1358,7 @@ function makeWallMaterial(bake1, bake2) {
       uChromaBaseGate: { value: new THREE.Vector2(...(MASK.baseGate || [0.05, 0.45])) },
       uChromaBaseRadius: { value: MASK.baseRadius || 0.14 },
       uChromaBaseDebug: { value: PARAMS.get('dbg') === 'field' ? 1 : 0 },   // dev only
+      uChromaCursorOnly: { value: (SITE_MASK || AMBIENT.chroma) ? 0 : 1 },
       uChromaBaseGamma: { value: MASK.baseGamma || 1 },
       uChromaCreaseFull: { value: SITE_MASK ? 1 : 0 },
       uBrightnessFactor: { value: BRIGHTNESS_FACTOR * BRIGHTNESS },
