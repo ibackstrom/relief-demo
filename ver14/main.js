@@ -1,21 +1,10 @@
 ﻿// immersive-g.com home bas-relief reveal — ver14.
-// ver13's wash, blurrier and half as strong: "можем еще больше размыть очертания это
-// облака" / "раза в два убавить насыщенность". Two things came out of measuring it
-// against the customer's own painted sketch, and only one of them was the obvious one:
-//   * strength is just CHROMATIC.base, halved (0.22 -> 0.11, then re-normalised per size).
-//   * "blur the outline" is NOT the blur radius. What made ver13 read as a disc with an
-//     edge is that 63% of its coloured area sat at full strength — a slab with a rim on
-//     it — where the sketch is 12% core and all the rest fade. So the fix is to spend
-//     nearly all of the profile fading: baseGate.y goes UP (few pixels ever reach full
-//     strength) and .x goes DOWN (the blur's tail is used instead of being clipped off).
-//     Widening the radius alone leaves the ratio where it was. Measured with
-//     scripts/measure_softness.py: core/reach 0.63 -> 0.28, edge 28 px -> 63 px.
-// Opening the gate like that also drops the field's peak, so holding the same visible
-// reach takes about three times ver13's blur radius (0.120 -> 0.365) — which is why the
-// radii below jumped, and why they stop there: at 0.50 the kernel flattens the field and
-// the haze comes out weaker, smaller AND harder-edged all at once.
+// ver13 with two constants changed and nothing else:
+//   CHROMATIC.baseGamma  2.1  -> 4.2    the wash's falloff, doubled
+//   CHROMATIC.amplitude  0.57 -> 0.285  the red mask's opacity, halved
+// Everything below this line is ver13's, unchanged.
 //
-// ver13's structure, unchanged: ver12 built the haze from distance
+// ver12's background wash, unpinned from the cursor. ver12 built the haze from distance
 // to the pointer, which made it round — what was asked for — but also made it a circle
 // that rides along under the cursor while the relief highlight it is supposed to belong
 // to trails behind. The customer drew exactly that: green round the circle, yellow round
@@ -228,22 +217,12 @@ const CHROMATIC = {
   // ver7 removed it; what makes it work here is that it is a heavily blurred read of the
   // reveal itself, so it is a soft ghost of the revealed patch rather than a flood.
   //
-  // Strength was set against the customer's own painted sketch (_shots/customer-sketch.jpg,
+  // Strength is set against the customer's own painted sketch (_shots/customer-sketch.jpg,
   // measured with the thin contour lines median-filtered out so only the haze is left):
   // the sketch peaks at 48 in R-max(G,B), and they asked for "literally 50% of that".
   // A background pixel blends toward rgb(242,55,55), so redness = 187 * base * gate *
-  // dye * amplitude(0.57) — which put the target of 24 at base 0.22 (ver11-ver13).
-  //
-  // ver14: HALVED on seeing it — "раза в два убавить насыщенность". Nothing else about
-  // the wash changes with it; the contour rim and crease are untouched, so what drops is
-  // the haze on the flat wall alone.
-  //
-  // This value is only the fallback: ?bg overrides it per size, because opening the gate
-  // for the blur costs strength and each size has to be put back on the same peak. Judge
-  // it by the peak redness in the ?bg table, never by comparing this number to ver13's
-  // 0.22 — a larger `base` there is a blurrier profile, not a redder one. ?base=<n> sets
-  // it live if the customer wants it up or down from here.
-  base: 0.11,
+  // dye * amplitude(0.57) — which puts the target of 24 at base 0.22.
+  base: 0.22,
   // The band on the BLURRED reveal that the haze occupies. Everything above .y is at full
   // strength, everything below .x is bare — so .x is where the ghost ends and .y is how
   // much of the revealed patch is solid. Wide and low, because after a blur of this radius
@@ -252,9 +231,15 @@ const CHROMATIC = {
   // ver12's falloff, kept: how much of the ghost's edge is spent fading. 1 = the blurred
   // reveal's own profile; above 1 the middle is pushed down so the haze thins out sooner
   // and further, which is the soft-edged look the sketch has.
-  baseGamma: 2.1,
+  // ver14: doubled — "just make falloff of red mask even more". The haze keeps the same
+  // reach; what changes is that more of it is spent fading, so the cloud loses its edge.
+  baseGamma: 4.2,
 
-  amplitude: 0.57,          // site
+  // The red mask's opacity, and the only one there is: applyFluidEffect ends on
+  //   mix(color, effectColor, max(rim/crease, wash) * amplitude)
+  // so this single number carries the rim, the crease and the background wash together.
+  // ver14: halved — "two times less opacity for red mask".
+  amplitude: 0.285,         // site: 0.57
   fluidMagnitude: 0.15,     // site
   colorRange: 2.0,          // site
 
@@ -325,15 +310,10 @@ const FEATHER_SIZE = ['s', 'm', 'l'].includes(PARAMS.get('feather')) ? PARAMS.ge
 // Three sizes of the BACKGROUND WASH — the haze on the flat wall, asked for in three
 // sizes so it can be picked by looking:
 //
-//   ?bg=s   the least blurred — nearest to ver13's, only softer and half as strong
+//   ?bg=s   the ghost hugs the revealed relief closely
 //   ?bg=m   the default
-//   ?bg=l   the most blurred: no boundary to the cloud at all
+//   ?bg=l   a wide, very soft halo around the whole trail
 //   ?bg=0   no wash at all — ver10
-//
-// ver14 turns these from three SIZES into three degrees of BLUR, because that is what
-// the note asked to move ("можем еще больше размыть очертания это облака"). They still
-// differ a little in reach, but the number that separates them is the softness of the
-// edge, and all three carry the same peak redness.
 //
 // The size is now the BLUR RADIUS applied to the reveal, in screen uv. It does two jobs
 // at once, which is why it is the only knob that changes between the three: it sets how
@@ -349,45 +329,10 @@ const FEATHER_SIZE = ['s', 'm', 'l'].includes(PARAMS.get('feather')) ? PARAMS.ge
 // two cancel almost exactly. Measured with one gate for all three, radius 0.120 and 0.190
 // covered 11.19% and 11.18% of frame — the same picture twice. The gate is scaled down
 // with the radius so the wider blurs actually reach further.
-//
-// ver14 ("blur the outline of this cloud even more"). The radii roughly doubled and the
-// gates opened right up, and the reason is worth keeping, because the obvious change —
-// widen the blur — does almost nothing on its own:
-//
-//   what the eye calls an outline is the boundary of the part that sits at FULL strength.
-//
-// ver13 spent 63% of its coloured area there (scripts/measure_softness.py, core/reach),
-// so it read as a disc with an edge no matter how the blur was widened — widening moves
-// the edge outward and leaves it just as abrupt. The customer's own sketch is 12% core.
-// So .y goes up near the top of what the blurred field ever reaches (little of the trail
-// is ever solid) and .x goes down to a hair above zero (the blur's tail is used instead
-// of being clipped), and what is left is nearly all fade:
-//
-// Measured on the shipped build, same frame of the same cursor path for all four
-// (scripts/measure_softness.py, which is peak-relative and so survives the frame-timing
-// jitter that makes raw coverage useless here):
-//
-//              core/reach   edge px   reach (% frame)   peak redness
-//   ver13 m        0.63       28          4.24              23
-//   ver14 s        0.44       46          3.49              13
-//   ver14 m        0.39       53          4.78              11
-//   ver14 l        0.25       75          4.79              10
-//
-// So the three now ladder in HOW BLURRED, which is the axis the note was about, and the
-// peak is half of ver13's across all of them (the ver8 rule: sizes may differ in reach
-// and softness, never in how red they are). Opening the gate that far costs strength —
-// few pixels reach 1 any more — which is why each size carries its own `base` and why
-// those numbers are LARGER than ver13's 0.22 while the render is half as red. Read the
-// peak column, not `base`.
-//
-// The radius stops helping at about 0.37. Measured at 0.50 (gate [0.001, 0.78]): the
-// kernel is wide enough to flatten the field, so the peak collapsed to 6, the reach FELL
-// to 3.70% and the edge came back in to 36 px — wider, weaker and harder at once. m and l
-// therefore share a radius and differ in the gate.
 const BG = {
-  s: { baseRadius: 0.135, baseGate: [0.0120, 0.95], baseGamma: 2.6, base: 0.13 },
-  m: { baseRadius: 0.365, baseGate: [0.0008, 0.62], baseGamma: 1.8, base: 0.16 },
-  l: { baseRadius: 0.365, baseGate: [0.0020, 0.80], baseGamma: 2.0, base: 0.26 },
+  s: { baseRadius: 0.070, baseGate: [0.100, 0.90] },
+  m: { baseRadius: 0.120, baseGate: [0.060, 0.75] },
+  l: { baseRadius: 0.190, baseGate: [0.015, 0.40] },
 };
 const BG_SIZE = ['s', 'm', 'l'].includes(PARAMS.get('bg')) ? PARAMS.get('bg') : 'm';
 const BG_OFF = PARAMS.get('bg') === '0' || PARAMS.get('bg') === 'off';
@@ -430,24 +375,6 @@ if (!SITE_MASK) {
     if (b >= 0 && b <= 1) MASK.base = b;
   }
   if (parseFloat(PARAMS.get('bgr')) >= 0) MASK.baseRadius = parseFloat(PARAMS.get('bgr'));
-  // dev: ?gate=lo,hi and ?bgm=<gamma> — the two knobs that shape the wash's edge, live,
-  // so a set of candidates can be rendered from ONE build instead of one edit per try.
-  if (PARAMS.has('gate')) {
-    const g = PARAMS.get('gate').split(',').map(parseFloat);
-    if (g.length === 2 && g.every((v) => v >= 0)) MASK.baseGate = g;
-  }
-  if (parseFloat(PARAMS.get('bgm')) > 0) MASK.baseGamma = parseFloat(PARAMS.get('bgm'));
-  // ?sheen=<0..1> — the CONTOUR colour's strength (the rim on the tops and the halo
-  // beside the lines), everything the wash is not. ver14 halves the wash because that is
-  // the cloud the note was about; if "half the saturation" meant the whole effect, this
-  // is the same halving applied to the lines, without touching anything else.
-  if (PARAMS.has('sheen')) {
-    const s = parseFloat(PARAMS.get('sheen'));
-    if (s >= 0 && s <= 1) {
-      MASK.fresnelOpacity *= s;
-      MASK.shadowOpacity *= s;
-    }
-  }
 }
 
 // The hue in force: MASK.hue outright if given, else the hue of MASK.color. Only the
@@ -516,12 +443,12 @@ const FLUID_SITE = {
 };
 const FLUID_ACTIVE = SITE_MASK ? { ...FLUID, ...FLUID_SITE } : FLUID;
 
-const ASSETS = '../reference/';
+const ASSETS = './assets/';
 
 const CUSTOM = {
   model: './bakes/model.glb',   // welded copy written by scripts/bake_levels.py — NOT output.gltf
-  bake1: './bakes/bake1.png',
-  bake2: './bakes/bake2.png',
+  bake1: './bakes/bake1.webp',
+  bake2: './bakes/bake2.webp',
   meta: './bakes/meta.json',    // depthMult etc. — written by the bake, no manual sync
   depthMult: 6.25,              // fallback if meta.json is missing
   // How far the flat plate sits above the reveal's scale origin, as a fraction of
@@ -1363,9 +1290,9 @@ const loadTex = (url, wrap) => {
   return t;
 };
 // Original's plaster — the shared plaster.jpg is ver3's 4K marble, a different look
-const tPlaster = loadTex(ASSETS + 'plaster_orig_backup.jpg', true);
-const tMaskNoiseWall = loadTex(ASSETS + 'rgb-attenuation-0,9.png', true);  // fast-scroll noise
-const tFlowNoise = loadTex(ASSETS + 'mask-noise.png', true);               // flowmap stamp noise
+const tPlaster = loadTex(ASSETS + 'plaster_orig_backup.webp', true);
+const tMaskNoiseWall = loadTex(ASSETS + 'rgb-attenuation-0,9.webp', true);  // fast-scroll noise
+const tFlowNoise = loadTex(ASSETS + 'mask-noise.webp', true);               // flowmap stamp noise
 const tFluidBlack = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
 tFluidBlack.needsUpdate = true;   // stand-in when the sheen is switched off
 
@@ -1465,11 +1392,11 @@ const gltfLoader = new GLTFLoader().setDRACOLoader(draco);
 // label the build so a screenshot of it is self-identifying
 if (!SITE_MASK) {
   const sizeName = { s: 'tight', m: 'medium', l: 'wide' }[FEATHER_SIZE];
-  const bgName = MASK.base > 0 ? { s: 'mild', m: 'medium', l: 'full' }[BG_SIZE] : 'off';
-  document.title = 'ver14 — wash blur: ' + bgName
+  const bgName = MASK.base > 0 ? { s: 'small', m: 'medium', l: 'large' }[BG_SIZE] : 'off';
+  document.title = 'ver14 — background wash: ' + bgName
                  + ' (red: ' + COLOR_ZONE + ', feather: ' + sizeName + ')';
   const hint = document.getElementById('hint');
-  if (hint) hint.textContent = 'wash blur: ' + bgName + '  —  ?bg=s / m / l / 0';
+  if (hint) hint.textContent = 'background wash: ' + bgName + '  —  ?bg=s / m / l / 0';
 }
 
 const loadingEl = document.getElementById('loading');
