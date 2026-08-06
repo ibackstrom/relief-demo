@@ -292,6 +292,21 @@ const BG = {
 const BG_SIZE = ['s', 'm', 'l'].includes(PARAMS.get('bg')) ? PARAMS.get('bg') : 'm';
 const BG_OFF = PARAMS.get('bg') === '0' || PARAMS.get('bg') === 'off';
 
+// ---------------------------------------------------------------- ?op
+// Three strengths for the sheen as a whole.
+//
+//   ?op=s   lightest
+//   ?op=m   default
+//   ?op=l   strongest
+//   ?op=<n> any amplitude directly
+//
+// These set CHROMATIC.amplitude, which scales the rim, the crease and the wash together,
+// so the three differ in how much colour there is and in nothing else — no shape, no
+// reach, no softness changes with them. Peak redness in R-max(G,B) runs about
+// 87 * amplitude on this bake, so the steps are ~25% apart and each is a visible one.
+const OPACITY = { s: 0.185, m: CHROMATIC.amplitude, l: 0.285 };
+const OPACITY_SIZE = ['s', 'm', 'l'].includes(PARAMS.get('op')) ? PARAMS.get('op') : 'm';
+
 // ---------------------------------------------------------------- ?mask=site
 // Every tuned mask constant restored to the reference build's value — the baseline to
 // judge the replication against.
@@ -322,6 +337,7 @@ if (!SITE_MASK && PARAMS.has('rim')) {
 }
 // ?base=<0..1> — the wash's strength, live; ?bg=0 turns it off. See CHROMATIC.base.
 // ?bgr=<uv> — the wash's radius, live. See BG above.
+// ?op=s|m|l|<n> — the sheen's overall strength. See OPACITY above.
 if (!SITE_MASK) {
   if (BG_OFF) MASK.base = 0;
   else if (PARAMS.has('base')) {
@@ -329,6 +345,8 @@ if (!SITE_MASK) {
     if (b >= 0 && b <= 1) MASK.base = b;
   }
   if (parseFloat(PARAMS.get('bgr')) >= 0) MASK.baseRadius = parseFloat(PARAMS.get('bgr'));
+  const opDirect = parseFloat(PARAMS.get('op'));
+  MASK.amplitude = opDirect > 0 && opDirect <= 1 ? opDirect : OPACITY[OPACITY_SIZE];
 }
 
 // The hue in force: MASK.hue outright if given, else the hue of MASK.color. Only the
@@ -1331,10 +1349,11 @@ const gltfLoader = new GLTFLoader().setDRACOLoader(draco);
 if (!SITE_MASK) {
   const sizeName = { s: 'tight', m: 'medium', l: 'wide' }[FEATHER_SIZE];
   const bgName = MASK.base > 0 ? { s: 'small', m: 'medium', l: 'large' }[BG_SIZE] : 'off';
-  document.title = 'ver16 — background wash: ' + bgName
-                 + ' (red: ' + COLOR_ZONE + ', feather: ' + sizeName + ')';
+  const opName = { s: 'light', m: 'medium', l: 'strong' }[OPACITY_SIZE];
+  document.title = 'ver16 — opacity: ' + opName + ' (' + MASK.amplitude + ')'
+                 + ' — wash: ' + bgName + ', feather: ' + sizeName;
   const hint = document.getElementById('hint');
-  if (hint) hint.textContent = 'background wash: ' + bgName + '  —  ?bg=s / m / l / 0';
+  if (hint) hint.textContent = 'red mask opacity: ' + opName + '  —  ?op=s / m / l';
 }
 
 const loadingEl = document.getElementById('loading');
