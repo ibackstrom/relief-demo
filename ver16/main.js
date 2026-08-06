@@ -203,7 +203,7 @@ const CHROMATIC = {
   //   mix(color, effectColor, max(rim/crease, wash) * amplitude)
   // so this one number scales the rim, the crease and the wash together. The knob for
   // "more/less colour" as a whole; it changes no shape.
-  amplitude: 0.23,          // site: 0.57
+  amplitude: 0.26,          // site: 0.57
   fluidMagnitude: 0.15,     // site
   colorRange: 2.0,          // site
 
@@ -304,7 +304,7 @@ const BG_OFF = PARAMS.get('bg') === '0' || PARAMS.get('bg') === 'off';
 // so the three differ in how much colour there is and in nothing else — no shape, no
 // reach, no softness changes with them. Peak redness in R-max(G,B) runs about
 // 87 * amplitude on this bake, so the steps are ~25% apart and each is a visible one.
-const OPACITY = { s: 0.185, m: CHROMATIC.amplitude, l: 0.285 };
+const OPACITY = { s: 0.210, m: CHROMATIC.amplitude, l: 0.320 };
 const OPACITY_SIZE = ['s', 'm', 'l'].includes(PARAMS.get('op')) ? PARAMS.get('op') : 'm';
 
 // ---------------------------------------------------------------- ?mask=site
