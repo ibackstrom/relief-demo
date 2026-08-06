@@ -1,54 +1,22 @@
-﻿// immersive-g.com home bas-relief reveal — ver16.
-// ver15 with ONE constant changed: CHROMATIC.amplitude 0.1425 -> 0.23, the red mask's
-// intensity — the customer wanted it between ver15 and ver14, a bit closer to ver14.
-// ver15's soft edge (blur radius, gate, gamma) is untouched.
+﻿// Bas-relief reveal: a plaster wall that extrudes into relief under the cursor and
+// takes an iridescent sheen where it does.
 //
-// ver15 was ver14 with the wash's numbers changed and nothing else — no shader, no structure:
-//   BG.m.baseRadius       0.120 -> 0.240        the blur, doubled: a wider fade band
-//   BG.m.baseGate  [0.06, 0.75] -> [0.004, 0.95]  nothing saturates, nothing is clipped
-//   CHROMATIC.baseGamma     4.2 -> 2.1          the gate does the fading now
-//   CHROMATIC.amplitude   0.285 -> 0.1425       the red mask's opacity, halved again
-// Measured at the same frame: the 80%->20% fade band goes 17 px -> 55 px (so the edge
-// stops being a boundary) and peak redness 24 -> 12.
+// Pipeline, per frame:
+//   1. Flowmap      a persistent screen-space buffer. The cursor stamps into it and it
+//                   decays; its value at a point is that point's extrusion (0..1).
+//   2. FluidSim     a Navier-Stokes solver whose dye trail follows the same cursor. The
+//                   sheen only appears where dye is present, so the dye is its extent.
+//   3. Wall shader  displaces z by the flowmap, shades from pre-baked levels, and mixes
+//                   in colour where the mask opens.
 //
-// ver14 was ver13 with baseGamma 2.1 -> 4.2 and amplitude 0.57 -> 0.285. Gamma turned out
-// to be the wrong knob for the outline: it darkens the middle of the haze but the visible
-// edge is where the gate CLIPS, so at 8.4 the outline measured just as sharp (13 px).
-// Everything below this line is ver13's, unchanged.
+// The mask has three terms, in CHROMATIC:
+//   fresnelOpacity  a hairline on surfaces turned edge-on — the contour itself
+//   shadowRange     colour in what the relief throws into shade — beside the contour
+//   base            a soft wash on the flat wall between contours
 //
-// ver12's background wash, unpinned from the cursor. ver12 built the haze from distance
-// to the pointer, which made it round — what was asked for — but also made it a circle
-// that rides along under the cursor while the relief highlight it is supposed to belong
-// to trails behind. The customer drew exactly that: green round the circle, yellow round
-// the trail it fails to follow (_shots/customer-comment1.jpg).
-//
-// ver13 drives it off the REVEAL instead, heavily blurred. The relief's own highlight is
-// a function of extrude, so a wash read from the same field is in unison with it by
-// construction — same trail, same dissipation, same swelling under the cursor — with
-// nothing to keep in sync and no cursor position involved at all. The blur is what keeps
-// it a glow rather than a second red copy of the relief, and is the "more blurring, more
-// ghosting" of the note. Strength is untouched, still half the customer's sketch.
-// Three sizes, as before — see ?bg.
-//   REVEAL_ZONE  the grey patch — the relief that comes out of the wall. 1, full size.
-//   COLOR_ZONE   the red inside it, as a fraction of the reveal. 0.35.
-//   base/?bg     the haze on the wall inside that red.
-// ver9's other change is kept: no "active / neon glow on the very tops of the relief"
-// — the fresnel rim, which ver7 and ver8 inherited from the site at opacity 0.98, sits
-// at CHROMATIC.fresnelOpacity 0.40, so the contour is drawn but does not glow.
-// Every shader and constant below is ported verbatim from the production bundle
-// (see ../REPLICATION-SPEC.md and ../reference/shaders_extracted.txt).
-//
-// ver7 = ver6's engine with the mask restarted from the site's own, because that is
-// the variant the customer picked as closest. Where ver6 tuned its way to a red that
-// covered a lot of the trail, ver7 keeps the original's restraint and changes only
-// what was asked for: no secondary shades, gradation kept, colour reaching a little
-// past the contour. Three changes, all marked OURS in CHROMATIC below:
-//   1. hue pinned to red — the site's rotation runs the whole wheel and produces the
-//      cyan and magenta the customer wants gone;
-//   2. S and V still read off the normal, but remapped into a band, so the gradation
-//      survives without the grey and near-black the raw values give here;
-//   3. a narrow, low-opacity crease term for the colour just beyond the line.
-// Undo all three and this is a verbatim port; each is one line in CHROMATIC.
+// Shaders and the constants marked "site" are ported from the reference build; see
+// ../REPLICATION-SPEC.md and ../reference/shaders_extracted.txt. ?mask=site restores
+// the reference values for every mask constant, for comparison.
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -56,45 +24,37 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 const PARAMS = new URLSearchParams(location.search);
 
-// ---------------------------------------------------------------- the two radii
-// There are two circles under the cursor and ver10 sizes them separately.
+// ---------------------------------------------------------------- brush radii
+// Two concentric discs follow the cursor and are sized independently.
 //
-//   REVEAL_ZONE  the GREY one: how much relief the cursor pulls out of the wall. This
-//                is the reveal brush, CONFIG.flowmap.falloff, a uv radius. 1 = ver8's.
-//                  ?zone=0.5  ver9's halved patch
-//   COLOR_ZONE   the RED one, as a fraction of the grey: how much of the revealed
-//                relief takes colour. This is the dye splat the fluid paints, and the
-//                mask only opens where that dye is dense, so the dye IS the red's reach.
-//                  ?red=1     ver9's behaviour — red out to the edge of the reveal
-//                  ?red=0.35  a tighter red core
+//   REVEAL_ZONE  the extrusion brush: how much relief is pulled out of the wall.
+//                Scales CONFIG.flowmap.falloff, a uv radius. 1 = full size.
+//                  ?zone=<n>  scale factor, ?zone=full for 1
+//   COLOR_ZONE   the colour disc, as a FRACTION of the extrusion brush. Scales the dye
+//                splat; the mask only opens where dye is dense, so the dye sets how far
+//                the colour reaches. Below 1 the stroke keeps a bare relief rim around
+//                a smaller coloured core.
+//                  ?red=1     colour out to the edge of the reveal
+//                  ?red=0.35  a tighter core (default)
 //
-// Until ver10 these were one number: FLUID.splatRadius was sized to the reveal brush
-// (0.38 -> ~0.19 uv) precisely so the two discs would coincide, because when the red
-// disc came out SMALLER than the grey one every stroke kept a permanent grey rim that
-// no tuning of the mask could fix. ver10 asks for that rim on purpose — grey relief
-// around a smaller red core — so the sizing is now deliberate rather than matched.
-//
-// ?mask=site keeps the site's own brush and its own dye unless asked otherwise: that
-// switch exists to show the untouched original, and both radii here are ours.
+// ?mask=site leaves both at the reference build's own sizing.
 const REVEAL_ZONE = PARAMS.get('zone') === 'full' ? 1
                   : parseFloat(PARAMS.get('zone')) > 0 ? parseFloat(PARAMS.get('zone'))
                   : 1;
 const COLOR_ZONE = parseFloat(PARAMS.get('red')) > 0 ? parseFloat(PARAMS.get('red'))
                  : PARAMS.get('mask') === 'site' ? 1
-                 : 0.35;   // ver11's base: ver10/?red=0.35, the one the customer kept
-// what the dye's radius ends up being, against ver8's — the red is a fraction of the grey
+                 : 0.35;
+// the dye's radius as an absolute fraction of the screen
 const DYE_ZONE = REVEAL_ZONE * COLOR_ZONE;
 
-// Shrinking either brush also makes what it paints WEAKER, which is not what is being
-// asked for and is easy to miss: both the flow-map and the dye accumulate frame by
-// frame, so what a point ends up with is (strength x how many frames it spent under the
-// brush). Halve a radius at the same cursor speed and every point spends half as long
-// under it — the relief comes out half as deep, and the dye half as dense.
-// Measured in ver9: halving the reveal with no compensation took the coloured area from
-// 1.37% of frame to 0.09%, a 15x drop where the area alone accounts for 4x, because the
-// colour needs extrude past ~0.4 before the deep bake levels mix in at all.
-// So each deposit rate is scaled by 1/its own radius: the patches change SIZE and
-// nothing else. ?ga=<n> and ?dg=<n> override them.
+// Deposit rates, compensating for radius.
+//
+// The flowmap and the dye both ACCUMULATE frame by frame, so what a point ends up with
+// is deposit rate x how many frames it spent under the brush. Halving a radius at a
+// given cursor speed therefore halves the dwell as well as the area: the relief comes
+// out shallower and the dye thinner, when only the size was meant to change. Scaling
+// each rate by 1/radius cancels the dwell term.
+// ?ga=<n> and ?dg=<n> override.
 const ZONE_GAIN = parseFloat(PARAMS.get('ga')) > 0 ? parseFloat(PARAMS.get('ga'))
                                                    : 1 / REVEAL_ZONE;
 const DYE_GAIN  = parseFloat(PARAMS.get('dg')) > 0 ? parseFloat(PARAMS.get('dg'))
@@ -111,14 +71,14 @@ const ROW_SPACING = 9.995;          // Ei
 const FOV_FIT = 1.33;               // $o  → worldHeight = 1.33 * (Ei - .1) / aspect
 const BRIGHTNESS_FACTOR = 0.6;      // desktop (mobile: .5)
 const BRIGHTNESS_OFFSET = 0.4;      // desktop (mobile: .6)
-const BRIGHTNESS = 1.1;             // whole-scene multiply, 1 = Original. No tone mapping:
+const BRIGHTNESS = 1.1;             // whole-scene multiply, 1 = unmodified. No tone mapping:
                                     //   the flat wall sits at ~0.77, so >1.25 clips to white
 const SCROLL_WHEEL_MULT = 0.00045;  // wheel px → rows (feel-tuned, site uses its own smooth-scroll rig)
 const SCROLL_SMOOTH = 0.035;
 
 // ---------------------------------------------------------------- zoom
 // Scroll drives a spring-damped camera zoom instead of travelling the wall.
-const SCROLL_TRAVELS = false;     // true = Original's infinite vertical travel instead
+const SCROLL_TRAVELS = false;     // true = infinite vertical travel instead of zoom
 const BRUSH_TRACKS_ZOOM = true;   // brush radius scales with zoom, so the revealed
                                   //   patch stays a constant size on the wall.
                                   //   false = the site's own screen-space behaviour
@@ -131,14 +91,13 @@ const ZOOM = {
 // ---------------------------------------------------------------- ambient pass
 // Idle motion: a second cursor wanders the wall on its own, stamping the flow-map's
 // second channel (mouse2 → .a). ?amb runs passes back to back with a title counter.
-// Values below are the tamed set; the site's own are 3 / 2 / 12 at blend 1, pause [1,3].
+// Reference-build values are noted per field; the set below is slower and smoother.
 const AMBIENT = {
   enabled: true,
   pause: [6, 14],             // seconds of stillness between passes (site: [1, 3])
   requireIdle: 1.5,           // seconds the POINTER must be still before a pass may start.
-                              //   Without this the countdown runs while the cursor is
-                              //   working and the wandering mask crosses live dye, which
-                              //   is what put red on it. See updateAmbient.
+                              //   Without it a pass can cross live dye while the cursor
+                              //   is painting and pick up colour. See updateAmbient.
   segments: [1, 3],           // site: floor(random*3)+1
   durMid: [0.8, 1.0],         // site: lerp(.8,1) for a segment followed by more
   durLast: [0.7, 0.8],        // site: lerp(.7,.8) for the closing segment
@@ -154,202 +113,177 @@ const FORCE_AMBIENT = new URLSearchParams(location.search).has('amb');
 // ---------------------------------------------------------------- A/B switches
 // Both default to the shipped build; add the query string to compare.
 //
-//   ?model=site   immersive-g's own relief GLB, with the bakes that ride inside its
-//                 materials, instead of the customer's model and our bakes
-//   ?mask=site    the sheen exactly as the site has it, instead of our tuned red
+//   ?model=site   the reference relief GLB, with the bakes that ride inside its
+//                 materials, in place of this model and its bakes
+//   ?mask=site    the sheen at reference values, in place of the tuned red
 //
-// The two are independent on purpose: the mask is identical across both models, so
-// ?model=site alone answers "is our replication 1:1?" without the colour changing
-// under you, and ?model=site&mask=site is the genuine article, end to end.
+// They are independent so either half can be isolated: the mask is identical across
+// both models, so ?model=site alone isolates the geometry, and ?model=site&mask=site
+// is the reference build end to end.
 const USE_CUSTOM = PARAMS.get('model') !== 'site';
 const SITE_MASK = PARAMS.get('mask') === 'site';
 // ---------------------------------------------------------------- chromatic sheen
-// The original's iridescent layer. Two halves:
+// The iridescent layer. Two halves:
 //
-//   1. A real GPU fluid simulation (FLUID below) paints a dye trail behind the
-//      cursor — advected, curling, dying away. Not a stamped blob.
+//   1. A GPU fluid simulation (FLUID below) paints a dye trail behind the cursor —
+//      advected, curling, dying away. Not a stamped blob.
 //   2. Where that dye is dense AND the mask opens, the wall takes a colour GENERATED
-//      FROM ITS OWN NORMAL: normal -> rgb -> hsv, hue rotated, back to rgb. Nothing is
-//      painted with a flat colour — the shimmer IS the relief's normal read as colour.
+//      FROM ITS OWN NORMAL: normal -> rgb -> hsv, hue rotated, back to rgb. No flat
+//      colour is ever painted; the shimmer is the relief's normal read as colour.
 //
-// The mask has two terms and they do very different jobs:
+// The mask's three terms do different jobs:
 //
 //   * the FRESNEL RIM — a hairline exactly on surfaces turned edge-on to the camera.
 //     This is the thin bright contour.
-//   * the CREASE term — colour in whatever the relief has thrown into shade. This is
-//     the colour BESIDE the lines, and it is what carries the original's look: the
-//     site's gold lives in its hollows, not on its rims.
+//   * the CREASE term — colour in whatever the relief has thrown into shade: the
+//     colour BESIDE the lines, which is what carries most of the effect.
+//   * the BACKGROUND WASH — a floor over the revealed patch, the only term that can
+//     put colour on flat wall.
 //
-// ver7 starts from the site's own mask, not from ver6's red, because that is the one
-// the customer picked as closest. Three changes on top, all marked OURS, and nothing
-// else touched — the delicacy of the original is the thing being preserved:
-//
-//   1. the hue is PINNED to red, so no secondary shades
-//   2. S and V still come from the normal, but remapped into a band, so the red keeps
-//      its gradation without ever reaching grey or black
-//   3. a narrow, low-opacity crease term puts colour just beyond the contour
+// Constants marked "site" are the reference build's. The three departures from it,
+// each one line: the hue is pinned (hueRange 0), S and V are remapped into bands with
+// floors (satRange/valRange), and the crease band is re-ranged for this bake's depth.
 const CHROMATIC = {
   enabled: true,
   fresnelSharpness: 35,     // site. The rim exponent: the mask only opens where the
                             //   surface is within a fraction of a degree of edge-on,
                             //   which is what keeps the contour a hairline.
-  // OURS (ver9). "Remove the active / neon glow on the very tops of the relief." That
-  // glow is this term. The rim opens to ~0.98 where the crease band opens to 0.30, so
-  // the hairline on the ridge edge came out over three times the strength of the halo
-  // around it: a saturated red at value 0.95 against a near-white wall, which is what
-  // reads as neon. It also flickers, because the normal it is built from is a
-  // screen-space derivative computed per 2x2 pixel quad.
-  //   0.98 -> the site's, ver7/ver8's: a bright glowing line          (?rim=0.98)
-  //   0.40 -> the contour is still drawn, at the halo's own weight    <- here
-  //   0.00 -> no rim at all; only the crease halo remains
-  // ?rim=<0..1> overrides it live, so this can be settled by looking.
+  // Rim strength. Held near the crease term's own weight (shadowOpacity): at the
+  // reference 0.98 the hairline is three times the halo around it, which on a near-white
+  // wall reads as a neon edge, and it flickers — the normal behind it is a screen-space
+  // derivative, computed per 2x2 pixel quad.
+  //   0.98  reference: a bright glowing line
+  //   0.40  the contour is drawn at the halo's weight        <- here
+  //   0.00  no rim; the crease halo alone
+  // ?rim=<0..1> overrides.
   fresnelOpacity: 0.40,
 
-  // OURS (1 of 3). "Slightly beyond the contours." The site's [0.2, 0.42] is inert on
-  // this bake — the shading spans 0.208-0.576 against a 0.545 flat wall, so nothing
-  // reaches 0.2 and only 4% of the plate is even below 0.42. This is a NARROW band
-  // just under the flat value at LOW opacity: a thin halo hugging the line, not the
-  // heavy flood ver6 used ([0.44, 0.538] at 0.72), which is what made ver6 read as
-  // thick red strokes rather than as the site's restrained sheen.
-  //   .y 0.500 -> the darkest 9% of the plate: barely past the line
-  //   .y 0.535 -> 12%: a clear halo                              <- here
-  //   .y 0.542 -> 13%: the whole shaded band. Keep .y under 0.545
-  //                    or flat wall starts taking colour.
+  // The band of bake shading values that takes crease colour, and the depth control for
+  // "colour just beyond the contour".
+  //
+  // Re-ranged for this bake: its shading spans 0.208-0.576 against a flat wall at 0.545,
+  // so the reference band [0.2, 0.42] is nearly inert here — nothing reaches 0.2 and only
+  // 4% of the plate falls below 0.42. A narrow band just under the flat value gives a
+  // halo hugging the line; widening it floods the stroke instead.
+  //   .y 0.500  the darkest 9% of the plate: barely past the line
+  //   .y 0.535  12%: a clear halo                              <- here
+  //   .y 0.542  13%: the whole shaded band
+  // Keep .y under 0.545 or flat wall starts taking colour.
   shadowRange: [0.46, 0.535],
-  shadowOpacity: 0.30,      // site is 0.25, against creases far deeper than this
-                            //   relief's. Raise for more colour beside the line.
+  shadowOpacity: 0.30,      // reference 0.25, against creases deeper than this relief's.
+                            //   Raise for more colour beside the line.
 
-  // OURS (ver11). The BACKGROUND WASH — "the red under the cursor should touch not just
-  // the contours but slightly the backdrop too". The rim and crease terms only ever open
-  // on the relief's own lines and shadows, so the wall between them stays bare no matter
-  // how they are tuned; this is a floor under the whole revealed patch, which is the only
-  // way the flat wall takes any colour at all.
+  // BACKGROUND WASH strength — colour on the flat wall between the contours.
   //
-  // The site has no such term. ver6 had one and the trail read as a solid pink disc, so
-  // ver7 removed it; what makes it work here is that it is a heavily blurred read of the
-  // reveal itself, so it is a soft ghost of the revealed patch rather than a flood.
+  // Rim and crease only ever open on the relief's own lines and shadows, so the wall
+  // between them stays bare however they are tuned. This is a floor over the whole
+  // revealed patch and the only term that can colour it. Not present in the reference
+  // build. It is read from a heavily blurred copy of the reveal (see baseGate,
+  // BG.baseRadius), which keeps it a soft ghost of the revealed patch rather than a
+  // flood — an unblurred version reads as a solid disc.
   //
-  // Strength is set against the customer's own painted sketch (_shots/customer-sketch.jpg,
-  // measured with the thin contour lines median-filtered out so only the haze is left):
-  // the sketch peaks at 48 in R-max(G,B), and they asked for "literally 50% of that".
-  // A background pixel blends toward rgb(242,55,55), so redness = 187 * base * gate *
-  // dye * amplitude(0.57) — which puts the target of 24 at base 0.22.
+  // A wall pixel blends toward rgb(242,55,55), so peak redness in R-max(G,B) is
+  // 187 * base * gate * dye * amplitude.
   base: 0.22,
-  // The band on the BLURRED reveal that the haze occupies. Everything above .y is at full
-  // strength, everything below .x is bare — so .x is where the ghost ends and .y is how
-  // much of the revealed patch is solid. Wide and low, because after a blur of this radius
-  // the trail's own peak is well under 1 and only its middle stays high.
-  // ver15: .y up past what the blurred reveal ever reaches and .x down onto its tail, so
-  // no part of the haze is at full strength and none of it is clipped — that flat middle
-  // ending at a clip is what made the cloud read as a disc with an outline.
+  // The band of the BLURRED reveal that the haze occupies: above .y is full strength,
+  // below .x is bare. Overridden per size by BG — set it there, not here.
+  //
+  // This is the control for how visible the haze's outline is. What the eye reads as an
+  // edge is the boundary of the saturated part, so .y is held above anything the blurred
+  // field actually reaches and .x on its tail: nothing saturates, nothing is clipped, and
+  // the whole profile is spent fading. A narrower band gives a flat middle ending at a
+  // clip, which reads as a disc with a rim however wide the blur is.
   baseGate: [0.004, 0.95],
-  // ver12's falloff, kept: how much of the ghost's edge is spent fading. 1 = the blurred
-  // reveal's own profile; above 1 the middle is pushed down so the haze thins out sooner
-  // and further, which is the soft-edged look the sketch has.
-  // ver14: doubled — "just make falloff of red mask even more".
-  // ver15: back to 2.1. With the gate above doing the fading, more gamma only darkens the
-  // middle; measured, gamma alone left the outline exactly as obvious (edge 13 px).
+  // Falloff exponent on the gated value. 1 = the blurred reveal's own profile; above 1
+  // the middle is pushed down, so the haze thins sooner and reaches further. This
+  // darkens the interior rather than softening the edge — the gate above does that.
   baseGamma: 2.1,
 
-  // The red mask's opacity, and the only one there is: applyFluidEffect ends on
+  // The sheen's overall opacity, and the only one: applyFluidEffect ends on
   //   mix(color, effectColor, max(rim/crease, wash) * amplitude)
-  // so this single number carries the rim, the crease and the background wash together.
-  // ver14: halved — "two times less opacity for red mask".
-  // ver15: halved again — "по насыщенности еще на 50% бы упал".
-  // ver16: between ver15 (0.1425) and ver14 (0.285), a bit closer to ver14 — 60% of the
-  // way back up. Only the intensity moves; ver15's soft edge is untouched.
+  // so this one number scales the rim, the crease and the wash together. The knob for
+  // "more/less colour" as a whole; it changes no shape.
   amplitude: 0.23,          // site: 0.57
   fluidMagnitude: 0.15,     // site
   colorRange: 2.0,          // site
 
-  // OURS (2 of 3). The site rotates the normal's hue and leaves it there, so the
-  // colour runs the whole wheel as the surface turns: gold facing the camera, cyan and
-  // magenta on the walls. Those are the "secondary shades". hueRange 0 pins the hue
-  // outright — every pixel is the same red, and the variation comes from S and V below.
+  // Hue, and how far it is allowed to swing with the surface normal. The reference
+  // rotates the normal's hue and leaves it there, so the colour runs the whole wheel as
+  // the surface turns — gold toward the camera, cyan and magenta on the walls. 0 pins it.
   color: 0x650003,          // only its HUE is used
-  hueRange: 0,              // 0 = one hue, no secondary shades. 1 = the site's full
-                            //   wheel. 0.05 is a hair of drift if it reads too flat.
+  hueRange: 0,              // 0 = a single hue. 1 = the full wheel (reference).
+                            //   0.05 adds a hair of drift if it reads too flat.
 
-  // OURS (3 of 3). The gradation. S and V still come from the normal exactly as the
-  // site takes them — this is what makes the red shift with the surface instead of
-  // lying flat — but each is remapped into a band with a floor. Unmapped, the site's
-  // S reaches 0 (grey) and its V reaches 0.5 (near black against this wall), and the
-  // normal is a screen-space derivative, so it is noisy per 2x2 pixel quad and those
-  // extremes flicker. [0, 1] on both is the site verbatim.
-  //   S from the normal spans 0..1; V spans 0.5..1, so valRange uses its upper half.
+  // Saturation and value bands. S and V still come from the normal — that is what makes
+  // the colour shift with the surface instead of lying flat — but each is remapped into
+  // a band with a floor. Unmapped, S reaches 0 (grey) and V reaches 0.5 (near black
+  // against this wall), and since the normal is a per-2x2-quad screen-space derivative,
+  // those extremes flicker as the relief moves. [0, 1] on both is the reference.
+  //   S off the normal spans 0..1; V spans 0.5..1, so valRange uses its upper half.
   satRange: [0.55, 1.0],
   valRange: [0.50, 0.95],
 
-  // OURS. How far past the edge of the shadow the colour reaches, as a mip bias on the
-  // bake: each +1 roughly doubles the blur, so the shaded region grows outward along
-  // its own contour and the spill keeps the shape of the form. Kept small here — the
-  // crease band is already narrow and this is meant to soften its outer edge, not to
-  // push the colour out on its own.
+  // How far past the edge of the shadow the crease colour spills, as a mip bias on the
+  // bake — each +1 roughly doubles the blur, so the shaded region grows outward along its
+  // own contour and the spill keeps the shape of the form. Small on purpose: this softens
+  // the crease band's outer edge rather than carrying colour outward on its own.
   spread: 1.2,
 };
 
 // ---------------------------------------------------------------- ?feather
-// Three sizes of the soft edge that carries the colour beyond the contour, so the
-// size can be chosen by looking rather than by argument:
+// Three widths for the crease colour beyond the contour:
 //
-//   ?feather=s   tight  — colour barely leaves the line
-//   ?feather=m   medium — ver7's, the default
-//   ?feather=l   wide   — the halo reads as a soft glow around the form
+//   ?feather=s   tight — colour barely leaves the line
+//   ?feather=m   medium
+//   ?feather=l   wide — the halo reads as a soft glow around the form (default)
 //
-// ONLY the feather differs between them. shadowOpacity, the hue, the S/V band and the
-// fluid are identical in all three, so what changes is width and softness and nothing
-// else. Two knobs make up a size:
-//   shadowRange.y  how far out the colour reaches, in bake shading values. The flat
-//                  wall sits at 0.545, so .y is always just under it; the closer, the
-//                  wider the reach. Past 0.545 bare wall starts taking colour.
+// ONLY the feather differs. shadowOpacity, the hue, the S/V bands and the fluid are
+// identical across the three, so a size changes width and softness and nothing else.
+// Two constants make one up:
+//   shadowRange.y  how far out the colour reaches, in bake shading values. Flat wall is
+//                  0.545, so .y sits just under it; the closer, the wider the reach.
 //   spread         mip bias on the bake: how blurred the outer edge of that reach is.
-// Measured on this bake straight from the shading, with no fluid involved, so these
-// are the sizes themselves and not a lucky frame. "Beyond the line" is how much of the
-// plate takes colour that the same band with no spread would not reach:
+//
+// Measured off the bake with no fluid involved, so these are the sizes themselves and
+// not one frame's luck. "Beyond the line" is the extra plate area the same band reaches
+// with the spread applied:
 //
 //        area with any colour    beyond the line    mean mask strength
 //   s          10.6%                  +0.4%               0.098
 //   m          13.5%                  +2.2%               0.098
 //   l          25.1%                 +12.9%               0.099
 //
-// Mean strength is flat across all three by design: between sizes the colour does not
-// get stronger or weaker, it only reaches further out and fades more gradually. The
-// first pass at these was too closely spaced (+0.6 / +2.2 / +8.6) and the three were
-// hard to tell apart on screen, because what you mostly see is the sharp fresnel rim.
+// Mean strength is flat by design. Space sizes by RADIUS, not by area — a set spaced
+// 1.4x/2x in area is a third of that in radius and the three read as identical.
 const FEATHER = {
   s: { shadowRange: [0.500, 0.5150], spread: 0.3 },
   m: { shadowRange: [0.460, 0.5350], spread: 1.2 },
   l: { shadowRange: [0.420, 0.5440], spread: 3.0 },
 };
-// ver9 ships the WIDE one as the default — that is the size the customer chose
-// (ver8/?feather=l). s and m are still reachable for comparison.
 const FEATHER_SIZE = ['s', 'm', 'l'].includes(PARAMS.get('feather')) ? PARAMS.get('feather') : 'l';
 
 // ---------------------------------------------------------------- ?bg
-// Three sizes of the BACKGROUND WASH — the haze on the flat wall, asked for in three
-// sizes so it can be picked by looking:
+// Three sizes of the BACKGROUND WASH — the haze on the flat wall.
 //
-//   ?bg=s   the ghost hugs the revealed relief closely
-//   ?bg=m   the default
+//   ?bg=s   hugs the revealed relief closely
+//   ?bg=m   default
 //   ?bg=l   a wide, very soft halo around the whole trail
-//   ?bg=0   no wash at all — ver10
+//   ?bg=0   no wash
 //
-// The size is now the BLUR RADIUS applied to the reveal, in screen uv. It does two jobs
-// at once, which is why it is the only knob that changes between the three: it sets how
-// far past the relief the haze carries, and it sets how completely the relief's own
-// strokes are smeared out of it. Small radii start to show the shape of the relief in the
-// haze — the wash stops reading as a glow and starts reading as a second, redder copy of
-// the wall. ?bgr=<uv> sets it directly.
+// The size is the BLUR RADIUS applied to the reveal, in screen uv, and it does two jobs:
+// it sets how far past the relief the haze carries, and how completely the relief's own
+// strokes are smeared out of it. Too small and the relief's shape shows through — the
+// wash stops reading as a glow and starts reading as a second, redder copy of the wall.
+// ?bgr=<uv> sets it directly.
 //
-// Spaced 1 : 1.7 : 2.7 in radius. Sets spaced by area instead — ver11's, and ver8's first
-// feathers — come out looking identical.
-// Each size carries its own gate, and it has to: a blur normalises, so a wider kernel
-// spreads the trail further AND makes it weaker everywhere, and against a fixed gate the
-// two cancel almost exactly. Measured with one gate for all three, radius 0.120 and 0.190
-// covered 11.19% and 11.18% of frame — the same picture twice. The gate is scaled down
-// with the radius so the wider blurs actually reach further.
-// ver15: radii doubled and every gate opened as CHROMATIC.baseGate describes — this table
-// overrides that one, so the sizes are where the change actually has to be made.
+// Each size carries its own gate and has to. A blur normalises, so a wider kernel spreads
+// the trail further AND weakens it everywhere; against one fixed gate the two effects
+// cancel and two radii an octave apart render the same picture. The gate opens as the
+// radius grows. These override CHROMATIC.baseGate and baseRadius, so wash-shape changes
+// belong in this table.
+//
+// The radius stops helping past ~0.4: the kernel flattens the field, and the haze comes
+// out weaker, smaller and harder-edged at once.
 const BG = {
   s: { baseRadius: 0.140, baseGate: [0.008, 0.95] },
   m: { baseRadius: 0.240, baseGate: [0.004, 0.95] },
@@ -359,22 +293,21 @@ const BG_SIZE = ['s', 'm', 'l'].includes(PARAMS.get('bg')) ? PARAMS.get('bg') : 
 const BG_OFF = PARAMS.get('bg') === '0' || PARAMS.get('bg') === 'off';
 
 // ---------------------------------------------------------------- ?mask=site
-// Every OURS above, undone. This is the sheen exactly as immersive-g has it, with no
-// value of ours left anywhere in it — the reference to judge the replication against.
+// Every tuned mask constant restored to the reference build's value — the baseline to
+// judge the replication against.
 //
-// hueRange 1.0 with this hue reproduces the site's single rotation exactly: our
-// formula is fract(hue + (h - 0.6667)) which, at hue = fract(0.6667 + hueShift),
-// collapses to the site's own fract(h + hueShift) with hueShift = -0.52.
+// hueRange 1.0 at this hue reproduces the reference's single rotation exactly: the
+// formula here is fract(hue + (h - 0.6667)) which, at hue = fract(0.6667 + hueShift),
+// collapses to fract(h + hueShift) with hueShift = -0.52.
 const CHROMATIC_SITE = {
   shadowRange: [0.2, 0.42],
   shadowOpacity: 0.25,
-  base: 0,                  // no floor: rim and crease only, as the site has it
+  base: 0,                  // no floor: rim and crease only
   spread: 0,                // colour stops where the shadow does
   hueRange: 1.0,            // the full wheel — gold facing the camera, cyan and
                             //   magenta on the walls
-  hue: 0.1467,              // = fract(0.6667 + hueShift), hueShift being the site's
-                            //   -0.52. Given as a number, not a hex: eyeballing a hex
-                            //   for a hue is how this preset first came out cyan.
+  hue: 0.1467,              // = fract(0.6667 + hueShift), hueShift -0.52. Given as a
+                            //   number: a hex picked by eye lands on the wrong hue.
   satRange: [0, 1],         // identity: S and V straight off the normal again,
   valRange: [0, 1],         //   speckle and all
 };
@@ -408,15 +341,15 @@ const chromaHue = () => {
 };
 
 // ---------------------------------------------------------------- fluid simulation
-// The classic WebGL-Fluid-Simulation the site runs: advect -> curl -> vorticity ->
-// divergence -> pressure Jacobi -> gradient subtract. The shaders are verbatim from
-// the reference dump (shaders 0-9). The rates are the library's defaults — the dump
-// carries the GLSL but not the JS that drives it.
-// These are tuned to keep the dye ON the reveal rather than running off it. The
-// library's own defaults (splatForce 6000, curl 30, radius 0.0025) are built for a
-// full-screen fluid toy where the point IS the racing motion. Here the dye is only a
-// mask for the colour, and if it outruns the reveal you get exactly what it gave us
-// before: a small red patch shooting ahead of a large patch of bare grey relief.
+// The standard WebGL-Fluid-Simulation pipeline: advect -> curl -> vorticity ->
+// divergence -> pressure Jacobi -> gradient subtract. Shaders are verbatim from the
+// reference dump (shaders 0-9); the rates below are not, since the dump carries the
+// GLSL but not the JS driving it (FLUID_SITE holds the library's published defaults).
+//
+// Tuned to keep the dye ON the reveal instead of running off it. The library's defaults
+// suit a full-screen fluid toy, where the racing motion is the point. Here the dye only
+// masks the colour, so if it outruns the reveal the result is a small coloured patch
+// shooting ahead of a large patch of bare relief.
 const FLUID = {
   simRes: 128,              // velocity/pressure grid
   dyeRes: 512,              // dye grid — this is what the wall samples
@@ -431,29 +364,28 @@ const FLUID = {
                             //   whips the trail into fast curls; this is a slow eddy.
   splatRadius: 0.020 * DYE_ZONE * DYE_ZONE,
                             // dye blob size, in the sim's SQUARED-distance units, and
-                            //   the thing that decides how wide the RED is. 0.020 is
-                            //   the reveal brush's own size (falloff 0.38 -> ~0.19 uv);
-                            //   DYE_ZONE 0.5 is the customer's "red half as wide".
-                            //   Squared units are why DYE_ZONE enters twice: a
-                            //   half-width patch is a quarter of this number.
+                            //   what decides how wide the colour is. 0.020 matches the
+                            //   reveal brush (falloff 0.38 -> ~0.19 uv). Squared units
+                            //   are why DYE_ZONE enters twice: a half-width patch is a
+                            //   quarter of this number.
   splatForce: 800,          // cursor speed -> velocity injected. Library default 6000.
   dyeAmount: 3.2 * DYE_GAIN,
                             // dye per splat, against fluidMagnitude's 0.15 ramp, which
-                            //   saturates at density 6.7 — so the core reddens in two
-                            //   frames while the skirt of the splat takes many. That
-                            //   gap IS the soft edge of the haze: raise this and the
-                            //   whole splat saturates at once and the trail gets a
-                            //   hard pink border. Library default is 1.5.
+                            //   saturates at density 6.7 — so the core reaches full
+                            //   colour in about two frames while the skirt of the splat
+                            //   takes many. That gap IS the soft edge of the trail:
+                            //   raise this and the whole splat saturates at once, giving
+                            //   it a hard border. Library default 1.5.
 };
 
 // ---------------------------------------------------------------- ?mask=site
-// The fluid untuned, back to WebGL-Fluid-Simulation's own defaults. This belongs to
-// the mask switch, not the model switch: the dye field is half of what the effect is,
-// so a "verbatim mask" running our tamed fluid would not be verbatim at all.
+// The fluid untuned, at WebGL-Fluid-Simulation's published defaults. Bound to the mask
+// switch rather than the model switch: the dye field is half of the effect, so a
+// reference mask running the tamed fluid would not be a reference at all.
 //
-// Honest about provenance: the reference dump carries the site's fluid SHADERS
-// verbatim but not the JS that drives them, so these are the library's published
-// defaults, which the site is built on — not numbers read off immersive-g itself.
+// Provenance: the reference dump carries the fluid SHADERS verbatim but not the JS that
+// drives them, so these are the library's defaults the build sits on, not values read
+// off the original.
 const FLUID_SITE = {
   densityDissipation: 0.985,
   velocityDissipation: 0.99,
@@ -472,10 +404,10 @@ const CUSTOM = {
   bake2: './bakes/bake2.webp',
   meta: './bakes/meta.json',    // depthMult etc. — written by the bake, no manual sync
   depthMult: 6.25,              // fallback if meta.json is missing
-  // How far the flat plate sits above the reveal's scale origin, as a fraction of
-  // relief depth — the reveal scales z about 0, so a plate at 0 is pinned and cannot
-  // drift. Travel = 0.95 * groundLift * depthMult * reliefDepth.
-  // 0 = pinned, 0.75 = Original's own ratio, 1.5+ starts reading as the wall swimming.
+  // How far the flat plate sits above the reveal's scale origin, as a fraction of relief
+  // depth. The reveal scales z about 0, so a plate at 0 is pinned and cannot drift;
+  // travel = 0.95 * groundLift * depthMult * reliefDepth.
+  // 0 = pinned, 1.5+ starts reading as the wall swimming.
   groundLift: 1.1,
 };
 
@@ -619,11 +551,11 @@ class Flowmap {
 }
 
 // ---------------------------------------------------------------- fluid simulation
-// Shaders 0-8 of the reference dump, verbatim. This is a real Navier-Stokes solver,
-// not a stamped trail: the cursor injects velocity and dye, the velocity field is
-// made swirl (vorticity confinement) and divergence-free (pressure Jacobi), and the
-// dye is advected along it. That advection is what gives the site's sheen its drift
-// and curl — a flow-map blob cannot produce it at any radius.
+// Shaders 0-8 of the reference dump, verbatim. A Navier-Stokes solver, not a stamped
+// trail: the cursor injects velocity and dye, the velocity field is made to swirl
+// (vorticity confinement) and divergence-free (pressure Jacobi), and the dye is advected
+// along it. That advection is what gives the sheen its drift and curl; a flow-map blob
+// cannot produce it at any radius.
 const FLUID_VERT = /* glsl */`
 varying vec2 vUv, vL, vR, vT, vB;
 uniform vec2 texelSize;
@@ -1004,13 +936,13 @@ vec3 rgb2hsv(vec3 c){
   float e = 1.0e-10;
   return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
 }
-// The wall's shading at a point, at the current reveal — the site's own six-level
-// mix, pulled out of main() so the crease mask can also sample it at neighbouring
-// texels (that is what CHROMATIC.spread does).
+// The wall's shading at a point, at the current reveal: the six-level bake mix, lifted
+// out of main() so the crease mask can sample it away from the shaded fragment too
+// (CHROMATIC.spread).
 float shadingAt(vec2 uv, float extrude, out float level5){
   vec3 b1 = sRGB_OETF(texture2D(tBake1, uv)).rgb;
   vec3 b2 = sRGB_OETF(texture2D(tBake2, uv)).rgb;
-  level5 = b1.r;               // the shading at full extrusion — what the site's crease term reads
+  level5 = b1.r;               // shading at full extrusion — what the reference crease term reads
   float s = 0.54504;
   s = mix(s, b2.g, smoothstep(0.0, 0.2, extrude));
   s = mix(s, b2.r, smoothstep(0.2, 0.4, extrude));
@@ -1023,10 +955,10 @@ float shadingAt(vec2 uv, float extrude, out float level5){
 // One fetch, and the hardware's trilinear filtering does the spreading: bias 0 is the
 // shading as baked, higher biases are progressively blurred copies of it.
 //
-// This replaces sampling a ring of neighbours and taking the darkest. Any finite set
-// of taps dilates a thin stroke into that many faintly offset copies of itself, and
-// on this relief — where every feature IS a thin stroke — the copies read as a comb
-// of parallel lines along each one. A mip is smooth by construction.
+// Preferred over sampling a ring of neighbours and taking the darkest: any finite tap
+// set dilates a thin stroke into that many faintly offset copies of itself, and on this
+// relief — where every feature IS a thin stroke — the copies read as a comb of parallel
+// lines along each one. A mip is smooth by construction.
 float deepShadingAt(vec2 uv, float extrude, float bias){
   vec3 b1 = sRGB_OETF(texture2D(tBake1, uv, bias)).rgb;
   float s = 0.54504;
@@ -1044,18 +976,19 @@ float extrudeAt(vec2 uv){
   // Not b * 2: that reads double the reveal and the wash saturates over the whole trail.
   return texture2D(tFlow, uv).b;
 }
-// applyFluidEffect, the site's own. Two of its terms are dropped as dead weight, not
-// as a change: a "lines" stripe pattern it multiplies in at strength 0.0, and an
-// "aberrationColor" it computes from the fluid velocity and never uses.
+// The reference's applyFluidEffect. Two of its terms are dropped as dead weight rather
+// than as a change: a "lines" stripe pattern multiplied in at strength 0.0, and an
+// "aberrationColor" computed from the fluid velocity and never used.
 //
-// The colour is not chosen anywhere. The surface normal is packed into 0..1 as if it
-// were rgb, read back as hsv, and only its HUE is rotated. So value and saturation
-// come from the geometry: a wall facing one way is a different colour from a wall
-// facing another, and that is the whole shimmer.
-// OURS (ver11). The background wash comes in as its own term rather than through mask,
-// because mask is multiplied by the dye here and the wash has to be able to reach PAST
-// the dye — that reach is what ?bg sizes. Taking the max keeps the contours as they are:
-// the wash is a floor, and where rim or crease is stronger it changes nothing.
+// No colour is chosen anywhere. The surface normal is packed into 0..1 as if it were
+// rgb, read back as hsv, and only its HUE is rotated — so value and saturation come from
+// the geometry, and a wall facing one way is a different colour from a wall facing
+// another. That is the whole shimmer.
+//
+// wash arrives as its own argument rather than folded into mask, because mask is
+// multiplied by the dye here and the wash has to reach PAST the dye (?bg sizes that
+// reach). Combining with max() leaves the contours untouched: the wash is a floor, and
+// wherever rim or crease is stronger it changes nothing.
 vec3 applyFluidEffect(vec3 color, vec4 fluid, float mask, float wash, vec3 normal){
   float fluidEdges = smoothstep(0.0, 1.0, fluid.b * uChromaFluidMag);
   vec3 normalVector = normal;
@@ -1063,19 +996,18 @@ vec3 applyFluidEffect(vec3 color, vec4 fluid, float mask, float wash, vec3 norma
   normalVector = normalize(normalVector);
   vec3 normalColor = (normalVector + 1.0) / 2.0;
   vec3 hsv = rgb2hsv(normalColor);
-  // OURS. The site does hsv.x = fract(hsv.x + hueShift) — one rotation, so the
-  // colour runs the whole wheel as the surface turns. We keep the swing but squeeze
-  // it around uChromaHue: 0.6667 is the hue a camera-facing normal produces, so it
-  // is the pivot the swing opens around, and the distance from it is measured the
-  // short way round (a plain subtraction sends hues past the wrap point backwards).
+  // The reference does hsv.x = fract(hsv.x + hueShift) — one rotation, so the colour
+  // runs the whole wheel as the surface turns. Here the swing is kept but squeezed
+  // around uChromaHue: 0.6667 is the hue a camera-facing normal produces, so it is the
+  // pivot the swing opens around, and the distance from it is measured the short way
+  // round (a plain subtraction sends hues past the wrap point backwards).
   float dHue = fract(hsv.x - 0.6667 + 0.5) - 0.5;
   hsv.x = fract(uChromaHue + dHue * uChromaHueRange);
-  // OURS. S and V keep coming from the normal, as the site takes them — that is what
-  // makes the red shift with the surface instead of lying flat — but each is remapped
-  // into a band with a floor. Unmapped, S reaches 0 (grey) and V reaches 0.5 (near
-  // black against this wall), and since the normal is a screen-space derivative,
-  // computed per 2x2 pixel quad, those extremes flicker as the relief moves. Ranges of
-  // [0, 1] make this an identity and the behaviour verbatim.
+  // S and V keep coming from the normal — that is what makes the colour shift with the
+  // surface instead of lying flat — but each is remapped into a band with a floor.
+  // Unmapped, S reaches 0 (grey) and V reaches 0.5 (near black against this wall), and
+  // since the normal is a per-2x2-quad screen-space derivative those extremes flicker as
+  // the relief moves. Ranges of [0, 1] make this an identity.
   hsv.y = mix(uChromaSatRange.x, uChromaSatRange.y, clamp(hsv.y, 0.0, 1.0));
   hsv.z = mix(uChromaValRange.x, uChromaValRange.y, clamp(hsv.z, 0.0, 1.0));
   vec3 effectColor = hsv2rgb(hsv);
@@ -1110,22 +1042,21 @@ void main(){
   color += gradient * 0.7 * uGradientStrength;
   color = color * uBrightnessFactor + uBrightnessOffset;
   // --- chromatic sheen, shader 36 verbatim ---------------------------------
-  // The normal is the SCREEN-SPACE geometric one, taken from the derivatives of the
-  // eye-space position — no normal map. It therefore sees exactly what the camera
-  // sees: a face turned edge-on reads fresnelFactor 0, a face pointing at the lens
-  // reads 1.
+  // The normal is the SCREEN-SPACE geometric one, from the derivatives of the eye-space
+  // position — no normal map is involved. It therefore sees exactly what the camera
+  // sees: a face turned edge-on reads fresnelFactor 0, one facing the lens reads 1.
   vec3 dFdxPos = dFdx(vEye);
   vec3 dFdyPos = dFdy(vEye);
   vec3 normal = normalize(cross(dFdxPos, dFdyPos));
   float fresnelFactor = abs(dot(normal, vec3(0., 0., 1.)));
   float inversefresnelFactor = 1.0 - fresnelFactor;
   inversefresnelFactor = 1. - pow(inversefresnelFactor, uChromaFresnelSharpness);
-  // The crease term reads o, the shading as it stands this frame, where the site
-  // reads level5, the shading at FULL extrusion. Same quantity, same range — but o
-  // is 0.545 flat everywhere the relief has not come out yet, so the colour cannot
-  // appear ahead of the reveal or outlive it. The site gets that for free because
-  // its reveal and its dye are one and the same trail; ours are two, and the dye
-  // lingers longer, which is exactly how red used to end up on bare wall.
+  // The crease term reads o — the shading as it stands this frame — where the reference
+  // reads level5, the shading at FULL extrusion. Same quantity and range, but o is a flat
+  // 0.545 everywhere the relief has not come out yet, so the colour cannot appear ahead
+  // of the reveal or outlive it. The reference gets that for free because its reveal and
+  // its dye are the same trail; here they are two, and the dye lingers longer, which
+  // otherwise leaves colour on bare wall.
   //
   // Spread: also read the shading from a blurred mip, and take whichever is darker.
   // In the shadow's core the sharp value wins and the crease keeps its depth; outside
@@ -1140,33 +1071,24 @@ void main(){
     smoothstep(uChromaShadowRange.y, uChromaShadowRange.x,
                mix(shade, level5, uChromaCreaseFull)) * uChromaShadowOpacity
   );
-  // OURS. Colour belongs to the CURSOR's trail and to nothing else.
-  //
   waveMask *= uOpacity;
   vec4 fluid = texture2D(tFluidFlowmap, uvScreen);
   fluid += mix(0., fastScrollNoise.g * 2., uFastScroll);
-  // OURS (ver11, reshaped twice since). The background wash: colour on the flat wall
-  // between the lines, which no other term can put there.
+  // The background wash: colour on the flat wall between the lines, which no other term
+  // can put there.
   //
-  // Where its shape comes from is the whole history of this term:
-  //   ver11  the dye — so it took the dye's shape, a streak along the cursor's path with
-  //          roughly parallel sides. Rejected: not the round fade of the sketch.
-  //   ver12  distance to the cursor — round and radial, but PINNED to the pointer. The
-  //          customer drew it: a green circle riding under the cursor, and a yellow
-  //          outline over the trail behind it where the relief is still lit and the haze
-  //          is not. A wash that does not travel with the reveal cannot read as part of
-  //          the same effect (_shots/customer-comment1.jpg).
-  //   ver13  the REVEAL ITSELF, blurred. The relief's own highlight is a function of
-  //          extrude, so driving the wash off the same field puts the two in unison by
-  //          construction: same trail, same dissipation, same growth under the cursor,
-  //          for free and with nothing to keep in sync. The blur is what keeps it from
-  //          being a second copy of the relief — at this radius the strokes are gone and
-  //          only the mass of the revealed patch is left, which is the "ghosting" the
-  //          customer asked for.
+  // It is driven off the REVEAL FIELD itself, heavily blurred. The relief's own highlight
+  // is a function of extrude, so a wash read from the same field is in unison with it by
+  // construction — same trail, same dissipation, same growth under the cursor — with
+  // nothing to keep in sync. Two alternatives that do not hold up: keying it off the dye
+  // gives it the dye's shape, a streak with roughly parallel sides; keying it off
+  // distance to the pointer pins it under the cursor while the highlight it belongs to
+  // trails behind. The blur is what keeps this from being a second copy of the relief —
+  // at these radii the strokes are gone and only the mass of the revealed patch is left.
   //
-  // Only channel b is read, never the ambient channel a: the idle pass reveals relief on
-  // its own and has never been allowed to take colour (AMBIENT.chroma), so a wash off the
-  // full extrude would put red on the wall with no cursor anywhere near it.
+  // Channel b only, never the ambient channel a: the idle pass reveals relief on its own
+  // and is not allowed to take colour (AMBIENT.chroma), so a wash off the full extrude
+  // would colour the wall with no cursor present.
   float washField = extrudeAt(uvScreen);
   {
     float aspect = uResolution.x / uResolution.y;
@@ -1182,32 +1104,28 @@ void main(){
     }
     washField /= wsum;
   }
-  // dev: ?dbg=field renders the blurred reveal itself, so the gate can be set against
-  // what the field actually reaches instead of by trial.
+  // ?dbg=field renders the blurred field itself, so baseGate can be set against what it
+  // actually reaches rather than by trial.
   if (uChromaBaseDebug > 0.5) { gl_FragColor = vec4(vec3(washField), 1.0); return; }
-  // OURS. The wash belongs to the CURSOR's trail and to nothing else.
+  // Restrict the wash to the pointer's own trail.
   //
-  // The idle pass wanders a second cursor over the wall on its own and has never been
-  // meant to paint (AMBIENT.chroma) — but it came up in pink blobs, because the reveal is
-  // the one thing the two share. Its stamp writes the same channels the cursor's does
-  // (FLOWMAP_FRAG even sets stamp2.a = stamp2.b), so a wash blurred from the reveal reads
-  // the wandering mask as if the cursor had made it. Only the rim and crease terms were
-  // safe, and only because applyFluidEffect multiplies them by the dye.
+  // The idle pass wanders a second cursor over the wall and is not meant to paint, but it
+  // shares the reveal with the pointer: its stamp writes the same flow-map channels
+  // (FLOWMAP_FRAG sets stamp2.a = stamp2.b), so a wash blurred from the reveal cannot tell
+  // the two apart. Rim and crease are already safe — applyFluidEffect multiplies them by
+  // the dye — so the wash is multiplied by the dye too, purely as a presence test, at a
+  // threshold far below the level that would shape it. The dye is splatted by the real
+  // pointer and nothing else.
   //
-  // So the wash is multiplied by the dye too — as a presence test, at a threshold far
-  // below the level that would shape it. The dye is splatted by the real pointer and by
-  // nothing else, which makes it the honest answer to "was the cursor here". Two things
-  // that look like they should work and do not: keying on channel b (the idle stamp writes
-  // it), and keying on rg, which the idle stamp does zero but which is a VELOCITY and
-  // cancels itself where a path crosses back over itself — it cost the wash a third of its
-  // reach, 11.2% -> 7.2% of frame.
+  // Two gates that look equivalent and are not: channel b (the idle stamp writes it), and
+  // rg (zeroed by the idle stamp, but a VELOCITY, so it cancels itself wherever a path
+  // crosses back over itself and costs the wash a third of its reach).
   //
-  // ?mask=site turns this off, because on the site the idle pass does paint.
-  // Dilated to the wash's own scale before it is read. The wash is a blurred quantity and
-  // reaches further than the dye does, so testing the dye where it stands clips the outer
-  // trail off — 11.2% of frame down to 7.0%, and lowering the threshold does not recover it
-  // because it is the dye's EXTENT that runs out, not its level. A max over one ring
-  // carries the presence outward the way the blur carries the reveal.
+  // The dye is dilated by a ring first: the wash is blurred and reaches further than the
+  // dye does, so testing the dye where it stands clips the outer trail off. Lowering the
+  // threshold does not recover that — it is the dye's EXTENT that runs out, not its level.
+  //
+  // ?mask=site disables the gate; the reference build's idle pass does paint.
   float dyeNear = fluid.b;
   {
     float aspect = uResolution.x / uResolution.y;
@@ -1259,12 +1177,12 @@ void main(){
   vec2 uv = vUv + rand(vUv) * 0.01;
   float gradient = mix(1.0, 0.5, length(uv - vec2(0.0, 0.8)));
   color += gradient * 0.7 * uGradientStrength;
-  color = (color * 0.6 + 0.4) * uBrightness;   // same 0.6/0.4 as the wall, + BRIGHTNESS
+  color = (color * 0.6 + 0.4) * uBrightness;   // same 0.6/0.4 as the wall
   gl_FragColor.rgb = color;
   gl_FragColor.a = alpha;
 }`;
 
-// ---------------------------------------------------------------- mouse tracker (exact port of site's `cu`)
+// ---------------------------------------------------------------- mouse tracker
 class MouseTracker {
   constructor() {
     this.normalFlip = new THREE.Vector2(-1, -1);
@@ -1310,7 +1228,7 @@ const loadTex = (url, wrap) => {
   if (wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 };
-// Original's plaster — the shared plaster.jpg is ver3's 4K marble, a different look
+// note the filename: the plaster.jpg beside it is a 4K marble, a different surface
 const tPlaster = loadTex(ASSETS + 'plaster_orig_backup.webp', true);
 const tMaskNoiseWall = loadTex(ASSETS + 'rgb-attenuation-0,9.webp', true);  // fast-scroll noise
 const tFlowNoise = loadTex(ASSETS + 'mask-noise.webp', true);               // flowmap stamp noise
@@ -1336,7 +1254,6 @@ const flowmap = new Flowmap(renderer, {
   uTime,
 });
 
-// the sheen rides a real fluid sim, as on the site
 const fluid = MASK.enabled ? new FluidSim(renderer, FLUID_ACTIVE) : null;
 
 // background
@@ -1371,7 +1288,7 @@ function makeWallMaterial(bake1, bake2) {
       tBake1: { value: bake1 },
       tBake2: { value: bake2 },
       tPlaster: { value: tPlaster },
-      uPlasterScale: { value: new THREE.Vector2(10, 10) },   // site value; custom mode overrides
+      uPlasterScale: { value: new THREE.Vector2(10, 10) },   // custom mode overrides per panel
       uScreenScroll,
       uScrollSpeed,
       uTextureStrength,
@@ -1410,7 +1327,7 @@ let rowSpacing = ROW_SPACING;   // custom mode overrides with its own panel heig
 const draco = new DRACOLoader().setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/libs/draco/');
 const gltfLoader = new GLTFLoader().setDRACOLoader(draco);
 
-// label the build so a screenshot of it is self-identifying
+// name the options in force, so a screenshot identifies itself
 if (!SITE_MASK) {
   const sizeName = { s: 'tight', m: 'medium', l: 'wide' }[FEATHER_SIZE];
   const bgName = MASK.base > 0 ? { s: 'small', m: 'medium', l: 'large' }[BG_SIZE] : 'off';
@@ -1431,7 +1348,7 @@ const failLoading = (err) => {
 };
 
 if (USE_CUSTOM) {
-  // ---- user's model + baked levels from scripts/bake_levels.py
+  // ---- project model + baked levels from scripts/bake_levels.py
   const bake1 = loadTex(CUSTOM.bake1);
   const bake2 = loadTex(CUSTOM.bake2);
   for (const t of [bake1, bake2]) {
@@ -1439,7 +1356,7 @@ if (USE_CUSTOM) {
     t.wrapT = THREE.RepeatWrapping;          // bake is vertically periodic → filtering
     t.wrapS = THREE.ClampToEdgeWrapping;     //   at the seam samples the neighbor
   }
-  // (bakes/normal.png is not loaded here: the site's sheen reads the screen-space
+  // (bakes/normal.png is deliberately not loaded: the sheen reads the screen-space
   //  geometric normal, never a baked one)
   const metaPromise = fetch(CUSTOM.meta).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
   metaPromise.then((meta) => {
@@ -1496,7 +1413,7 @@ if (USE_CUSTOM) {
   gltf.scene.children.forEach((child) => {
     if (!child.geometry) return;
     // bakes ride inside the GLB materials; loader tags them sRGB → GPU decodes to
-    // linear → the shader's OETF re-encodes (same chain as the site)
+    // linear → the shader's OETF re-encodes (the same chain as the custom bakes)
     const bake1 = child.material.map;
     const bake2 = child.material.emissiveMap;
     const mesh = new THREE.Mesh(child.geometry, makeWallMaterial(bake1, bake2));
@@ -1635,18 +1552,16 @@ function updateAmbient(delta) {
     ambientVel.set(0, 0);
   }
   ambientPrev.copy(flowmap.mouse2);
-  // OURS. The idle pass only runs when the pointer is actually idle.
+  // A pass may only start once the pointer has actually been still.
   //
-  // ambientWait counted down on its own, so a pass started every 6-14 seconds whether or
-  // not the cursor was busy — and a wandering mask crossing the wall WHILE the pointer is
-  // painting runs straight over live dye, which is where the red on it was coming from.
-  // Gating the colour cannot fix that case honestly: the two reveals share the flow map's
-  // channels (the idle stamp writes b and a both), so from the mask's side an idle reveal
-  // over fresh dye is indistinguishable from the cursor's own. Not running the pass while
-  // the cursor is working is both the real fix and what an idle animation should do; by
-  // the time one does start, the dye is seconds gone and the mask is grey on its own.
+  // Without this the countdown runs regardless of what the cursor is doing, so a pass can
+  // set off across the wall while the pointer is painting and cross live dye — and from
+  // the mask's side that is indistinguishable from the pointer's own reveal, since both
+  // write the same flow-map channels. No colour-side gate fixes that case; not running
+  // the pass while the cursor is busy does, and is what an idle animation should do
+  // anyway. By the time one starts, the dye has decayed.
   //
-  // ?amb bypasses it, or the pass could never be tested headlessly.
+  // ?amb bypasses the wait so the pass can be exercised in a headless test.
   if (!FORCE_AMBIENT && (performance.now() - tracker.lastMoveMs) < AMBIENT.requireIdle * 1000) {
     ambientPass = null;
     ambientWait = rnd(AMBIENT.pause[0], AMBIENT.pause[1]);
@@ -1740,8 +1655,8 @@ function frame(now) {
     if (v.lengthSq() > 1e-8) {
       fluid.splat(tracker.normalFlip.x, tracker.normalFlip.y, v.x, v.y);
     }
-    // the site lets its idle pass paint; we hold it back at the customer's request,
-    // so ?mask=site restores that too — otherwise the comparison is not the site's
+    // the idle pass feeds the fluid only when it is allowed to paint; ?mask=site
+    // restores that, or the comparison would not be the reference's behaviour
     if ((AMBIENT.chroma || SITE_MASK) && flowmap.mouse2.x >= 0) {
       fluid.splat(flowmap.mouse2.x, flowmap.mouse2.y, ambientVel.x, ambientVel.y);
     }
