@@ -1357,67 +1357,72 @@ if (!SITE_MASK) {
 }
 
 // ---------------------------------------------------------------- colour panel
-// Live sliders over the red mask's colour. The mask paints no flat colour: it reads the
+// Three sliders over the red mask's colour. The mask paints no flat colour: it reads the
 // surface normal as HSV and remaps it (see applyFluidEffect), so its colour is exactly
 // three things — the hue it is pinned to, and the bands saturation and value are squeezed
-// into. Those are what this panel exposes, one slider per number.
+// into.
 //
-// Every row names the constant in CHROMATIC it writes to and prints the value in force,
-// so a look found here transfers to the build by typing the printed numbers into that
-// block. Nothing is persisted; a reload is the shipped build again. ?ui=0 hides the panel.
+// Saturation and value are BANDS, not single numbers: S and V still come from the normal,
+// which is what makes the colour shift with the surface, and each is remapped into a band
+// with a floor. One slider moves a whole band, holding the ratio between its ends — the
+// value on the right is the pair to write into CHROMATIC. Moving one end alone is not
+// worth a control: satRange[0] over its entire travel, 0.55 to 1, shifts peak redness by
+// 3 of 255, where scaling the band reaches plain grey at 0.
+//
+// Each row prints the constant it writes and the value in force, so a look found here
+// transfers to the build by typing. Nothing is persisted; a reload is the shipped build
+// again. ?ui=0 hides the panel.
 const uiEl = document.getElementById('ui');
 if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
-  // comp: '' for a float uniform, 'x' / 'y' for the two ends of a vec2 band
+  // band: the two ends move together as slider / band[1], so the slider IS the band's
+  // top and the floor keeps its proportion. hue has no band — it is a single number.
   const ROWS = [
-    { group: 'hue' },
-    { label: 'hue', cst: 'CHROMATIC.color', uni: 'uChromaHue', comp: '',
+    { label: 'hue', cst: 'CHROMATIC.color', uni: 'uChromaHue',
       value: chromaHue(), step: 0.001 },
-    { group: 'saturation' },
-    { label: 'floor', cst: 'CHROMATIC.satRange[0]', uni: 'uChromaSatRange', comp: 'x',
-      value: MASK.satRange[0], step: 0.01 },
-    { label: 'ceiling', cst: 'CHROMATIC.satRange[1]', uni: 'uChromaSatRange', comp: 'y',
-      value: MASK.satRange[1], step: 0.01 },
-    { group: 'lightness' },
-    { label: 'floor', cst: 'CHROMATIC.valRange[0]', uni: 'uChromaValRange', comp: 'x',
-      value: MASK.valRange[0], step: 0.01 },
-    { label: 'ceiling', cst: 'CHROMATIC.valRange[1]', uni: 'uChromaValRange', comp: 'y',
-      value: MASK.valRange[1], step: 0.01 },
+    { label: 'saturation', cst: 'CHROMATIC.satRange', uni: 'uChromaSatRange',
+      band: MASK.satRange, value: MASK.satRange[1], step: 0.01 },
+    { label: 'lightness', cst: 'CHROMATIC.valRange', uni: 'uChromaValRange',
+      band: MASK.valRange, value: MASK.valRange[1], step: 0.01 },
   ];
-  uiEl.innerHTML = '<h2>red mask colour</h2>' + ROWS.map((r, i) => r.group
-    ? '<div class="grp">' + r.group + '</div>'
-    : '<div class="row"><div class="lbl">'
-      + '<span>' + r.label + ' <span class="cst">' + r.cst + '</span></span>'
-      + '<span class="val" id="uiv' + i + '">' + r.value.toFixed(3) + '</span></div>'
-      + '<input type="range" id="uir' + i + '" min="0" max="1"'
-      + ' step="' + r.step + '" value="' + r.value + '"></div>'
+  // what the row is worth at slider position v: a pair for a band, one number otherwise
+  const at = (r, v) => r.band ? [r.band[0] / r.band[1] * v, v] : v;
+  const text = (r, v) => {
+    const a = at(r, v);
+    return r.band ? a[0].toFixed(3) + ' – ' + a[1].toFixed(3) : a.toFixed(3);
+  };
+  uiEl.innerHTML = '<h2>red mask colour</h2>' + ROWS.map((r, i) =>
+    '<div class="row"><div class="lbl">'
+    + '<span>' + r.label + ' <span class="cst">' + r.cst + '</span></span>'
+    + '<span class="val" id="uiv' + i + '">' + text(r, r.value) + '</span></div>'
+    + '<input type="range" id="uir' + i + '" min="0" max="1"'
+    + ' step="' + r.step + '" value="' + r.value + '"></div>'
   ).join('') + '<div class="foot"><button id="uireset">reset</button> &nbsp; ?ui=0 hides this</div>';
 
   // one material per wall panel, so a change has to reach all of them
   const apply = (r, v) => {
+    const a = at(r, v);
     for (const mesh of sections) {
       const u = mesh.material.uniforms[r.uni];
       if (!u) continue;
-      if (r.comp) u.value[r.comp] = v; else u.value = v;
+      if (r.band) u.value.set(a[0], a[1]); else u.value = a;
     }
   };
-  const show = (r, i, v) => {
-    document.getElementById('uir' + i).value = v;
-    document.getElementById('uiv' + i).textContent = v.toFixed(3);
-    apply(r, v);
-  };
   ROWS.forEach((r, i) => {
-    if (r.group) return;
     const slider = document.getElementById('uir' + i);
     slider.addEventListener('input', () => {
       const v = parseFloat(slider.value);
-      document.getElementById('uiv' + i).textContent = v.toFixed(3);
+      document.getElementById('uiv' + i).textContent = text(r, v);
       apply(r, v);
     });
   });
   document.getElementById('uireset').addEventListener('click', () => {
-    ROWS.forEach((r, i) => { if (!r.group) show(r, i, r.value); });
+    ROWS.forEach((r, i) => {
+      document.getElementById('uir' + i).value = r.value;
+      document.getElementById('uiv' + i).textContent = text(r, r.value);
+      apply(r, r.value);
+    });
   });
 }
 
