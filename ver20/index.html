@@ -1,0 +1,62 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>immersive-g reveal — ver20</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #b7b7b7; }
+  canvas { display: block; }
+  #hint {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    font: 12px/1.4 Helvetica, Arial, sans-serif; letter-spacing: .08em;
+    color: rgba(0,0,0,.45); text-transform: uppercase; pointer-events: none;
+    transition: opacity 1s ease;
+  }
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font: 12px/1 Helvetica, Arial, sans-serif; letter-spacing: .12em; color: rgba(0,0,0,.5);
+    text-transform: uppercase; background: #b7b7b7; transition: opacity .6s ease; z-index: 10;
+  }
+  /* the red mask's colour panel — hue, saturation, lightness. Each row is one shader
+     uniform; the name on the right is the constant in main.js it comes from, and the
+     number is the value to write there. ?ui=0 hides it. */
+  #ui {
+    position: fixed; top: 14px; left: 14px; width: 260px; z-index: 20;
+    background: rgba(255,255,255,.82); backdrop-filter: blur(6px);
+    border: 1px solid rgba(0,0,0,.12); border-radius: 4px; padding: 10px 12px 12px;
+    font: 11px/1.35 Helvetica, Arial, sans-serif; color: rgba(0,0,0,.75);
+  }
+  #ui h2 {
+    margin: 0 0 8px; font-size: 10px; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; color: rgba(0,0,0,.5);
+  }
+  #ui .row { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,.10); }
+  #ui .row:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+  #ui .lbl { display: flex; justify-content: space-between; align-items: baseline; }
+  #ui .cst { font-family: Consolas, Menlo, monospace; font-size: 10px; color: rgba(0,0,0,.45); }
+  #ui .val { font-family: Consolas, Menlo, monospace; font-size: 11px; color: #a41010; }
+  #ui input[type=range] { width: 100%; margin: 2px 0 0; accent-color: #a41010; }
+  #ui .foot { margin-top: 10px; font-size: 10px; color: rgba(0,0,0,.4); }
+  #ui button {
+    font: 10px/1 Helvetica, Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase;
+    padding: 4px 7px; border: 1px solid rgba(0,0,0,.2); border-radius: 3px;
+    background: rgba(255,255,255,.7); color: rgba(0,0,0,.6); cursor: pointer;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="loading">loading model…</div>
+<div id="hint">move the cursor over the wall — scroll to travel</div>
+<div id="ui"></div>
+<script type="module" src="./main.js?v=20260808111750"></script>
+</body>
+</html>
