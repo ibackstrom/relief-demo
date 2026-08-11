@@ -9,10 +9,26 @@ Serve over HTTP — it will not run from `file://`:
 python -m http.server 8000     # then open http://localhost:8000/
 ```
 
-`index.html` + `main.js` is the whole thing — no textures, no assets, nothing to fetch. No
-controls either: the settings in `CONFIG` are the build. The canvas is transparent and draws
-no background of its own, so it drops over an existing page as an overlay — the grey here is
-only a stand-in.
+`index.html` + `main.js` is the whole thing — no textures, no assets, nothing to fetch. The
+canvas is transparent and draws no background of its own, so it drops over an existing page
+as an overlay; the grey here is only a stand-in.
+
+## Controls
+
+Three bars, top-left, and nothing else. Each prints the `CONFIG` value it writes so a look
+found here transfers to the build by typing it in. `?ui=0` hides the panel.
+
+| bar | writes | default |
+|---|---|---|
+| colour | `colorOverlayR/G/B` | `0.850 0.050 0.060` |
+| quantity | `particleCount` | 4200 |
+| size | `particleSize` | 2.5 |
+
+Colour is **one** bar rather than three because the material only ever varies in hue: the
+spheres are shaded in greyscale and tinted, so saturation and value belong to the lighting
+rig, not to the choice of colour. The bar drives hue, holds S and V at the shipped red's,
+and prints the RGB triple to paste back. Quantity re-seeds the whole population, so a drag
+is coalesced into one rebuild rather than one per input event.
 
 ## The motes are spheres
 

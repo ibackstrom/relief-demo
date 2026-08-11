@@ -23,8 +23,8 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 1200,
-  particleSize: 4.6,        // sphere diameter, world units, before the per-mote multiplier
+  particleCount: 4200,
+  particleSize: 2.5,        // sphere diameter, world units, before the per-mote multiplier
   sizeVariation: 4.0,       // size = abs(1 + (rand*2-1) * this). Deliberately large: the
                             //   spread of apparent sizes IS the depth cue, and it wants
                             //   to be wide enough that near and far motes differ several
@@ -947,3 +947,110 @@ function tick() {
   if (firstFrame) { firstFrame = false; dismissLoading(); }
 }
 tick();
+
+// ---------------------------------------------------------------- panel
+// Three controls and no more: colour, quantity, size. Each prints the CONFIG value it
+// writes, so a look found here transfers to the build by typing. Nothing is persisted —
+// a reload is the shipped build again. ?ui=0 hides the panel.
+//
+// Colour is one bar rather than three because the material only ever varies in HUE: the
+// spheres are shaded in greyscale and tinted, so saturation and value belong to the
+// shading rig, not to the choice of colour. The bar drives the hue and holds S and V at
+// the shipped red's, and the readout is the RGB triple to paste back.
+const uiEl = document.getElementById('ui');
+if (uiEl && PARAMS.get('ui') === '0') {
+  uiEl.remove();
+} else if (uiEl) {
+  const hsvToRgb = (h, s, v) => {
+    const i = Math.floor(h * 6), f = h * 6 - i;
+    const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+    switch (i % 6) {
+      case 0: return [v, t, p];
+      case 1: return [q, v, p];
+      case 2: return [p, v, t];
+      case 3: return [p, q, v];
+      case 4: return [t, p, v];
+      default: return [v, p, q];
+    }
+  };
+  // S and V of the shipped colour, held constant so the bar only moves hue
+  const base = [CONFIG.colorOverlayR, CONFIG.colorOverlayG, CONFIG.colorOverlayB];
+  const vMax = Math.max(...base), vMin = Math.min(...base);
+  const satFixed = vMax > 0 ? (vMax - vMin) / vMax : 0;
+  const valFixed = vMax;
+  const hueOf = (r, g, b) => {
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    if (d === 0) return 0;
+    let h;
+    if (mx === r) h = ((g - b) / d) % 6;
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+    return h < 0 ? h + 1 : h;
+  };
+
+  const ROWS = [
+    { key: 'hue', name: 'colour', cst: 'CONFIG.colorOverlayRGB',
+      min: 0, max: 1, step: 0.001, value: hueOf(...base) },
+    { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
+      min: 300, max: 14000, step: 100, value: CONFIG.particleCount, rebuild: true },
+    { key: 'particleSize', name: 'size', cst: 'CONFIG.particleSize',
+      min: 0.6, max: 12, step: 0.1, value: CONFIG.particleSize, uni: 'uParticleSize' },
+  ];
+
+  const rgbAt = (h) => hsvToRgb(h, satFixed, valFixed);
+  const text = (r, v) => {
+    if (r.key === 'hue') return rgbAt(v).map((c) => c.toFixed(3)).join('  ');
+    if (r.key === 'particleCount') return String(Math.round(v));
+    return v.toFixed(1);
+  };
+
+  uiEl.innerHTML = '<h2>particle cloud</h2>' + ROWS.map((r, i) =>
+    '<div class="row"><div class="lbl">'
+    + '<span class="name">' + r.name + '</span>'
+    + (r.key === 'hue' ? '<span class="sw" id="psw"></span>' : '')
+    + '<span class="val" id="pv' + i + '">' + text(r, r.value) + '</span></div>'
+    + '<span class="cst">' + r.cst + '</span>'
+    + '<input type="range" id="pr' + i + '" min="' + r.min + '" max="' + r.max + '"'
+    + ' step="' + r.step + '" value="' + r.value + '"></div>'
+  ).join('') + '<div class="foot">?ui=0 hides this</div>';
+
+  const swatch = document.getElementById('psw');
+  const paintSwatch = (rgb) => {
+    if (swatch) swatch.style.background =
+      'rgb(' + rgb.map((c) => Math.round(c * 255)).join(',') + ')';
+  };
+  paintSwatch(rgbAt(ROWS[0].value));
+
+  // Rebuilding allocates new buffers and re-seeds every mote, so a drag is coalesced into
+  // one rebuild at the end rather than one per input event.
+  let pending = null;
+  const rebuild = () => {
+    const old = mesh;
+    mesh = new THREE.Mesh(buildParticles(CONFIG.particleCount), material);
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    group.remove(old);
+    old.geometry.dispose();
+  };
+
+  ROWS.forEach((r, i) => {
+    const slider = document.getElementById('pr' + i);
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      document.getElementById('pv' + i).textContent = text(r, v);
+      if (r.key === 'hue') {
+        const rgb = rgbAt(v);
+        CONFIG.colorOverlayR = rgb[0];
+        CONFIG.colorOverlayG = rgb[1];
+        CONFIG.colorOverlayB = rgb[2];
+        uniforms.uColorOverlay.value.set(rgb[0], rgb[1], rgb[2]);
+        paintSwatch(rgb);
+        return;
+      }
+      CONFIG[r.key] = r.key === 'particleCount' ? Math.round(v) : v;
+      if (r.uni) uniforms[r.uni].value = CONFIG[r.key];
+      if (r.rebuild) { clearTimeout(pending); pending = setTimeout(rebuild, 110); }
+    });
+  });
+}
