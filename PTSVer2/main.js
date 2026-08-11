@@ -1,4 +1,5 @@
-// Corner particle cloud. Instanced sprite quads, solved entirely in the vertex shader.
+// Corner particle cloud. Instanced billboards carrying analytic lit spheres, with the
+// motion solved entirely in the vertex shader.
 //
 // Per frame each mote goes through:
 //   1. drift    a fraction of them travel along one direction on a 5s recycle, fading
@@ -6,7 +7,8 @@
 //   2. bloom    the whole field scales away from the screen corner while hovered
 //   3. cursor   motes near the pointer ray are pushed off it
 //   4. curl     divergence-free curl noise, so the field swirls without clumping
-//   5. colour   one of 7 sprite frames, then the overlay/sat/contrast chain
+//   5. shading  a sphere reconstructed per pixel on the billboard, key + fill + rim +
+//               specular, then the overlay/sat/contrast chain
 //
 // Canvas is transparent — this is an overlay, it does not draw its own background.
 
@@ -21,8 +23,8 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 1500,
-  particleSize: 4.6,        // sprite edge, world units, before the per-mote multiplier
+  particleCount: 1200,
+  particleSize: 4.6,        // sphere diameter, world units, before the per-mote multiplier
   sizeVariation: 4.0,       // size = abs(1 + (rand*2-1) * this). Deliberately large: the
                             //   spread of apparent sizes IS the depth cue, and it wants
                             //   to be wide enough that near and far motes differ several
@@ -111,19 +113,51 @@ const CONFIG = {
                             //   Keep it low — it scatters motes back into the hole the
                             //   push just made, and over ~3 it closes it completely.
 
+  // ------------------------------------------------------------ sphere shading
+  // Each mote is a lit sphere, reconstructed per pixel on its billboard. These are the
+  // material: the light it sits under, how glossy it is, and how hollow.
+  lightDirX: -0.45,         // in VIEW space — x right, y up, z toward the camera. Keep z
+  lightDirY: 0.72,          //   positive or the highlight falls behind the spheres and
+  lightDirZ: 0.52,          //   they go flat.
+  wrap: 0.45,               // how far light wraps past the terminator. 0 = hard Lambert,
+                            //   which leaves half of every sphere black and reads as a
+                            //   hole punched in a light page. Above ~0.7 it goes flat.
+  shininess: 40.0,          // specular exponent. High = a small tight glint, low = a broad
+                            //   sheen. Small and tight is what reads as glass.
+  specular: 0.85,           // highlight strength
+  specOpacity: 0.9,         // how much of the highlight survives into ALPHA. The glint has
+                            //   to be opaque or it vanishes on the thin part of the shell.
+  fresnelPower: 4.2,        // rim tightness. Low spreads the rim over the whole sphere.
+  rim: 0.22,                // rim strength
+  fillDirX: 0.55,           // the bounce light, opposite the key and below it
+  fillDirY: -0.55,
+  fillDirZ: 0.30,
+  fill: 0.30,               // strength. Past ~0.5 it starts to read as a second key and
+                            //   the form goes ambiguous.
+  fillColorR: 0.42,         // cool, to sit against the warm key — the contrast between
+  fillColorG: 0.52,         //   the two is doing the work, not either one alone
+  fillColorB: 0.72,
+  rimColorR: 1.00,          // the rim is the light behind the bubble, so it is close to
+  rimColorG: 0.72,          //   white with a warm lean rather than the body colour
+  rimColorB: 0.68,
+  coreAlpha: 0.78,          // opacity through the middle of a sphere. Low is what makes
+                            //   them hollow shells; at 1 they are solid beads.
+  edgeSoftness: 0.16,       // silhouette antialias, in radii. Too low and the discs step;
+                            //   too high and they turn back into soft blobs.
+
   // ------------------------------------------------------------ colour
-  // The sprite sheet is greyscale, so the overlay is the only thing giving the cloud a
-  // colour. Blend modes: 0 multiply, 1 add, 2 overlay, 3 screen.
+  // The spheres are shaded in greyscale and take their colour here, so this is the body
+  // colour of the material. Blend modes: 0 multiply, 1 add, 2 overlay, 3 screen.
   colorOverlayR: 0.85,
   colorOverlayG: 0.05,
   colorOverlayB: 0.06,
   colorOverlayBlendMode: 0,
   colorOverlayStrength: 1.0,
-  saturation: 1.60,
+  saturation: 1.45,
   contrast: 1.10,
-  brightness: 1.15,
+  brightness: 0.98,
   minBrightness: 0.0,
-  opacity: 0.62,            // overall alpha of the field
+  opacity: 0.72,            // overall alpha of the field
 
   // ------------------------------------------------------------ scan
   // A band that sweeps the cloud and tints what it crosses; drive uProgress off scroll
@@ -292,7 +326,6 @@ attribute vec3 aDriftDir;        // per-mote travel direction (already jittered)
 attribute float aDriftSpeed;     // 0 for a stationary mote
 attribute float aSize;
 attribute float aTimeOffset;
-attribute float aSprite;         // 0..6
 attribute float aBrightness;
 attribute float aCurlResp;       // 0 or 1
 
@@ -319,7 +352,6 @@ uniform float uExpandAmount;
 uniform float uExpandCurlBoost;
 
 varying vec2  vUv;
-varying float vSprite;
 varying float vBrightness;
 varying float vFade;
 varying vec3  vPos;
@@ -402,7 +434,6 @@ void main(){
   float viewZ = (modelViewMatrix * vec4(pos, 1.0)).z;
   vDepth = clamp(0.5 - (viewZ - uCentreViewZ) / (2.0 * uHalfDepth), 0.0, 1.0);
   vUv = position.xy + 0.5;
-  vSprite = aSprite;
   vBrightness = aBrightness;
 
   // ---- 4. billboard ----------------------------------------------------------
@@ -414,7 +445,6 @@ void main(){
 
 // ---------------------------------------------------------------- GLSL: fragment
 const FRAG = /* glsl */`
-uniform sampler2D tSprite;
 uniform float uProgress;
 uniform float uScanSize;
 uniform float uScanDirection;
@@ -430,7 +460,6 @@ uniform float uMinBrightness;
 uniform float uOpacity;
 
 varying vec2  vUv;
-varying float vSprite;
 varying float vBrightness;
 varying float vFade;
 varying vec3  vPos;
@@ -438,6 +467,20 @@ varying float vDepth;
 
 uniform float uDepthFade;
 uniform float uDepthDarken;
+
+uniform vec3  uLightDir;
+uniform float uWrap;
+uniform float uShininess;
+uniform float uSpecular;
+uniform float uSpecOpacity;
+uniform float uFresnelPower;
+uniform float uRim;
+uniform vec3  uRimColor;
+uniform vec3  uFillDir;
+uniform float uFill;
+uniform vec3  uFillColor;
+uniform float uCoreAlpha;
+uniform float uEdgeSoftness;
 
 vec3 adjustSaturation(vec3 c, float s){
   float g = dot(c, vec3(0.299, 0.587, 0.114));
@@ -457,12 +500,44 @@ vec3 applyColorOverlay(vec3 base, vec3 ov, float mode, float strength){
   return mix(base, blended, strength);
 }
 
+// A sphere IMPOSTOR. The quad stays a camera-facing billboard, but the surface normal is
+// reconstructed per pixel from the quad's own coordinates: the unit disc is the silhouette
+// of a unit sphere, so z = sqrt(1 - x^2 - y^2) gives the front hemisphere exactly. The
+// result is a real, per-pixel-lit sphere for the cost of two triangles — no geometry, and
+// the silhouette stays analytically round at every size instead of pixelating.
+//
+// Lit in VIEW space with a fixed light, so every mote catches its highlight in the same
+// place. That consistency is what makes them read as objects under one light rather than
+// as decorated discs, and it is why the light is not jittered per mote.
 void main(){
-  // pick one frame out of the 7-wide sheet
-  float spriteWidth = 1.0 / 7.0;
-  vec2 spriteUV = vec2(vUv.x * spriteWidth + vSprite * spriteWidth, vUv.y);
-  vec4 texel = texture2D(tSprite, spriteUV);
-  if (texel.a < 0.002) discard;
+  vec2 p = vUv * 2.0 - 1.0;
+  float r2 = dot(p, p);
+  if (r2 > 1.0) discard;                 // outside the silhouette
+  float r = sqrt(r2);
+  vec3 n = vec3(p, sqrt(max(0.0, 1.0 - r2)));
+
+  vec3 L = normalize(uLightDir);
+  vec3 V = vec3(0.0, 0.0, 1.0);          // billboards face the camera, so view is +z
+  vec3 H = normalize(L + V);
+
+  // Wrapped diffuse. A hard Lambert term leaves half the sphere black, which on a light
+  // page reads as a hole; wrapping lifts the terminator so the dark side keeps a colour.
+  float ndl = dot(n, L);
+  float diffuse = mix(uWrap, 1.0, clamp((ndl + uWrap) / (1.0 + uWrap), 0.0, 1.0));
+
+  // Fill from the opposite quarter, in a cooler tone. One light gives a sphere that is
+  // correct and lifeless; a cool bounce on the shadow side is what stops the dark half
+  // going to dead colour and is most of the difference between a lit ball and a nice one.
+  float fill = max(dot(n, normalize(uFillDir)), 0.0) * uFill;
+
+  // Specular — the strongest "this is a ball" cue. A small bright spot sitting at a fixed
+  // point on every sphere, which the eye reads as a light source reflected in each one.
+  float spec = pow(max(dot(n, H), 0.0), uShininess) * uSpecular;
+
+  // Fresnel: grazing angles sit at the silhouette, so this is the rim. Bubbles are dense
+  // at the rim and thin through the middle, and driving ALPHA with it — not just colour —
+  // is what makes them read as hollow shells rather than solid beads.
+  float fres = pow(1.0 - n.z, uFresnelPower);
 
   // the sweeping band, keyed off the mote's own position along one axis
   float scanPosition = uProgress * 2.0 - 1.0;
@@ -470,19 +545,32 @@ void main(){
   float scanMask = smoothstep(uScanSize, 0.0, abs(axis - scanPosition));
 
   // aerial perspective: the back of the volume is dimmer and thinner than the front
-  vec3 col = vec3(1.0);
+  vec3 col = vec3(diffuse);
   col = mix(col, uScanGlow, scanMask * 0.6 * uScanStrength);
   col *= vBrightness * (1.0 - uDepthDarken * vDepth);
 
-  vec3 mixed = col * texel.rgb;
+  vec3 mixed = col;
   mixed = applyColorOverlay(mixed, uColorOverlay, uColorOverlayBlendMode, uColorOverlayStrength);
   mixed = adjustSaturation(mixed, uSaturation);
   mixed = adjustContrast(mixed, uContrast);
   mixed = mixed * uBrightness;
+
+  // Rim and highlight go on AFTER the colour pipeline, so saturation and contrast cannot
+  // tint them — they are light ON the surface, not part of the surface's own colour.
+  mixed += uFillColor * fill;
+  mixed += uRimColor * fres * uRim;
+  mixed += vec3(spec);
   mixed = applyMinBrightness(mixed, uMinBrightness);
   mixed = clamp(mixed, 0.0, 1.0);
 
-  float alpha = texel.a * vBrightness * vFade * uOpacity * (1.0 - uDepthFade * vDepth);
+  // Hollow shell: thin through the middle, dense at the rim. The smoothstep is the
+  // antialias on the silhouette — with no texture there is no filtering doing it for us,
+  // and without it the discs have visibly stepped edges.
+  float shell = mix(uCoreAlpha, 1.0, fres);
+  float edge = smoothstep(1.0, 1.0 - uEdgeSoftness, r);
+  float alpha = shell * edge * vBrightness * vFade * uOpacity * (1.0 - uDepthFade * vDepth);
+  alpha = min(1.0, alpha + spec * uSpecOpacity);   // the highlight carries its own opacity
+
   gl_FragColor = vec4(mixed, alpha);
 }
 `;
@@ -509,7 +597,7 @@ const viewHeightAt = (z) =>
 
 // ---------------------------------------------------------------- geometry
 // One quad, instanced. Per-mote values are generated once on the CPU: seat in the box,
-// size multiplier, brightness, sprite frame, and which of the two roles it takes.
+// size multiplier, brightness, and which of the two roles it takes.
 function buildParticles(count) {
   const geo = new THREE.InstancedBufferGeometry();
   geo.instanceCount = count;
@@ -525,7 +613,6 @@ function buildParticles(count) {
   const driftSpeed = new Float32Array(count);
   const sizes      = new Float32Array(count);
   const timeOffs   = new Float32Array(count);
-  const sprites    = new Float32Array(count);
   const brights    = new Float32Array(count);
   const curlResp   = new Float32Array(count);
 
@@ -564,11 +651,10 @@ function buildParticles(count) {
     driftDir[i3] = d.x; driftDir[i3 + 1] = d.y; driftDir[i3 + 2] = d.z;
 
     // abs() because sizeVariation > 1 makes this negative, which mirrors the quad —
-    // invisible on a round sprite, but the size then grows again as it goes more negative
+    // invisible on a round mote, but the size then grows again as it goes more negative
     sizes[i] = Math.abs(1.0 + (Math.random() * 2 - 1) * CONFIG.sizeVariation);
 
     timeOffs[i] = Math.random() * 5.0;
-    sprites[i]  = Math.floor(Math.random() * 7);
     brights[i]  = 0.8 + Math.random() * 0.2;
     curlResp[i] = Math.random() < CONFIG.curlAffectedParticles ? 1.0 : 0.0;
   }
@@ -580,7 +666,6 @@ function buildParticles(count) {
   inst('aDriftSpeed', driftSpeed, 1);
   inst('aSize', sizes, 1);
   inst('aTimeOffset', timeOffs, 1);
-  inst('aSprite', sprites, 1);
   inst('aBrightness', brights, 1);
   inst('aCurlResp', curlResp, 1);
 
@@ -592,7 +677,7 @@ function buildParticles(count) {
   geo.userData.src = {
     aInitPos: initPos.slice(), aDriftDir: driftDir.slice(),
     aDriftSpeed: driftSpeed.slice(), aSize: sizes.slice(),
-    aTimeOffset: timeOffs.slice(), aSprite: sprites.slice(),
+    aTimeOffset: timeOffs.slice(),
     aBrightness: brights.slice(), aCurlResp: curlResp.slice(),
   };
   geo.userData.order = new Int32Array(count).map((_, i) => i);
@@ -600,16 +685,15 @@ function buildParticles(count) {
   return geo;
 }
 
-const loader = new THREE.TextureLoader();
-const spriteSheet = loader.load('./assets/bubbles.png', () => {
+// Nothing to load — the motes are shaded analytically, there is no texture. The overlay
+// is dismissed on the first painted frame instead of on an asset callback.
+let firstFrame = true;
+function dismissLoading() {
   const el = document.getElementById('loading');
+  if (!el) return;
   el.style.opacity = 0;
   setTimeout(() => el.remove(), 700);
-});
-spriteSheet.colorSpace = THREE.LinearSRGBColorSpace;
-spriteSheet.minFilter = THREE.LinearFilter;
-spriteSheet.magFilter = THREE.LinearFilter;
-spriteSheet.wrapS = spriteSheet.wrapT = THREE.ClampToEdgeWrapping;
+}
 
 const uniforms = {
   uTime: { value: 0 },
@@ -632,12 +716,28 @@ const uniforms = {
   uCentreViewZ: { value: 0 },
   uDepthFade: { value: CONFIG.depthFade },
   uDepthDarken: { value: CONFIG.depthDarken },
+  uLightDir: { value: new THREE.Vector3(
+    CONFIG.lightDirX, CONFIG.lightDirY, CONFIG.lightDirZ) },
+  uWrap: { value: CONFIG.wrap },
+  uShininess: { value: CONFIG.shininess },
+  uSpecular: { value: CONFIG.specular },
+  uSpecOpacity: { value: CONFIG.specOpacity },
+  uFresnelPower: { value: CONFIG.fresnelPower },
+  uRim: { value: CONFIG.rim },
+  uRimColor: { value: new THREE.Vector3(
+    CONFIG.rimColorR, CONFIG.rimColorG, CONFIG.rimColorB) },
+  uFillDir: { value: new THREE.Vector3(
+    CONFIG.fillDirX, CONFIG.fillDirY, CONFIG.fillDirZ) },
+  uFill: { value: CONFIG.fill },
+  uFillColor: { value: new THREE.Vector3(
+    CONFIG.fillColorR, CONFIG.fillColorG, CONFIG.fillColorB) },
+  uCoreAlpha: { value: CONFIG.coreAlpha },
+  uEdgeSoftness: { value: CONFIG.edgeSoftness },
   uExpandOrigin: { value: new THREE.Vector3() },
   uExpand: { value: 0 },
   uExpandAmount: { value: CONFIG.expandAmount },
   uExpandCurlBoost: { value: CONFIG.expandCurlBoost },
 
-  tSprite: { value: spriteSheet },
   uProgress: { value: 0.5 },
   uScanSize: { value: CONFIG.scanSize },
   uScanDirection: { value: CONFIG.scanDirection },
@@ -844,5 +944,6 @@ function tick() {
   sortByDepth();
   updateCursor(dt);
   renderer.render(scene, camera);
+  if (firstFrame) { firstFrame = false; dismissLoading(); }
 }
 tick();
