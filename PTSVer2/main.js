@@ -23,8 +23,8 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 4200,
-  particleSize: 2.5,        // sphere diameter, world units, before the per-mote multiplier
+  particleCount: 14000,
+  particleSize: 0.9,        // sphere diameter, world units, before the per-mote multiplier
   sizeVariation: 4.0,       // size = abs(1 + (rand*2-1) * this). Deliberately large: the
                             //   spread of apparent sizes IS the depth cue, and it wants
                             //   to be wide enough that near and far motes differ several
@@ -203,7 +203,7 @@ const numParam = (k, lo, hi) => {
   const v = parseFloat(PARAMS.get(k));
   return Number.isFinite(v) && v >= lo && v <= hi ? v : null;
 };
-if (numParam('p', 1, 20000) !== null) CONFIG.particleCount = Math.round(numParam('p', 1, 20000));
+if (numParam('p', 1, 40000) !== null) CONFIG.particleCount = Math.round(numParam('p', 1, 40000));
 if (numParam('curl', 0, 5) !== null) CONFIG.curlAmplitude = numParam('curl', 0, 5);
 if (numParam('push', 0, 5) !== null) CONFIG.mouseStrength = numParam('push', 0, 5);
 
@@ -414,14 +414,18 @@ void main(){
   float amplification = 1.0 + pushFalloff * uMouseCurlBoost + expand * uExpandCurlBoost;
   float effectiveCurl = uCurlAmplitude * curlReduction * amplification;
 
-  float ct = uTime * uCurlSpeed * 0.01;
-  vec3 curlOffset = curlNoise(vec3(pos.x, pos.y, ct), uCurlFrequency, ct, effectiveCurl);
-
-  // a mote that travels does not curl, and vice versa
+  // A mote that travels does not curl, and vice versa. Roughly a third of the population
+  // is one or the other, and the curl is three simplex-with-derivative evaluations, so it
+  // is worth branching around rather than computing and multiplying by zero. The test is
+  // per instance, so a whole quad takes the same path and the branch stays coherent.
   float curlInfluence = mix(aCurlResp, 0.0, hasVelocity);
-  pos.x += curlOffset.x * curlInfluence;
-  pos.y += curlOffset.y * curlInfluence;
-  pos.z += curlOffset.z * 0.1 * curlInfluence;
+  if (curlInfluence > 0.0) {
+    float ct = uTime * uCurlSpeed * 0.01;
+    vec3 curlOffset = curlNoise(vec3(pos.x, pos.y, ct), uCurlFrequency, ct, effectiveCurl);
+    pos.x += curlOffset.x * curlInfluence;
+    pos.y += curlOffset.y * curlInfluence;
+    pos.z += curlOffset.z * 0.1 * curlInfluence;
+  }
 
   // the push is applied after the curl so it is never swallowed by it
   pos += pushDir * pushFalloff * uMouseStrength;
@@ -782,12 +786,19 @@ group.add(mesh);
 //
 // Cheap at this population: a few hundred keys is well under a millisecond, and it is
 // only redone every SORT_EVERY frames because the volume turns slowly.
+// Below this on-screen diameter the sort is switched off. Ordering only matters while a
+// mote is big enough that you can see one in front of another; at a couple of pixels the
+// overlap is a blend either way, and the sort is pure cost — and it is exactly at small
+// sizes that the population tends to be large, so it is the worst case that pays most.
+const SORT_MIN_PX = 3.5;
 const SORT_EVERY = 4;
 let sortTick = 0;
+let sortWorthwhile = true;
 const _v = new THREE.Vector3();
 const _mv = new THREE.Matrix4();
 
 function sortByDepth() {
+  if (!sortWorthwhile) return;
   if (sortTick++ % SORT_EVERY !== 0) return;
   const geo = mesh.geometry;
   const src = geo.userData.src;
@@ -840,6 +851,11 @@ function place() {
 
   uniforms.uHalfDepth.value = Math.max(1e-3, CONFIG.boxDepth * vh * 0.5);
   hoverRadiusWorld = CONFIG.expandHoverRadius * vh;
+
+  // typical mote diameter in device pixels: the mean of abs(1 + U(-1,1)*sizeVariation)
+  // is about sizeVariation/2 for the wide spreads used here, hence the 2.0
+  const typicalPx = (CONFIG.particleSize * 2.0 * 0.01) / vh * renderer.domElement.height;
+  sortWorthwhile = typicalPx >= SORT_MIN_PX;
   hoverInnerWorld = CONFIG.expandHoverInner * vh;
 }
 
@@ -993,7 +1009,7 @@ if (uiEl && PARAMS.get('ui') === '0') {
     { key: 'hue', name: 'colour', cst: 'CONFIG.colorOverlayRGB',
       min: 0, max: 1, step: 0.001, value: hueOf(...base) },
     { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
-      min: 300, max: 14000, step: 100, value: CONFIG.particleCount, rebuild: true },
+      min: 14000, max: 30000, step: 100, value: CONFIG.particleCount, rebuild: true },
     { key: 'particleSize', name: 'size', cst: 'CONFIG.particleSize',
       min: 0.6, max: 12, step: 0.1, value: CONFIG.particleSize, uni: 'uParticleSize' },
   ];

@@ -21,8 +21,8 @@ found here transfers to the build by typing it in. `?ui=0` hides the panel.
 | bar | writes | default |
 |---|---|---|
 | colour | `colorOverlayR/G/B` | `0.850 0.050 0.060` |
-| quantity | `particleCount` | 4200 |
-| size | `particleSize` | 2.5 |
+| quantity | `particleCount` | 14 000, range 14 000–30 000 |
+| size | `particleSize` | 0.9 |
 
 Colour is **one** bar rather than three because the material only ever varies in hue: the
 spheres are shaded in greyscale and tinted, so saturation and value belong to the lighting
@@ -144,6 +144,16 @@ Footprint is the screen area actually covered (4 px cells touched) — ×1.65 on
 - **`boxDepth` and `expandAmount` are paired with the rest of the box.** The box is 60% of
   the size the cloud reaches open, and `expandAmount` (0.667) is the trip back. Resize one
   without the other and the open size moves.
+- **At `particleSize` under about 2 the sphere shading stops paying for itself.** A mote
+  is then 1–4 px and the key/fill/rim/specular rig is below what the eye can resolve — the
+  cloud is a fine spray, which is a fine look, but it is not the lighting doing the work.
+  The shading starts to read again around 2.5.
+- **Cost is linear in `particleCount`**, with no fixed overhead worth speaking of: measured
+  26 / 79 / 151 ms per frame at 2000 / 7000 / 14 000. Those numbers come from a headless
+  SwiftShader context, which rasterises on the CPU, so they are not what real hardware
+  does — but the SHAPE is, and it means quantity is the one control that can make this
+  expensive. The work is per mote and mostly per fragment: branching the curl noise around
+  the third of motes that discard it saved only 1.5%.
 - **`fresnelPower` and `rim` are easy to overdo.** At a low power the rim spreads over most
   of the disc, washes the body out and leaves a small saturated core — the spheres read as
   pale rings with a coloured eye rather than as balls. Keep the rim on the actual edge.
