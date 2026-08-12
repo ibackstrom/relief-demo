@@ -23,35 +23,47 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 11000,
-  particleSize: 2.2,        // sphere diameter, world units, before the per-mote multiplier
+  particleCount: 30000,
+  particleSize: 0.9,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
-  // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias. A symmetric spread has to raise
-  // its mean to widen its range, so the cloud gets heavier as the big motes get bigger; a
-  // biased tail decouples the two and puts small and large side by side everywhere,
-  // including out in the spray where a symmetric draw never reached.
-  sizeMin: 0.28,
-  sizeMax: 11.0,
-  sizeBias: 4.2,            // 1 is uniform; each step up crowds the population toward
+  // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
+  //
+  // A symmetric spread has to raise its MEAN to widen its RANGE, so the whole cloud gets
+  // heavier as the big motes get bigger and there is a limit to how far it can be pushed.
+  // A biased tail decouples the two: most motes stay small while a few reach right out to
+  // sizeMax. That is what puts small and large side by side rather than sorting them.
+  sizeMin: 0.30,
+  sizeMax: 12.0,
+  sizeBias: 4.0,            // 1 is uniform; each step up crowds the population toward
                             //   sizeMin while leaving the top of the range where it is
 
-  // ------------------------------------------------------------ the shape of the mass
-  // Not an ellipsoid. The mass is built from a handful of overlapping LOBES so its
-  // silhouette is lumpy and asymmetric, with a dense middle where lobes pile up — a plain
-  // ellipsoid reads as an airbrushed oval and never as a spatter.
-  lobes: 6,                 // more lobes = smoother; fewer = blobbier and more irregular
-  lobeSpread: 0.50,         // how far lobe centres wander from the middle, in box halves
-  lobeSize: 0.42,           // lobe radius, in box halves
-  coreShare: 0.74,          // fraction of motes in the mass proper; the rest are spray
-  corePack: 2.6,            // radial packing inside a lobe. 3 fills it evenly by volume;
-                            //   lower crowds the centre so each lobe keeps a hot middle
+  // Spread of the Gaussian, in box halves. The mass has NO boundary — density falls off
+  // smoothly forever — so there is no edge to give away, and the last per cent of motes
+  // is the scatter that makes the outline dissolve.
+  //
+  // Matched to the spread of the box draw this replaced. That draw was triangular over
+  // the box, standard deviation 1/sqrt(6) = 0.41 of a half-extent; a Gaussian at the same
+  // number reads WIDER, because its tails run on where the triangle stopped dead. 0.35
+  // lines the two up at the 90th percentile, which is where the eye reads the size — and
+  // it has to go a little under that, because at this count there are simply more motes
+  // out in the tail to be seen.
+  radialSigma: 0.31,
 
-  // The scattered outfall: motes flung well past the mass, thinning with distance. This
-  // is what stops the mass reading as a cut-out — its edge has to dissolve into countable
-  // dots rather than simply stop.
-  sprayReach: 2.9,          // how far the spray goes, as a multiple of the mass radius
-  sprayBias: 2.4,           // higher keeps most of the spray close in, a few far out
+  // How clumpy the interior is. Seats are rejection-sampled against a low-frequency noise
+  // field, so motes gather in some places and thin out in others instead of falling in a
+  // smooth gradient. 0 is the plain distribution; past ~0.8 the voids start reading as
+  // holes rather than as texture.
+  shapeNoise: 0.62,
+  shapeNoiseScale: 3.4,     // features per box width. Higher is finer, grainier clumping.
+
+  // How far the OUTLINE wanders. The mass's radius is scaled by a noise field read in
+  // each mote's direction, so the boundary rolls in and out instead of tracing an
+  // ellipse. Read per direction rather than per mote on purpose: per-mote jitter only
+  // fuzzes an edge, it never changes the shape of one.
+  edgeNoise: 0.50,          // 0 is a clean ellipsoid; past ~0.7 the mass tears into lumps
+  edgeNoiseScale: 1.5,      // features around the outline. Low is a few broad bulges,
+                            //   high is a crinkled rim.
 
   // ------------------------------------------------------------ the box the motes fill
   // Distribution volume, in units of the viewport HEIGHT at the cloud's depth, so the
@@ -125,7 +137,7 @@ const CONFIG = {
   //
   // Radius and push are fractions of viewport HEIGHT, not world units, so the opening
   // holds its size on screen at any window. Don't put world units here.
-  mouseRadius: 0.078,       // radius of the tube that opens
+  mouseRadius: 0.050,       // radius of the tube that opens
   mouseStrength: 0.055,     // how far a mote at the centre of it is pushed
   falloffPower: 2.0,        // 1 = linear, 2 = soft outer edge with a firm core
   mouseSmoothing: 0.12,     // lag on the cursor the motes actually see, per frame. Low
@@ -145,9 +157,9 @@ const CONFIG = {
   wrap: 0.45,               // how far light wraps past the terminator. 0 = hard Lambert,
                             //   which leaves half of every sphere black and reads as a
                             //   hole punched in a light page. Above ~0.7 it goes flat.
-  shininess: 55.0,          // specular exponent. High = a small tight glint, low = a broad
+  shininess: 40.0,          // specular exponent. High = a small tight glint, low = a broad
                             //   sheen. Small and tight is what reads as glass.
-  specular: 1.00,           // highlight strength
+  specular: 0.85,           // highlight strength
   specOpacity: 0.9,         // how much of the highlight survives into ALPHA. The glint has
                             //   to be opaque or it vanishes on the thin part of the shell.
   fresnelPower: 4.2,        // rim tightness. Low spreads the rim over the whole sphere.
@@ -168,16 +180,22 @@ const CONFIG = {
   edgeSoftness: 0.16,       // silhouette antialias, in radii. Too low and the discs step;
                             //   too high and they turn back into soft blobs.
 
-  // The glow around each sphere. This is what makes a clump read as luminous instead of
-  // as a pile of separate beads, and it is most of the difference from the reference look.
-  // It costs overdraw: the billboard grows by haloScale, so the fill cost goes as its
-  // SQUARE — 2.0 is four times the pixels per mote.
-  haloScale: 1.95,          // billboard size as a multiple of the sphere
-  haloStrength: 0.20,       // peak alpha of the glow at the silhouette
-  haloPower: 2.3,           // falloff. Higher hugs the sphere, lower spreads the bloom.
-  haloLift: 0.30,           // how far the glow is pushed toward white. A halo is light
-                            //   scattered off the sphere, so it sits brighter than it.
-  iridescence: 0.16,        // cool fringe at the extreme edge, where light would split
+  // ------------------------------------------------------------ crowding
+  // The denser a mote's neighbourhood, the deeper its colour. Each mote's neighbours are
+  // counted once, when the population is built, and the count travels with it as an
+  // attribute — so this is a property of the MOTE, not of what happens to be drawn on top
+  // of it. That distinction matters: doing it with a blend mode instead makes the whole
+  // cloud translucent and the spheres stop reading as solid.
+  //
+  // Because it is fixed per mote it also cannot flicker as the cloud turns, and it costs
+  // nothing per frame.
+  densityRadius: 0.030,     // neighbourhood size, as a fraction of viewport height
+  deepen: 0.62,             // how far the most crowded motes are taken toward the deep
+                            //   colour. 0 is off; 1 makes the core nearly black.
+  deepenBias: 0.85,         // curve on the normalised count. Under 1 spreads the effect
+                            //   into the mid-densities, over 1 keeps it to the very core.
+  deepenSat: 1.25,          // saturation boost as it deepens, so the core goes richer
+                            //   rather than merely darker — plain darkening reads as grey
 
   // ------------------------------------------------------------ colour
   // The spheres are shaded in greyscale and take their colour here, so this is the body
@@ -240,6 +258,7 @@ const numParam = (k, lo, hi) => {
 if (numParam('p', 1, 40000) !== null) CONFIG.particleCount = Math.round(numParam('p', 1, 40000));
 if (numParam('curl', 0, 5) !== null) CONFIG.curlAmplitude = numParam('curl', 0, 5);
 if (numParam('push', 0, 5) !== null) CONFIG.mouseStrength = numParam('push', 0, 5);
+if (numParam('noise', 0, 1) !== null) CONFIG.shapeNoise = numParam('noise', 0, 1);
 
 // ---------------------------------------------------------------- GLSL: curl noise
 // 3D simplex noise returning its ANALYTIC gradient alongside its value (xyz = gradient,
@@ -362,6 +381,7 @@ attribute float aSize;
 attribute float aTimeOffset;
 attribute float aBrightness;
 attribute float aCurlResp;       // 0 or 1
+attribute float aDensity;        // 0..1, how crowded this mote's neighbourhood is
 
 uniform float uTime;
 uniform float uFloatingSpeed;
@@ -378,7 +398,6 @@ uniform float uMouseStrength;    // already scaled by the fade
 uniform float uFalloffPower;
 uniform float uMouseCurlBoost;
 uniform float uParticleSize;
-uniform float uHaloScale;       // billboard is this many sphere radii across
 uniform float uHalfDepth;        // half the volume's depth
 uniform float uCentreViewZ;      // view-space z of the volume's own centre
 uniform vec3  uExpandOrigin;     // the screen corner, in this object's local space
@@ -388,6 +407,7 @@ uniform float uExpandCurlBoost;
 
 varying vec2  vUv;
 varying float vBrightness;
+varying float vDensity;
 varying float vFade;
 varying vec3  vPos;
 varying float vDepth;           // 0 at the front of the volume, 1 at the back
@@ -474,10 +494,11 @@ void main(){
   vDepth = clamp(0.5 - (viewZ - uCentreViewZ) / (2.0 * uHalfDepth), 0.0, 1.0);
   vUv = position.xy + 0.5;
   vBrightness = aBrightness;
+  vDensity = aDensity;
 
   // ---- 4. billboard ----------------------------------------------------------
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-  mv.xy += position.xy * (uParticleSize * aSize * 0.01 * uHaloScale);
+  mv.xy += position.xy * (uParticleSize * aSize * 0.01);
   gl_Position = projectionMatrix * mv;
 }
 `;
@@ -500,6 +521,7 @@ uniform float uOpacity;
 
 varying vec2  vUv;
 varying float vBrightness;
+varying float vDensity;
 varying float vFade;
 varying vec3  vPos;
 varying float vDepth;
@@ -520,11 +542,9 @@ uniform float uFill;
 uniform vec3  uFillColor;
 uniform float uCoreAlpha;
 uniform float uEdgeSoftness;
-uniform float uHaloScale;
-uniform float uHaloStrength;
-uniform float uHaloPower;
-uniform float uHaloLift;
-uniform float uIridescence;
+uniform float uDeepen;
+uniform float uDeepenBias;
+uniform float uDeepenSat;
 
 vec3 adjustSaturation(vec3 c, float s){
   float g = dot(c, vec3(0.299, 0.587, 0.114));
@@ -554,22 +574,9 @@ vec3 applyColorOverlay(vec3 base, vec3 ov, float mode, float strength){
 // place. That consistency is what makes them read as objects under one light rather than
 // as decorated discs, and it is why the light is not jittered per mote.
 void main(){
-  vec2 q = vUv * 2.0 - 1.0;
-  float rq = length(q);
-  if (rq > 1.0) discard;                 // outside the quad's inscribed circle
-
-  // The billboard is uHaloScale times the sphere, so the sphere occupies the inner
-  // 1/uHaloScale of it and the ring outside is free for the glow. rs is distance in
-  // SPHERE radii: 1 is the silhouette, uHaloScale is the outer edge of the halo.
-  float rs = rq * uHaloScale;
-
-  // The glow: a soft falloff filling the ring, and the thing that makes a dense clump
-  // read as luminous rather than as a pile of separate beads.
-  float t = clamp((rs - 1.0) / max(uHaloScale - 1.0, 1e-3), 0.0, 1.0);
-  float glow = pow(1.0 - t, uHaloPower);
-
-  vec2 p = q * uHaloScale;
-  float r2 = clamp(dot(p, p), 0.0, 1.0);
+  vec2 p = vUv * 2.0 - 1.0;
+  float r2 = dot(p, p);
+  if (r2 > 1.0) discard;                 // outside the silhouette
   float r = sqrt(r2);
   vec3 n = vec3(p, sqrt(max(0.0, 1.0 - r2)));
 
@@ -606,9 +613,13 @@ void main(){
   col = mix(col, uScanGlow, scanMask * 0.6 * uScanStrength);
   col *= vBrightness * (1.0 - uDepthDarken * vDepth);
 
-  vec3 body = uColorOverlay;
+  // Crowding deepens the body colour: darker and a little richer where motes are packed.
+  vec3 deep = clamp(uColorOverlay * (1.0 - uDeepen), 0.0, 1.0);
+  deep = adjustSaturation(deep, uDeepenSat);
+  vec3 body = mix(uColorOverlay, deep, pow(clamp(vDensity, 0.0, 1.0), uDeepenBias));
+
   vec3 mixed = col;
-  mixed = applyColorOverlay(mixed, uColorOverlay, uColorOverlayBlendMode, uColorOverlayStrength);
+  mixed = applyColorOverlay(mixed, body, uColorOverlayBlendMode, uColorOverlayStrength);
   mixed = adjustSaturation(mixed, uSaturation);
   mixed = adjustContrast(mixed, uContrast);
   mixed = mixed * uBrightness;
@@ -621,28 +632,15 @@ void main(){
   mixed = applyMinBrightness(mixed, uMinBrightness);
   mixed = clamp(mixed, 0.0, 1.0);
 
-  // A cool fringe at the extreme edge. Real bubbles split light at grazing angles, and a
-  // touch of it is what keeps a mass of one colour from looking like flat stickers.
-  mixed += uIridescence * pow(fres, 3.0) * vec3(0.35, 0.55, 1.0);
-  mixed = clamp(mixed, 0.0, 1.0);
-
   // Hollow shell: thin through the middle, dense at the rim. The smoothstep is the
   // antialias on the silhouette — with no texture there is no filtering doing it for us,
   // and without it the discs have visibly stepped edges.
   float shell = mix(uCoreAlpha, 1.0, fres);
-  float edge = smoothstep(1.0, 1.0 - uEdgeSoftness, rs);
+  float edge = smoothstep(1.0, 1.0 - uEdgeSoftness, r);
   float alpha = shell * edge * vBrightness * vFade * uOpacity * (1.0 - uDepthFade * vDepth);
   alpha = min(1.0, alpha + spec * uSpecOpacity);   // the highlight carries its own opacity
 
-  // Outside the silhouette the sphere shading means nothing, so the ring is the body
-  // colour at the glow's own falloff. Lit a little brighter than the sphere, because a
-  // halo is light scattered off it rather than the surface itself.
-  float haloA = glow * uHaloStrength * vBrightness * vFade * uOpacity
-              * (1.0 - uDepthFade * vDepth);
-  vec3 haloC = clamp(mix(body, vec3(1.0), uHaloLift), 0.0, 1.0);
-
-  float inSphere = step(rs, 1.0);
-  gl_FragColor = vec4(mix(haloC, mixed, inSphere), mix(haloA, alpha, inSphere));
+  gl_FragColor = vec4(mixed, alpha);
 }
 `;
 
@@ -665,6 +663,37 @@ scene.add(group);
 // is expressed against this, so the cloud holds its share of the frame on any window.
 const viewHeightAt = (z) =>
   2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * Math.abs(camera.position.z - z);
+
+// ---------------------------------------------------------------- shape noise
+// A small 3D value noise, used only on the CPU when seats are drawn. It does not need the
+// quality of the simplex noise in the shader — it is sampled a few times per mote at
+// startup and never again, and all it has to do is vary smoothly.
+const hash3 = (x, y, z) => {
+  const t = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453;
+  return t - Math.floor(t);
+};
+const smoothT = (t) => t * t * (3 - 2 * t);
+// Box-Muller, two at a time, with the spare kept for the next call.
+let gaussSpare = null;
+function gauss1() {
+  if (gaussSpare !== null) { const v = gaussSpare; gaussSpare = null; return v; }
+  const r = Math.sqrt(-2 * Math.log(1 - Math.random()));
+  const t = 2 * Math.PI * Math.random();
+  gaussSpare = r * Math.sin(t);
+  return r * Math.cos(t);
+}
+const gauss3 = () => [gauss1(), gauss1(), gauss1()];
+
+function valueNoise3(x, y, z) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const u = smoothT(x - xi), v = smoothT(y - yi), w = smoothT(z - zi);
+  const L = (a, b, t) => a + (b - a) * t;
+  const c = (dx, dy, dz) => hash3(xi + dx, yi + dy, zi + dz);
+  return L(
+    L(L(c(0,0,0), c(1,0,0), u), L(c(0,1,0), c(1,1,0), u), v),
+    L(L(c(0,0,1), c(1,0,1), u), L(c(0,1,1), c(1,1,1), u), v),
+    w);
+}
 
 // ---------------------------------------------------------------- geometry
 // One quad, instanced. Per-mote values are generated once on the CPU: seat in the box,
@@ -692,17 +721,6 @@ function buildParticles(count) {
   const halfH = CONFIG.boxHeight * vh * 0.5;
   const halfD = CONFIG.boxDepth  * vh * 0.5;
 
-  // Lobe centres, redrawn whenever the population is rebuilt. Kept off the exact middle
-  // so no lobe sits on top of another and the pile-up lands off-centre.
-  const lobeCentres = [];
-  for (let k = 0; k < CONFIG.lobes; k++) {
-    const u = Math.random() * 2 - 1;
-    const th = Math.random() * Math.PI * 2;
-    const rxy = Math.sqrt(1 - u * u);
-    const rr = CONFIG.lobeSpread * Math.pow(Math.random(), 0.6);
-    lobeCentres.push([rxy * Math.cos(th) * rr, rxy * Math.sin(th) * rr, u * rr]);
-  }
-
   const baseDir = new THREE.Vector3(
     CONFIG.floatingDirectionX, CONFIG.floatingDirectionY, CONFIG.floatingDirectionZ
   );
@@ -712,26 +730,44 @@ function buildParticles(count) {
   for (let i = 0; i < count; i++) {
     const i3 = i * 3;
 
-    // Seat: either inside one of the lobes that make up the mass, or out in the spray.
-    // Direction is drawn on a sphere and then squashed to the box, so the whole thing
-    // scales with the frame like everything else here.
-    const u = Math.random() * 2 - 1;
-    const th = Math.random() * Math.PI * 2;
-    const rxy = Math.sqrt(1 - u * u);
-    const dir = [rxy * Math.cos(th), rxy * Math.sin(th), u];
+    // RADIAL, not per-axis. Drawing each axis independently fills a BOX, and the flat
+    // share of that draw runs right up to its walls — which is exactly the straight left
+    // and bottom edges. A direction on the sphere plus a radius has no walls to find.
+    let sx = 0, sy = 0, sz = 0;
+    for (let tries = 0; tries < 6; tries++) {
+      // Three independent normals ARE a 3D Gaussian cloud: the direction comes out
+      // uniform for free, and the density falls off smoothly with no boundary anywhere.
+      // That is the point — any draw with a fixed maximum radius ends in an edge, and an
+      // edge is what has to be hidden. Here there is none to hide.
+      const g = gauss3();
+      const len = Math.hypot(g[0], g[1], g[2]) || 1e-6;
+      const dx = g[0] / len, dy = g[1] / len, dz = g[2] / len;
+      const rad = len * CONFIG.radialSigma;
 
-    let cx = 0, cy = 0, cz = 0, rad;
-    if (Math.random() < CONFIG.coreShare) {
-      const L = lobeCentres[(Math.random() * lobeCentres.length) | 0];
-      cx = L[0]; cy = L[1]; cz = L[2];
-      rad = CONFIG.lobeSize * Math.pow(Math.random(), 1 / CONFIG.corePack);
-    } else {
-      // spray: starts at the edge of the mass and thins outward
-      rad = 1.0 + (CONFIG.sprayReach - 1.0) * Math.pow(Math.random(), CONFIG.sprayBias);
+      // Wobble the boundary itself. The radius is scaled by a noise field read in the
+      // mote's own DIRECTION, so neighbouring motes agree on where the edge is and it
+      // comes out as a rolling, lumpy outline rather than as per-mote jitter — which
+      // would only fuzz a circle without ever changing its shape.
+      const e = CONFIG.edgeNoiseScale;
+      const w = valueNoise3(dx * e + 31.7, dy * e + 8.3, dz * e + 57.1) - 0.5;
+      const r = rad * (1 + CONFIG.edgeNoise * 2 * w);
+
+      sx = dx * r; sy = dy * r; sz = dz * r;
+
+      // Then carve the interior: rejection against a second noise field so motes clump
+      // and thin instead of falling in a smooth gradient. Bounded retries rather than a
+      // loop until success — in a heavily carved field a seat can be unlucky many times
+      // over and the cost of insisting is unbounded. Taking the last candidate biases the
+      // result slightly toward the smooth distribution, the harmless direction to be
+      // wrong in.
+      const k = CONFIG.shapeNoiseScale;
+      const d = valueNoise3(sx * k + 11.3, sy * k + 4.7, sz * k + 19.1);
+      const accept = 1 - CONFIG.shapeNoise + CONFIG.shapeNoise * d * 2;
+      if (Math.random() < accept) break;
     }
-    initPos[i3]     = (cx + dir[0] * rad) * halfW;
-    initPos[i3 + 1] = (cy + dir[1] * rad) * halfH;
-    initPos[i3 + 2] = (cz + dir[2] * rad) * halfD;
+    initPos[i3]     = sx * halfW;
+    initPos[i3 + 1] = sy * halfH;
+    initPos[i3 + 2] = sz * halfD;
 
     const travels = Math.random() < CONFIG.floatingParticles;
     driftSpeed[i] = travels ? CONFIG.floatingSpeed * (0.6 + Math.random() * 0.8) : 0.0;
@@ -754,6 +790,46 @@ function buildParticles(count) {
     curlResp[i] = Math.random() < CONFIG.curlAffectedParticles ? 1.0 : 0.0;
   }
 
+  // ---- crowding ------------------------------------------------------------
+  // Each mote's neighbours within densityRadius, counted through a uniform grid: bucket
+  // every mote by cell, then look only at the 27 cells around it. Naively this is a
+  // pairwise scan — 900 million comparisons at 30k motes — where the grid makes it linear
+  // in the population and finishes in a few milliseconds, once, at build time.
+  const density = new Float32Array(count);
+  {
+    const R = CONFIG.densityRadius * viewHeightAt(CONFIG.anchorZ);
+    const R2 = R * R;
+    const buckets = new Map();
+    const cellOf = (v) => Math.floor(v / R);
+    const keyOf = (a, b, c) => a + ':' + b + ':' + c;
+    for (let i = 0; i < count; i++) {
+      const k = keyOf(cellOf(initPos[i * 3]), cellOf(initPos[i * 3 + 1]), cellOf(initPos[i * 3 + 2]));
+      const b = buckets.get(k);
+      if (b) b.push(i); else buckets.set(k, [i]);
+    }
+    const raw = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      const x = initPos[i * 3], y = initPos[i * 3 + 1], z = initPos[i * 3 + 2];
+      const gx = cellOf(x), gy = cellOf(y), gz = cellOf(z);
+      let n = 0;
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+        const list = buckets.get(keyOf(gx + a, gy + b, gz + c));
+        if (!list) continue;
+        for (let j = 0; j < list.length; j++) {
+          const o = list[j] * 3;
+          const dx = initPos[o] - x, dy = initPos[o + 1] - y, dz = initPos[o + 2] - z;
+          if (dx * dx + dy * dy + dz * dz < R2) n++;
+        }
+      }
+      raw[i] = n - 1;                       // a mote is not its own neighbour
+    }
+    // Normalise against the 97th percentile rather than the maximum: one freak cluster
+    // would otherwise set the scale and flatten the effect everywhere else.
+    const sorted = Float32Array.from(raw).sort();
+    const ref = Math.max(1, sorted[Math.floor(count * 0.97)]);
+    for (let i = 0; i < count; i++) density[i] = Math.min(1, raw[i] / ref);
+  }
+
   const inst = (name, arr, size) =>
     geo.setAttribute(name, new THREE.InstancedBufferAttribute(arr, size));
   inst('aInitPos', initPos, 3);
@@ -763,6 +839,7 @@ function buildParticles(count) {
   inst('aTimeOffset', timeOffs, 1);
   inst('aBrightness', brights, 1);
   inst('aCurlResp', curlResp, 1);
+  inst('aDensity', density, 1);
 
   // the cloud moves in the shader, so nothing can be culled off its rest bounds
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Math.max(halfW, halfH, halfD) * 4);
@@ -828,11 +905,9 @@ const uniforms = {
     CONFIG.fillColorR, CONFIG.fillColorG, CONFIG.fillColorB) },
   uCoreAlpha: { value: CONFIG.coreAlpha },
   uEdgeSoftness: { value: CONFIG.edgeSoftness },
-  uHaloScale: { value: CONFIG.haloScale },
-  uHaloStrength: { value: CONFIG.haloStrength },
-  uHaloPower: { value: CONFIG.haloPower },
-  uHaloLift: { value: CONFIG.haloLift },
-  uIridescence: { value: CONFIG.iridescence },
+  uDeepen: { value: CONFIG.deepen },
+  uDeepenBias: { value: CONFIG.deepenBias },
+  uDeepenSat: { value: CONFIG.deepenSat },
   uExpandOrigin: { value: new THREE.Vector3() },
   uExpand: { value: 0 },
   uExpandAmount: { value: CONFIG.expandAmount },
@@ -950,7 +1025,7 @@ function place() {
 
   // Typical mote diameter in device pixels. The mean of the size draw is
   // sizeMin + (sizeMax - sizeMin) / (sizeBias + 1) — for a heavy tail that sits far below
-  // the middle of the range, since the largest motes are rare.
+  // the middle of the range, because the largest motes are rare.
   const meanMult = CONFIG.sizeMin
     + (CONFIG.sizeMax - CONFIG.sizeMin) / (CONFIG.sizeBias + 1);
   const typicalPx = (CONFIG.particleSize * meanMult * 0.01) / vh * renderer.domElement.height;

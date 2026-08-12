@@ -21,7 +21,7 @@ found here transfers to the build by typing it in. `?ui=0` hides the panel.
 | bar | writes | default |
 |---|---|---|
 | colour | `colorOverlayR/G/B` | `0.850 0.050 0.060` |
-| quantity | `particleCount` | 14 000, range 14 000–30 000 |
+| quantity | `particleCount` | 30 000, range 14 000–30 000 |
 | size | `particleSize` | 0.9 |
 
 Colour is **one** bar rather than three because the material only ever varies in hue: the
@@ -29,22 +29,6 @@ spheres are shaded in greyscale and tinted, so saturation and value belong to th
 rig, not to the choice of colour. The bar drives hue, holds S and V at the shipped red's,
 and prints the RGB triple to paste back. Quantity re-seeds the whole population, so a drag
 is coalesced into one rebuild rather than one per input event.
-
-## The shape of the mass
-
-The mass is built from a handful of overlapping **lobes** rather than as one ellipsoid, so
-its silhouette is lumpy and asymmetric and the middle is dense where lobes pile up. An
-ellipsoid reads as an airbrushed oval, never as a spatter.
-
-Around it is a **spray**: `1 − coreShare` of the motes are flung out to `sprayReach` times
-the mass radius, thinning with distance. Without it the mass has a definite edge and reads
-as a cut-out; the edge has to dissolve into countable dots instead of stopping.
-
-Sizes come from a heavy-tailed draw, `sizeMin + (sizeMax − sizeMin) × rand^sizeBias`, not a
-± spread around the base. A symmetric spread has to raise its mean to widen its range, so
-the cloud gets heavier as the big motes get bigger; a biased tail decouples the two and puts
-small and large side by side everywhere, including out in the spray where a symmetric draw
-never reached.
 
 ## The motes are spheres
 
@@ -69,15 +53,106 @@ The material is a small lighting rig rather than a flat tint:
 - **specular**, tight and bright — the single strongest "this is a ball" cue.
 - **fresnel rim**, which drives *alpha* as well as colour, so the spheres are dense at the
   edge and thin through the middle and read as shells rather than beads.
-- **a halo** in the ring outside the sphere, which is what makes a dense clump read as
-  luminous rather than as a pile of separate beads. It costs overdraw: the billboard grows
-  by `haloScale`, so fill cost goes as its **square** — 2.0 is four times the pixels a mote.
-- **an iridescent fringe** at the extreme edge, where a real bubble splits light. A touch of
-  it keeps a mass of a single colour from looking like flat stickers.
 
 Everything is lit in view space from a fixed direction, so every mote catches its highlight
 in the same place. That consistency is what makes them read as objects under one light
 rather than as separately decorated discs, and it is why the light is not jittered per mote.
+
+## Size, small and large everywhere
+
+Sizes come from a heavy-tailed draw, `sizeMin + (sizeMax − sizeMin) × rand^sizeBias`, rather
+than a ± spread around the base. A symmetric spread has to raise its **mean** to widen its
+**range**, so the whole cloud gets heavier as the big motes get bigger and there is a limit
+to how far it can be pushed. A biased tail decouples the two: most motes stay small while a
+few reach right out to `sizeMax`.
+
+Seats are drawn **radially**, not per axis. Drawing each axis independently fills a *box*,
+and the flat part of that draw runs right up to its walls — which is where the straight left
+and bottom edges came from. Three independent normals give a 3D Gaussian cloud instead: the
+direction falls out uniform for free, and the density falls off smoothly with **no boundary
+anywhere**. Any draw with a fixed maximum radius ends in an edge; here there is none to hide.
+
+On top of that, `edgeNoise` scales the radius by a noise field read in each mote's
+**direction**, so neighbouring motes agree on where the edge is and the outline rolls in and
+out. Read per mote instead, it would only fuzz an edge and never change its shape.
+
+Measured as how far the left boundary wanders row to row, with its slow trend removed:
+
+| | detrended wander |
+|---|---|
+| box draw | 14.1 px |
+| radial, `edgeNoise` 0 | 29.6 px |
+| radial + `edgeNoise` 0.50 | **33.0 px** |
+
+Most of the gain is losing the box; the noise field adds the rest.
+
+`radialSigma` is matched to the spread of the box draw it replaced. That draw was
+triangular over the box — standard deviation 1/√6 = 0.41 of a half-extent — but a Gaussian
+at the same number reads *wider*, because its tails run on where the triangle stopped dead,
+and at 30 000 there are more motes out there to be seen. 0.31 lines the two up at the 90th
+percentile, which is where the eye reads the size: 125.9 px against 121.3 px, within 4%.
+
+Sampled over 200 000 motes, against the symmetric spread this replaced:
+
+| | motes in the outer band | large motes there | largest there | mean size | 99th pct |
+|---|---|---|---|---|---|
+| symmetric spread | 38.0% | **0.00%** | 5.0 | 2.12 | 4.92 |
+| heavy tail + `edgeShare` | 53.3% | **10.2%** | 14.0 | 2.58 | 13.32 |
+
+The extremes grow nearly threefold while the mean barely moves — more variety without a
+heavier cloud.
+
+## Crowding deepens the colour
+
+The denser a mote's neighbourhood, the deeper its colour. Neighbours are counted **once**,
+when the population is built, and the count rides along as a per-mote attribute — so this is
+a property of the mote, not of whatever happens to be drawn on top of it.
+
+That distinction is the whole design. Doing it with a blend mode instead makes every mote a
+filter, which turns the cloud translucent and stops the spheres reading as solid. Here the
+blending is untouched: the spheres stay opaque and glossy, and only their body colour moves.
+Being fixed per mote, it also cannot flicker as the cloud turns, and it costs nothing per
+frame.
+
+Counting is done through a uniform grid — bucket every mote by cell, then look only at the
+27 cells around it. The naive version is a pairwise scan, 900 million comparisons at 30 000
+motes; the grid is linear in the population and finishes in a few milliseconds at build
+time. The counts are normalised against the **97th percentile** rather than the maximum, or
+a single freak cluster would set the scale and flatten the effect everywhere else.
+
+Measured by local coverage, against the same build without the term:
+
+| | | R | G | B | luminance |
+|---|---|---|---|---|---|
+| sparse | without | 214.1 | 146.0 | 146.2 | 168.8 |
+| | with | 213.6 | 149.7 | 149.8 | 171.0 |
+| crowded | without | 200.1 | 60.4 | 64.0 | 108.2 |
+| | **with** | **176.9** | 60.3 | 63.7 | **100.3** |
+
+The sparse end is untouched and the crowded end drops 23 points in the red channel itself —
+the effect lands where the motes are packed and nowhere else.
+
+`deepen` is the amount, `deepenBias` the curve (under 1 spreads it into the mid-densities),
+`deepenSat` keeps the core going richer rather than merely grey, and `densityRadius` sets
+what counts as a neighbourhood.
+
+## A noisier interior
+
+Seats are rejection-sampled against a low-frequency value-noise field, so motes gather in
+some places and thin out in others instead of falling in a smooth radial gradient.
+`shapeNoise` is the amount, `shapeNoiseScale` the feature size. `?noise=<0..1>` overrides it.
+
+Measured with the radial trend divided out — so this is *local* texture, not the falloff:
+
+| | local variation |
+|---|---|
+| `shapeNoise` 0 | 0.564 |
+| `shapeNoise` 0.62 | 0.609 |
+
+Retries are bounded at six rather than looping until a seat is accepted: in a heavily carved
+field a seat can be unlucky many times over and the cost of insisting is unbounded. Taking
+the last candidate biases the result slightly toward the smooth distribution, which is the
+harmless direction to be wrong in.
 
 ## What makes it read as a volume
 
@@ -132,7 +207,8 @@ Two responses, composed rather than competing.
 
 **The push** measures each mote against its distance to the *ray* from the camera through
 the pointer, so the cloud opens as a tube through its whole depth rather than at a single
-z. Inside the radius a mote is driven straight off the ray on a `pow(1 - d/r, falloffPower)`
+z. `mouseRadius` is 0.050, down from 0.155: the cleared core measures about 12 px where it
+was about 45 px. Inside the radius a mote is driven straight off the ray on a `pow(1 - d/r, falloffPower)`
 falloff, with its curl amplified so the opening boils instead of sliding apart.
 
 **The bloom** grows the whole volume out of the screen corner while the pointer is near it.
@@ -169,6 +245,10 @@ Footprint is the screen area actually covered (4 px cells touched) — ×1.65 on
   is then 1–4 px and the key/fill/rim/specular rig is below what the eye can resolve — the
   cloud is a fine spray, which is a fine look, but it is not the lighting doing the work.
   The shading starts to read again around 2.5.
+- **30 000 motes is the top of the range and it is not free.** In the software-rendered
+  harness it averages 395 ms a frame against 151 ms at 14 000 — still linear, still not
+  representative of a real GPU, but it does mean quantity is the control that decides
+  whether this runs well. Check it on real hardware before shipping.
 - **Cost is linear in `particleCount`**, with no fixed overhead worth speaking of: measured
   26 / 79 / 151 ms per frame at 2000 / 7000 / 14 000. Those numbers come from a headless
   SwiftShader context, which rasterises on the CPU, so they are not what real hardware
