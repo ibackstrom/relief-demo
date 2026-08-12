@@ -189,6 +189,26 @@ const CONFIG = {
   edgeSoftness: 0.16,       // silhouette antialias, in radii. Too low and the discs step;
                             //   too high and they turn back into soft blobs.
 
+  // ------------------------------------------------------------ bloom
+  // The glow is a POST pass over the whole frame, not something each mote draws for
+  // itself. The scene goes into a half-float target, the bright part is extracted,
+  // blurred at a few scales and added back. That is where the reference look comes from:
+  // its particles are plain, and everything luminous about them happens afterwards.
+  //
+  // The threshold is deliberately almost zero, so it is not really a "bright pass" at
+  // all — every lit pixel blooms, and the pass reads as a soft light around the mass
+  // rather than as highlights picked out of it.
+  bloom: true,
+  bloomThreshold: 0.011,
+  bloomStrength: 1.55,      // above the reference's 0.62 on purpose: theirs glows against
+                            //   black, where added light is all there is. Against a light
+                            //   page there is nothing to add light TO, so the pass has to
+                            //   work by spreading colour instead, and that costs more.
+  bloomRadius: 0.22,        // blur spread, in half-res texels per step
+  bloomAlpha: 1.70,         // how much the glow raises the canvas's own alpha. The page
+                            //   behind is light, so without this the glow has nothing to
+                            //   show up against and simply disappears into it.
+
   // ------------------------------------------------------------ crowding
   // The denser a mote's neighbourhood, the deeper its colour. Each mote's neighbours are
   // counted once, when the population is built, and the count travels with it as an
@@ -268,6 +288,8 @@ if (numParam('p', 1, 40000) !== null) CONFIG.particleCount = Math.round(numParam
 if (numParam('curl', 0, 5) !== null) CONFIG.curlAmplitude = numParam('curl', 0, 5);
 if (numParam('push', 0, 5) !== null) CONFIG.mouseStrength = numParam('push', 0, 5);
 if (numParam('noise', 0, 1) !== null) CONFIG.shapeNoise = numParam('noise', 0, 1);
+if (PARAMS.get('bloom') === '0') CONFIG.bloom = false;
+if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
 
 // ---------------------------------------------------------------- GLSL: curl noise
 // 3D simplex noise returning its ANALYTIC gradient alongside its value (xyz = gradient,
@@ -1043,6 +1065,151 @@ function sortByDepth() {
   }
 }
 
+
+// ---------------------------------------------------------------- bloom
+// Scene -> half-float target -> soft-threshold prefilter -> separable blur at three
+// halving scales -> added back. Written out rather than pulled from a composer so the
+// final composite can control ALPHA: this canvas is an overlay, and a glow that only
+// adds colour has nothing to show up against on a light page.
+const FS_VERT = /* glsl */`
+varying vec2 vUv;
+void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+`;
+
+// Soft knee, so the pass fades in over a range instead of switching on at a hard edge —
+// a hard cut crawls along the boundary as motes drift across it.
+const PREFILTER_FRAG = /* glsl */`
+uniform sampler2D tSrc;
+uniform float uThreshold;
+varying vec2 vUv;
+void main(){
+  vec4 c = texture2D(tSrc, vUv);
+  float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722)) * c.a;
+  float knee = uThreshold * 0.5 + 1e-5;
+  float w = clamp((l - uThreshold + knee) / (2.0 * knee), 0.0, 1.0);
+  w = w * w * (l > uThreshold ? 1.0 : w);
+  gl_FragColor = vec4(c.rgb * c.a * w, 1.0);
+}
+`;
+
+// Nine taps on a Gaussian, run once per axis. Separable, so a 9x9 kernel costs 18 samples
+// instead of 81.
+const BLUR_FRAG = /* glsl */`
+uniform sampler2D tSrc;
+uniform vec2 uDir;            // texel step, already scaled by the radius
+varying vec2 vUv;
+void main(){
+  float w[5];
+  w[0] = 0.2270270270; w[1] = 0.1945945946; w[2] = 0.1216216216;
+  w[3] = 0.0540540541; w[4] = 0.0162162162;
+  vec3 sum = texture2D(tSrc, vUv).rgb * w[0];
+  for (int i = 1; i < 5; i++) {
+    vec2 o = uDir * float(i);
+    sum += texture2D(tSrc, vUv + o).rgb * w[i];
+    sum += texture2D(tSrc, vUv - o).rgb * w[i];
+  }
+  gl_FragColor = vec4(sum, 1.0);
+}
+`;
+
+const COMPOSITE_FRAG = /* glsl */`
+uniform sampler2D tScene;
+uniform sampler2D tBloom0;
+uniform sampler2D tBloom1;
+uniform sampler2D tBloom2;
+uniform float uStrength;
+uniform float uAlpha;
+varying vec2 vUv;
+void main(){
+  vec4 base = texture2D(tScene, vUv);
+  // The three scales carry progressively wider, weaker light — a single blur gives either
+  // a tight rim or a flat wash, never both.
+  vec3 b = texture2D(tBloom0, vUv).rgb * 1.00
+         + texture2D(tBloom1, vUv).rgb * 0.60
+         + texture2D(tBloom2, vUv).rgb * 0.35;
+  b *= uStrength;
+
+  // Output PREMULTIPLIED. The glow has to lift the canvas's own alpha or there is nothing
+  // for it to be seen against: the page behind is light, and colour alone would vanish
+  // into it. Raising alpha is what lets the glow tint the page rather than sit under it.
+  float a = clamp(base.a + dot(b, vec3(0.333)) * uAlpha, 0.0, 1.0);
+  gl_FragColor = vec4(base.rgb * base.a + b, a);
+}
+`;
+
+let bloomChain = null;
+function makeBloom() {
+  const opts = { type: THREE.HalfFloatType, depthBuffer: false,
+                 minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
+  const rt = (w, h, depth) => new THREE.WebGLRenderTarget(
+    Math.max(1, w | 0), Math.max(1, h | 0),
+    depth ? { ...opts, depthBuffer: true } : opts);
+
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), null);
+  const fsScene = new THREE.Scene().add(quad);
+  const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const mat = (frag, uniforms) => new THREE.ShaderMaterial({
+    vertexShader: FS_VERT, fragmentShader: frag, uniforms, depthTest: false,
+    depthWrite: false, transparent: false,
+  });
+
+  const chain = {
+    scene: null, levels: [], quad, fsScene, fsCam,
+    prefilter: mat(PREFILTER_FRAG, {
+      tSrc: { value: null }, uThreshold: { value: CONFIG.bloomThreshold } }),
+    blur: mat(BLUR_FRAG, { tSrc: { value: null }, uDir: { value: new THREE.Vector2() } }),
+    composite: mat(COMPOSITE_FRAG, {
+      tScene: { value: null }, tBloom0: { value: null }, tBloom1: { value: null },
+      tBloom2: { value: null }, uStrength: { value: CONFIG.bloomStrength },
+      uAlpha: { value: CONFIG.bloomAlpha } }),
+    resize(w, h) {
+      if (this.scene) this.scene.dispose();
+      this.levels.forEach((l) => { l.a.dispose(); l.b.dispose(); });
+      this.scene = rt(w, h, true);
+      this.levels = [];
+      for (let i = 0; i < 3; i++) {
+        const d = 2 << i;                       // half, quarter, eighth
+        this.levels.push({ a: rt(w / d, h / d), b: rt(w / d, h / d), w: w / d, h: h / d });
+      }
+    },
+  };
+  return chain;
+}
+
+function renderBloom() {
+  const c = bloomChain;
+  renderer.setRenderTarget(c.scene);
+  renderer.clear();
+  renderer.render(scene, camera);
+
+  const draw = (material, target) => {
+    c.quad.material = material;
+    renderer.setRenderTarget(target);
+    renderer.clear();
+    renderer.render(c.fsScene, c.fsCam);
+  };
+
+  // Each level is prefiltered from the SCENE, not chained off the level above: chaining
+  // compounds the blur and the widest level ends up a featureless smear.
+  for (const lv of c.levels) {
+    c.prefilter.uniforms.tSrc.value = c.scene.texture;
+    draw(c.prefilter, lv.a);
+    const r = CONFIG.bloomRadius * 8.0;
+    c.blur.uniforms.tSrc.value = lv.a.texture;
+    c.blur.uniforms.uDir.value.set(r / lv.w, 0);
+    draw(c.blur, lv.b);
+    c.blur.uniforms.tSrc.value = lv.b.texture;
+    c.blur.uniforms.uDir.value.set(0, r / lv.h);
+    draw(c.blur, lv.a);
+  }
+
+  c.composite.uniforms.tScene.value = c.scene.texture;
+  c.composite.uniforms.tBloom0.value = c.levels[0].a.texture;
+  c.composite.uniforms.tBloom1.value = c.levels[1].a.texture;
+  c.composite.uniforms.tBloom2.value = c.levels[2].a.texture;
+  draw(c.composite, null);
+}
+
 // ---------------------------------------------------------------- placement
 // The group is parked in a corner of the viewport. anchor 1 = the edge exactly, so the
 // default sits the mass just inside the top-right and lets its tail run off the corner.
@@ -1150,6 +1317,11 @@ function resize() {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   uniforms.uViewportPx.value = renderer.domElement.height;
+  if (CONFIG.bloom) {
+    if (!bloomChain) bloomChain = makeBloom();
+    const dpr = renderer.getPixelRatio();
+    bloomChain.resize(innerWidth * dpr, innerHeight * dpr);
+  }
   place();
 }
 addEventListener('resize', resize);
@@ -1180,7 +1352,8 @@ function tick() {
     _v.setFromMatrixPosition(group.matrixWorld).applyMatrix4(camera.matrixWorldInverse).z;
   sortByDepth();
   updateCursor(dt);
-  renderer.render(scene, camera);
+  if (CONFIG.bloom && bloomChain) renderBloom();
+  else renderer.render(scene, camera);
   if (firstFrame) { firstFrame = false; dismissLoading(); }
 }
 tick();

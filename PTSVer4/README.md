@@ -102,6 +102,38 @@ Sampled over 200 000 motes, against the symmetric spread this replaced:
 The extremes grow nearly threefold while the mean barely moves — more variety without a
 heavier cloud.
 
+## The glow is a post pass
+
+The luminous quality is **not** something each mote draws for itself. The scene is rendered
+into a half-float target, the bright part is extracted, blurred at three halving scales and
+added back. The particles themselves are plain.
+
+The threshold is almost zero (0.011), so it is not really a bright pass: every lit pixel
+blooms and the result reads as light around the whole mass rather than as highlights picked
+out of it.
+
+Three things had to differ from a textbook bloom, all because this is an overlay on a
+**light** page rather than a scene on black:
+
+- **Strength runs higher** — 1.55 against the reference's 0.62. Glowing against black is
+  just adding light; against a light page there is nothing to add light *to*, so the pass
+  has to work by spreading colour, which costs more.
+- **The composite raises the canvas's own alpha**, not only its colour. A glow that adds
+  only colour has nothing to show up against and disappears into the page. Lifting alpha is
+  what lets it tint the page instead of sitting under it. Output is premultiplied for that
+  reason.
+- **Each level is prefiltered from the scene**, not chained off the level above. Chaining
+  compounds the blur and the widest level ends up a featureless smear.
+
+Measured against the same frame with `?bloom=0`:
+
+| | tinted area | peak redness |
+|---|---|---|
+| off | 6389 px | 179.3 |
+| on | 11 118 px | 246.0 |
+
+`?bloom=0` disables it, `?bs=<n>` sets the strength.
+
 ## Crowding deepens the colour
 
 The denser a mote's neighbourhood, the deeper its colour. Neighbours are counted **once**,
