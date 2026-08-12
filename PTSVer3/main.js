@@ -23,7 +23,7 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 14000,
+  particleCount: 30000,
   particleSize: 0.9,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
@@ -38,11 +38,10 @@ const CONFIG = {
   sizeBias: 4.0,            // 1 is uniform; each step up crowds the population toward
                             //   sizeMin while leaving the top of the range where it is
 
-  // Share of motes seated by a UNIFORM draw instead of the centre-biased one. The
-  // centre-biased draw is what rounds the cloud off, but on its own it leaves the outer
-  // reaches thin — so the rare large motes almost never landed there and the perimeter
-  // came out as fine dust only. This fraction spreads flat across the box and fills it.
-  edgeShare: 0.45,
+  // Spread of the Gaussian, in box halves. The mass has NO boundary — density falls off
+  // smoothly forever — so there is no edge to give away. Roughly 99% of motes land inside
+  // 2.6 of these, and the last per cent is the scatter that makes the outline dissolve.
+  radialSigma: 0.52,
 
   // How clumpy the interior is. Seats are rejection-sampled against a low-frequency noise
   // field, so motes gather in some places and thin out in others instead of falling in a
@@ -50,6 +49,14 @@ const CONFIG = {
   // holes rather than as texture.
   shapeNoise: 0.62,
   shapeNoiseScale: 3.4,     // features per box width. Higher is finer, grainier clumping.
+
+  // How far the OUTLINE wanders. The mass's radius is scaled by a noise field read in
+  // each mote's direction, so the boundary rolls in and out instead of tracing an
+  // ellipse. Read per direction rather than per mote on purpose: per-mote jitter only
+  // fuzzes an edge, it never changes the shape of one.
+  edgeNoise: 0.50,          // 0 is a clean ellipsoid; past ~0.7 the mass tears into lumps
+  edgeNoiseScale: 1.5,      // features around the outline. Low is a few broad bulges,
+                            //   high is a crinkled rim.
 
   // ------------------------------------------------------------ the box the motes fill
   // Distribution volume, in units of the viewport HEIGHT at the cloud's depth, so the
@@ -630,6 +637,17 @@ const hash3 = (x, y, z) => {
   return t - Math.floor(t);
 };
 const smoothT = (t) => t * t * (3 - 2 * t);
+// Box-Muller, two at a time, with the spare kept for the next call.
+let gaussSpare = null;
+function gauss1() {
+  if (gaussSpare !== null) { const v = gaussSpare; gaussSpare = null; return v; }
+  const r = Math.sqrt(-2 * Math.log(1 - Math.random()));
+  const t = 2 * Math.PI * Math.random();
+  gaussSpare = r * Math.sin(t);
+  return r * Math.cos(t);
+}
+const gauss3 = () => [gauss1(), gauss1(), gauss1()];
+
 function valueNoise3(x, y, z) {
   const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
   const u = smoothT(x - xi), v = smoothT(y - yi), w = smoothT(z - zi);
@@ -676,25 +694,38 @@ function buildParticles(count) {
   for (let i = 0; i < count; i++) {
     const i3 = i * 3;
 
-    // Two draws, mixed by population. The centre-biased one (mean of two samples) rounds
-    // the mass off and thins its edges; the flat one reaches the walls of the box and is
-    // what puts motes — of every size — right out on the perimeter.
-    const flat = Math.random() < CONFIG.edgeShare;
-    const draw = flat
-      ? () => (Math.random() * 2 - 1)
-      : () => ((Math.random() + Math.random()) - 1.0);
-
-    // Then rejection-sample the seat against a noise field so the interior clumps.
-    // Bounded retries rather than a loop until success: in a heavily carved field a seat
-    // can be unlucky many times over, and the cost of insisting is unbounded. Taking the
-    // last candidate after a few tries biases the result a little toward the smooth
-    // distribution, which is the harmless direction to be wrong in.
+    // RADIAL, not per-axis. Drawing each axis independently fills a BOX, and the flat
+    // share of that draw runs right up to its walls — which is exactly the straight left
+    // and bottom edges. A direction on the sphere plus a radius has no walls to find.
     let sx = 0, sy = 0, sz = 0;
     for (let tries = 0; tries < 6; tries++) {
-      sx = draw(); sy = draw(); sz = draw();
+      // Three independent normals ARE a 3D Gaussian cloud: the direction comes out
+      // uniform for free, and the density falls off smoothly with no boundary anywhere.
+      // That is the point — any draw with a fixed maximum radius ends in an edge, and an
+      // edge is what has to be hidden. Here there is none to hide.
+      const g = gauss3();
+      const len = Math.hypot(g[0], g[1], g[2]) || 1e-6;
+      const dx = g[0] / len, dy = g[1] / len, dz = g[2] / len;
+      const rad = len * CONFIG.radialSigma;
+
+      // Wobble the boundary itself. The radius is scaled by a noise field read in the
+      // mote's own DIRECTION, so neighbouring motes agree on where the edge is and it
+      // comes out as a rolling, lumpy outline rather than as per-mote jitter — which
+      // would only fuzz a circle without ever changing its shape.
+      const e = CONFIG.edgeNoiseScale;
+      const w = valueNoise3(dx * e + 31.7, dy * e + 8.3, dz * e + 57.1) - 0.5;
+      const r = rad * (1 + CONFIG.edgeNoise * 2 * w);
+
+      sx = dx * r; sy = dy * r; sz = dz * r;
+
+      // Then carve the interior: rejection against a second noise field so motes clump
+      // and thin instead of falling in a smooth gradient. Bounded retries rather than a
+      // loop until success — in a heavily carved field a seat can be unlucky many times
+      // over and the cost of insisting is unbounded. Taking the last candidate biases the
+      // result slightly toward the smooth distribution, the harmless direction to be
+      // wrong in.
       const k = CONFIG.shapeNoiseScale;
       const d = valueNoise3(sx * k + 11.3, sy * k + 4.7, sz * k + 19.1);
-      // accept everywhere at shapeNoise 0; at 1 the field alone decides
       const accept = 1 - CONFIG.shapeNoise + CONFIG.shapeNoise * d * 2;
       if (Math.random() < accept) break;
     }

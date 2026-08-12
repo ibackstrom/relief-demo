@@ -21,7 +21,7 @@ found here transfers to the build by typing it in. `?ui=0` hides the panel.
 | bar | writes | default |
 |---|---|---|
 | colour | `colorOverlayR/G/B` | `0.850 0.050 0.060` |
-| quantity | `particleCount` | 14 000, range 14 000–30 000 |
+| quantity | `particleCount` | 30 000, range 14 000–30 000 |
 | size | `particleSize` | 0.9 |
 
 Colour is **one** bar rather than three because the material only ever varies in hue: the
@@ -66,10 +66,25 @@ than a ± spread around the base. A symmetric spread has to raise its **mean** t
 to how far it can be pushed. A biased tail decouples the two: most motes stay small while a
 few reach right out to `sizeMax`.
 
-`edgeShare` of the population is also seated by a **uniform** draw instead of the
-centre-biased one. The centre-biased draw is what rounds the mass off, but on its own it
-leaves the outer reaches thin — so the rare large motes almost never landed there and the
-perimeter came out as fine dust only.
+Seats are drawn **radially**, not per axis. Drawing each axis independently fills a *box*,
+and the flat part of that draw runs right up to its walls — which is where the straight left
+and bottom edges came from. Three independent normals give a 3D Gaussian cloud instead: the
+direction falls out uniform for free, and the density falls off smoothly with **no boundary
+anywhere**. Any draw with a fixed maximum radius ends in an edge; here there is none to hide.
+
+On top of that, `edgeNoise` scales the radius by a noise field read in each mote's
+**direction**, so neighbouring motes agree on where the edge is and the outline rolls in and
+out. Read per mote instead, it would only fuzz an edge and never change its shape.
+
+Measured as how far the left boundary wanders row to row, with its slow trend removed:
+
+| | detrended wander |
+|---|---|
+| box draw | 14.1 px |
+| radial, `edgeNoise` 0 | 29.6 px |
+| radial + `edgeNoise` 0.50 | **33.0 px** |
+
+Most of the gain is losing the box; the noise field adds the rest.
 
 Sampled over 200 000 motes, against the symmetric spread this replaced:
 
@@ -190,6 +205,10 @@ Footprint is the screen area actually covered (4 px cells touched) — ×1.65 on
   is then 1–4 px and the key/fill/rim/specular rig is below what the eye can resolve — the
   cloud is a fine spray, which is a fine look, but it is not the lighting doing the work.
   The shading starts to read again around 2.5.
+- **30 000 motes is the top of the range and it is not free.** In the software-rendered
+  harness it averages 395 ms a frame against 151 ms at 14 000 — still linear, still not
+  representative of a real GPU, but it does mean quantity is the control that decides
+  whether this runs well. Check it on real hardware before shipping.
 - **Cost is linear in `particleCount`**, with no fixed overhead worth speaking of: measured
   26 / 79 / 151 ms per frame at 2000 / 7000 / 14 000. Those numbers come from a headless
   SwiftShader context, which rasterises on the CPU, so they are not what real hardware
