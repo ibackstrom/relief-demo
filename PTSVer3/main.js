@@ -26,24 +26,30 @@ const CONFIG = {
   particleCount: 14000,
   particleSize: 0.9,        // sphere diameter, world units, before the per-mote multiplier
 
-  // Size is drawn from a HEAVY-TAILED distribution rather than a +/- spread around the
-  // base: mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias. A symmetric spread has to
-  // raise its mean to widen its range, so the whole cloud gets heavier as the big motes
-  // get bigger. A biased tail decouples the two — most motes stay small while a few reach
-  // right out to sizeMax, which is what puts small and large side by side everywhere.
+  // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
+  // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
   //
-  // sizeBias is the shape: 1 is uniform, and each step up pushes more of the population
-  // toward sizeMin while leaving the top of the range where it is. At 5 the median mote
-  // is about a twentieth of the way up the range and the mean about a sixth.
+  // A symmetric spread has to raise its MEAN to widen its RANGE, so the whole cloud gets
+  // heavier as the big motes get bigger and there is a limit to how far it can be pushed.
+  // A biased tail decouples the two: most motes stay small while a few reach right out to
+  // sizeMax. That is what puts small and large side by side rather than sorting them.
   sizeMin: 0.30,
-  sizeMax: 14.0,
-  sizeBias: 5.0,
+  sizeMax: 12.0,
+  sizeBias: 4.0,            // 1 is uniform; each step up crowds the population toward
+                            //   sizeMin while leaving the top of the range where it is
 
   // Share of motes seated by a UNIFORM draw instead of the centre-biased one. The
   // centre-biased draw is what rounds the cloud off, but on its own it leaves the outer
-  // reaches thin, so the few large motes almost never land there and the edge reads as
-  // fine dust only. This fraction is spread flat across the box and populates the rim.
+  // reaches thin — so the rare large motes almost never landed there and the perimeter
+  // came out as fine dust only. This fraction spreads flat across the box and fills it.
   edgeShare: 0.45,
+
+  // How clumpy the interior is. Seats are rejection-sampled against a low-frequency noise
+  // field, so motes gather in some places and thin out in others instead of falling in a
+  // smooth gradient. 0 is the plain distribution; past ~0.8 the voids start reading as
+  // holes rather than as texture.
+  shapeNoise: 0.62,
+  shapeNoiseScale: 3.4,     // features per box width. Higher is finer, grainier clumping.
 
   // ------------------------------------------------------------ the box the motes fill
   // Distribution volume, in units of the viewport HEIGHT at the cloud's depth, so the
@@ -140,10 +146,10 @@ const CONFIG = {
   shininess: 40.0,          // specular exponent. High = a small tight glint, low = a broad
                             //   sheen. Small and tight is what reads as glass.
   specular: 0.85,           // highlight strength
+  specOpacity: 0.9,         // how much of the highlight survives into ALPHA. The glint has
+                            //   to be opaque or it vanishes on the thin part of the shell.
   fresnelPower: 4.2,        // rim tightness. Low spreads the rim over the whole sphere.
-  rim: 0.22,                // rim strength: extra pigment at the silhouette
-  lightLift: 0.72,          // how far the key and fill THIN the pigment. 0 = flat colour
-                            //   with no form at all; near 1 the lit side disappears.
+  rim: 0.22,                // rim strength
   fillDirX: 0.55,           // the bounce light, opposite the key and below it
   fillDirY: -0.55,
   fillDirZ: 0.30,
@@ -155,6 +161,8 @@ const CONFIG = {
   rimColorR: 1.00,          // the rim is the light behind the bubble, so it is close to
   rimColorG: 0.72,          //   white with a warm lean rather than the body colour
   rimColorB: 0.68,
+  coreAlpha: 0.78,          // opacity through the middle of a sphere. Low is what makes
+                            //   them hollow shells; at 1 they are solid beads.
   edgeSoftness: 0.16,       // silhouette antialias, in radii. Too low and the discs step;
                             //   too high and they turn back into soft blobs.
 
@@ -171,6 +179,14 @@ const CONFIG = {
   brightness: 0.98,
   minBrightness: 0.0,
   opacity: 0.72,            // overall alpha of the field
+
+  // ------------------------------------------------------------ scan
+  // A band that sweeps the cloud and tints what it crosses; drive uProgress off scroll
+  // to use it as a reveal. Off by default — the glow colour fights a warm overlay.
+  scanSize: 0.175,
+  scanDirection: 0,         // 0 = the band runs along Y, 1 = along X
+  scanStrength: 0.0,
+  scanGlow: [0.15, 0.70, 1.00],
 
   // ------------------------------------------------------------ bloom on hover
   // A second way to answer the cursor, independent of the ray push above. Where the push
@@ -211,6 +227,7 @@ const numParam = (k, lo, hi) => {
 if (numParam('p', 1, 40000) !== null) CONFIG.particleCount = Math.round(numParam('p', 1, 40000));
 if (numParam('curl', 0, 5) !== null) CONFIG.curlAmplitude = numParam('curl', 0, 5);
 if (numParam('push', 0, 5) !== null) CONFIG.mouseStrength = numParam('push', 0, 5);
+if (numParam('noise', 0, 1) !== null) CONFIG.shapeNoise = numParam('noise', 0, 1);
 
 // ---------------------------------------------------------------- GLSL: curl noise
 // 3D simplex noise returning its ANALYTIC gradient alongside its value (xyz = gradient,
@@ -454,6 +471,11 @@ void main(){
 
 // ---------------------------------------------------------------- GLSL: fragment
 const FRAG = /* glsl */`
+uniform float uProgress;
+uniform float uScanSize;
+uniform float uScanDirection;
+uniform float uScanStrength;
+uniform vec3  uScanGlow;
 uniform vec3  uColorOverlay;
 uniform float uColorOverlayBlendMode;
 uniform float uColorOverlayStrength;
@@ -476,13 +498,14 @@ uniform vec3  uLightDir;
 uniform float uWrap;
 uniform float uShininess;
 uniform float uSpecular;
+uniform float uSpecOpacity;
 uniform float uFresnelPower;
-uniform float uLightLift;
 uniform float uRim;
 uniform vec3  uRimColor;
 uniform vec3  uFillDir;
 uniform float uFill;
 uniform vec3  uFillColor;
+uniform float uCoreAlpha;
 uniform float uEdgeSoftness;
 
 vec3 adjustSaturation(vec3 c, float s){
@@ -503,22 +526,15 @@ vec3 applyColorOverlay(vec3 base, vec3 ov, float mode, float strength){
   return mix(base, blended, strength);
 }
 
-// A sphere IMPOSTOR, shaded as PIGMENT rather than as an emitter.
+// A sphere IMPOSTOR. The quad stays a camera-facing billboard, but the surface normal is
+// reconstructed per pixel from the quad's own coordinates: the unit disc is the silhouette
+// of a unit sphere, so z = sqrt(1 - x^2 - y^2) gives the front hemisphere exactly. The
+// result is a real, per-pixel-lit sphere for the cost of two triangles — no geometry, and
+// the silhouette stays analytically round at every size instead of pixelating.
 //
-// The quad stays a camera-facing billboard, but the surface normal is reconstructed per
-// pixel from the quad's own coordinates: the unit disc is the silhouette of a unit sphere,
-// so z = sqrt(1 - x^2 - y^2) gives the front hemisphere exactly. A real per-pixel-lit
-// sphere for two triangles, round at any size.
-//
-// What each mote outputs is a TRANSMITTANCE — how much of the page it lets through per
-// channel — not a colour to paint on top. 1 passes everything and is invisible; the body
-// colour absorbs its complement. The blend is a multiply, so two motes over the same pixel
-// multiply their filters together and the colour deepens instead of settling on the first
-// one's value. Density is what the lighting drives: lit faces hold less pigment, the rim
-// holds more, and the specular clears it to nothing.
-//
-// A useful consequence: multiplication commutes, so the result no longer depends on the
-// order the motes are drawn in.
+// Lit in VIEW space with a fixed light, so every mote catches its highlight in the same
+// place. That consistency is what makes them read as objects under one light rather than
+// as decorated discs, and it is why the light is not jittered per mote.
 void main(){
   vec2 p = vUv * 2.0 - 1.0;
   float r2 = dot(p, p);
@@ -530,48 +546,58 @@ void main(){
   vec3 V = vec3(0.0, 0.0, 1.0);          // billboards face the camera, so view is +z
   vec3 H = normalize(L + V);
 
-  // Wrapped diffuse. A hard Lambert term drives half of every sphere to full density,
-  // which under a multiply reads as a solid blot rather than as a lit form.
+  // Wrapped diffuse. A hard Lambert term leaves half the sphere black, which on a light
+  // page reads as a hole; wrapping lifts the terminator so the dark side keeps a colour.
   float ndl = dot(n, L);
   float diffuse = mix(uWrap, 1.0, clamp((ndl + uWrap) / (1.0 + uWrap), 0.0, 1.0));
 
-  // Fill from the opposite quarter. One light gives a sphere that is correct and
-  // lifeless; a second, weaker one across the form is most of the difference.
+  // Fill from the opposite quarter, in a cooler tone. One light gives a sphere that is
+  // correct and lifeless; a cool bounce on the shadow side is what stops the dark half
+  // going to dead colour and is most of the difference between a lit ball and a nice one.
   float fill = max(dot(n, normalize(uFillDir)), 0.0) * uFill;
 
-  // Specular — the strongest "this is a ball" cue. Under a multiply it is not added light
-  // but an absence of pigment: the page shows through cleanly and reads as a glint.
+  // Specular — the strongest "this is a ball" cue. A small bright spot sitting at a fixed
+  // point on every sphere, which the eye reads as a light source reflected in each one.
   float spec = pow(max(dot(n, H), 0.0), uShininess) * uSpecular;
 
-  // Fresnel: grazing angles sit at the silhouette, so this is the rim. Denser there,
-  // which is what a shell looks like edge-on.
+  // Fresnel: grazing angles sit at the silhouette, so this is the rim. Bubbles are dense
+  // at the rim and thin through the middle, and driving ALPHA with it — not just colour —
+  // is what makes them read as hollow shells rather than solid beads.
   float fres = pow(1.0 - n.z, uFresnelPower);
 
-  float dens = 1.0 - clamp(diffuse + fill, 0.0, 1.0) * uLightLift;
-  dens += fres * uRim;
-  dens -= spec;
-  dens *= 1.0 - uDepthDarken * vDepth;    // aerial perspective: the back is paler
-  dens = clamp(dens, 0.0, 1.0);
+  // the sweeping band, keyed off the mote's own position along one axis
+  float scanPosition = uProgress * 2.0 - 1.0;
+  float axis = mix(vPos.y, vPos.x, uScanDirection);
+  float scanMask = smoothstep(uScanSize, 0.0, abs(axis - scanPosition));
 
-  // The filter itself. The colour pipeline runs on the body colour once, not per pixel of
-  // shading, because under a multiply the shading is a density and not a colour.
-  vec3 body = uColorOverlay;
-  body = adjustSaturation(body, uSaturation);
-  body = adjustContrast(body, uContrast);
-  body = clamp(body * uBrightness, 0.0, 1.0);
-  body = applyMinBrightness(body, uMinBrightness);
+  // aerial perspective: the back of the volume is dimmer and thinner than the front
+  vec3 col = vec3(diffuse);
+  col = mix(col, uScanGlow, scanMask * 0.6 * uScanStrength);
+  col *= vBrightness * (1.0 - uDepthDarken * vDepth);
 
-  vec3 trans = mix(vec3(1.0), body, dens);
+  vec3 mixed = col;
+  mixed = applyColorOverlay(mixed, uColorOverlay, uColorOverlayBlendMode, uColorOverlayStrength);
+  mixed = adjustSaturation(mixed, uSaturation);
+  mixed = adjustContrast(mixed, uContrast);
+  mixed = mixed * uBrightness;
 
-  // Coverage. The smoothstep is the antialias on the silhouette — with no texture there
-  // is no filtering doing it for us, and without it the discs have stepped edges.
+  // Rim and highlight go on AFTER the colour pipeline, so saturation and contrast cannot
+  // tint them — they are light ON the surface, not part of the surface's own colour.
+  mixed += uFillColor * fill;
+  mixed += uRimColor * fres * uRim;
+  mixed += vec3(spec);
+  mixed = applyMinBrightness(mixed, uMinBrightness);
+  mixed = clamp(mixed, 0.0, 1.0);
+
+  // Hollow shell: thin through the middle, dense at the rim. The smoothstep is the
+  // antialias on the silhouette — with no texture there is no filtering doing it for us,
+  // and without it the discs have visibly stepped edges.
+  float shell = mix(uCoreAlpha, 1.0, fres);
   float edge = smoothstep(1.0, 1.0 - uEdgeSoftness, r);
-  float a = edge * vBrightness * vFade * uOpacity * (1.0 - uDepthFade * vDepth);
+  float alpha = shell * edge * vBrightness * vFade * uOpacity * (1.0 - uDepthFade * vDepth);
+  alpha = min(1.0, alpha + spec * uSpecOpacity);   // the highlight carries its own opacity
 
-  // Premultiplied, because the blend is out = dst * (1 - a * (1 - trans)): the source
-  // colour arrives already scaled by its coverage. Emitting it unpremultiplied would
-  // BRIGHTEN the backdrop wherever a mote is partly transparent.
-  gl_FragColor = vec4(trans * a, a);
+  gl_FragColor = vec4(mixed, alpha);
 }
 `;
 
@@ -579,10 +605,7 @@ void main(){
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
-// White and opaque, because the motes are filters: white is "absorbs nothing". The canvas
-// then multiplies onto the page in CSS, so untouched areas leave the page exactly as it is
-// and the cloud tints whatever it lies over rather than painting on top of it.
-renderer.setClearColor(0xffffff, 1);
+renderer.setClearColor(0x000000, 0);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
@@ -597,6 +620,26 @@ scene.add(group);
 // is expressed against this, so the cloud holds its share of the frame on any window.
 const viewHeightAt = (z) =>
   2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * Math.abs(camera.position.z - z);
+
+// ---------------------------------------------------------------- shape noise
+// A small 3D value noise, used only on the CPU when seats are drawn. It does not need the
+// quality of the simplex noise in the shader — it is sampled a few times per mote at
+// startup and never again, and all it has to do is vary smoothly.
+const hash3 = (x, y, z) => {
+  const t = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453;
+  return t - Math.floor(t);
+};
+const smoothT = (t) => t * t * (3 - 2 * t);
+function valueNoise3(x, y, z) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const u = smoothT(x - xi), v = smoothT(y - yi), w = smoothT(z - zi);
+  const L = (a, b, t) => a + (b - a) * t;
+  const c = (dx, dy, dz) => hash3(xi + dx, yi + dy, zi + dz);
+  return L(
+    L(L(c(0,0,0), c(1,0,0), u), L(c(0,1,0), c(1,1,0), u), v),
+    L(L(c(0,0,1), c(1,0,1), u), L(c(0,1,1), c(1,1,1), u), v),
+    w);
+}
 
 // ---------------------------------------------------------------- geometry
 // One quad, instanced. Per-mote values are generated once on the CPU: seat in the box,
@@ -633,17 +676,31 @@ function buildParticles(count) {
   for (let i = 0; i < count; i++) {
     const i3 = i * 3;
 
-    // A plain uniform box gives a rectangle with visible corners; biasing each axis
-    // toward its centre with the mean of two samples rounds the mass off. Neither alone
-    // is right, so the population is split: most motes take the rounded draw, and
-    // edgeShare of them take the flat one and reach the walls of the box.
+    // Two draws, mixed by population. The centre-biased one (mean of two samples) rounds
+    // the mass off and thins its edges; the flat one reaches the walls of the box and is
+    // what puts motes — of every size — right out on the perimeter.
     const flat = Math.random() < CONFIG.edgeShare;
     const draw = flat
       ? () => (Math.random() * 2 - 1)
       : () => ((Math.random() + Math.random()) - 1.0);
-    initPos[i3]     = draw() * halfW;
-    initPos[i3 + 1] = draw() * halfH;
-    initPos[i3 + 2] = draw() * halfD;
+
+    // Then rejection-sample the seat against a noise field so the interior clumps.
+    // Bounded retries rather than a loop until success: in a heavily carved field a seat
+    // can be unlucky many times over, and the cost of insisting is unbounded. Taking the
+    // last candidate after a few tries biases the result a little toward the smooth
+    // distribution, which is the harmless direction to be wrong in.
+    let sx = 0, sy = 0, sz = 0;
+    for (let tries = 0; tries < 6; tries++) {
+      sx = draw(); sy = draw(); sz = draw();
+      const k = CONFIG.shapeNoiseScale;
+      const d = valueNoise3(sx * k + 11.3, sy * k + 4.7, sz * k + 19.1);
+      // accept everywhere at shapeNoise 0; at 1 the field alone decides
+      const accept = 1 - CONFIG.shapeNoise + CONFIG.shapeNoise * d * 2;
+      if (Math.random() < accept) break;
+    }
+    initPos[i3]     = sx * halfW;
+    initPos[i3 + 1] = sy * halfH;
+    initPos[i3 + 2] = sz * halfD;
 
     const travels = Math.random() < CONFIG.floatingParticles;
     driftSpeed[i] = travels ? CONFIG.floatingSpeed * (0.6 + Math.random() * 0.8) : 0.0;
@@ -679,6 +736,16 @@ function buildParticles(count) {
   // the cloud moves in the shader, so nothing can be culled off its rest bounds
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Math.max(halfW, halfH, halfD) * 4);
 
+  // pristine copies, kept so the depth sort can permute from a fixed source rather than
+  // repeatedly permuting an already-permuted buffer
+  geo.userData.src = {
+    aInitPos: initPos.slice(), aDriftDir: driftDir.slice(),
+    aDriftSpeed: driftSpeed.slice(), aSize: sizes.slice(),
+    aTimeOffset: timeOffs.slice(),
+    aBrightness: brights.slice(), aCurlResp: curlResp.slice(),
+  };
+  geo.userData.order = new Int32Array(count).map((_, i) => i);
+  geo.userData.key = new Float32Array(count);
   return geo;
 }
 
@@ -718,9 +785,9 @@ const uniforms = {
   uWrap: { value: CONFIG.wrap },
   uShininess: { value: CONFIG.shininess },
   uSpecular: { value: CONFIG.specular },
+  uSpecOpacity: { value: CONFIG.specOpacity },
   uFresnelPower: { value: CONFIG.fresnelPower },
   uRim: { value: CONFIG.rim },
-  uLightLift: { value: CONFIG.lightLift },
   uRimColor: { value: new THREE.Vector3(
     CONFIG.rimColorR, CONFIG.rimColorG, CONFIG.rimColorB) },
   uFillDir: { value: new THREE.Vector3(
@@ -728,12 +795,18 @@ const uniforms = {
   uFill: { value: CONFIG.fill },
   uFillColor: { value: new THREE.Vector3(
     CONFIG.fillColorR, CONFIG.fillColorG, CONFIG.fillColorB) },
+  uCoreAlpha: { value: CONFIG.coreAlpha },
   uEdgeSoftness: { value: CONFIG.edgeSoftness },
   uExpandOrigin: { value: new THREE.Vector3() },
   uExpand: { value: 0 },
   uExpandAmount: { value: CONFIG.expandAmount },
   uExpandCurlBoost: { value: CONFIG.expandCurlBoost },
 
+  uProgress: { value: 0.5 },
+  uScanSize: { value: CONFIG.scanSize },
+  uScanDirection: { value: CONFIG.scanDirection },
+  uScanStrength: { value: CONFIG.scanStrength },
+  uScanGlow: { value: new THREE.Vector3(...CONFIG.scanGlow) },
   uColorOverlay: { value: new THREE.Vector3(
     CONFIG.colorOverlayR, CONFIG.colorOverlayG, CONFIG.colorOverlayB) },
   uColorOverlayBlendMode: { value: CONFIG.colorOverlayBlendMode },
@@ -754,22 +827,68 @@ const material = new THREE.ShaderMaterial({
   transparent: true,
   depthWrite: false,
   depthTest: false,
-  // out.rgb = src.rgb * dst.rgb + dst.rgb * (1 - src.a), and the shader emits src.rgb
-  // premultiplied, so this resolves to dst * (1 - a * (1 - trans)): a filter laid over
-  // whatever is behind, and two of them multiply. That is the whole "overlap deepens"
-  // behaviour, and it is why the motes no longer need sorting — multiplication commutes.
-  blending: THREE.CustomBlending,
-  blendEquation: THREE.AddEquation,
-  blendSrc: THREE.DstColorFactor,
-  blendDst: THREE.OneMinusSrcAlphaFactor,
-  blendEquationAlpha: THREE.AddEquation,
-  blendSrcAlpha: THREE.OneFactor,
-  blendDstAlpha: THREE.OneFactor,
+  blending: THREE.NormalBlending,
 });
 
 let mesh = new THREE.Mesh(buildParticles(CONFIG.particleCount), material);
 mesh.frustumCulled = false;
 group.add(mesh);
+
+// ---------------------------------------------------------------- depth sort
+// Motes are large, soft and transparent, and transparency is order-dependent: drawn in
+// creation order, a mote at the back can be composited over one at the front and the
+// volume reads as a flat sheet of overlapping stickers. Sorting back to front is what
+// lets near bubbles sit convincingly in front of far ones.
+//
+// Sorted on the SEAT position, not the final one — the curl displacement is a fraction of
+// the spacing, so the order it would give is the same, and the seats are known on the CPU
+// where the final positions are not (the whole solve lives in the vertex shader).
+//
+// Cheap at this population: a few hundred keys is well under a millisecond, and it is
+// only redone every SORT_EVERY frames because the volume turns slowly.
+// Below this on-screen diameter the sort is switched off. Ordering only matters while a
+// mote is big enough that you can see one in front of another; at a couple of pixels the
+// overlap is a blend either way, and the sort is pure cost — and it is exactly at small
+// sizes that the population tends to be large, so it is the worst case that pays most.
+const SORT_MIN_PX = 3.5;
+const SORT_EVERY = 4;
+let sortTick = 0;
+let sortWorthwhile = true;
+const _v = new THREE.Vector3();
+const _mv = new THREE.Matrix4();
+
+function sortByDepth() {
+  if (!sortWorthwhile) return;
+  if (sortTick++ % SORT_EVERY !== 0) return;
+  const geo = mesh.geometry;
+  const src = geo.userData.src;
+  if (!src) return;
+  const n = geo.instanceCount;
+  const order = geo.userData.order;
+  const key = geo.userData.key;
+
+  // view-space z of each seat: more negative is further from the camera
+  const mv = _mv.multiplyMatrices(camera.matrixWorldInverse, group.matrixWorld);
+  for (let i = 0; i < n; i++) {
+    _v.set(src.aInitPos[i * 3], src.aInitPos[i * 3 + 1], src.aInitPos[i * 3 + 2])
+      .applyMatrix4(mv);
+    key[i] = _v.z;
+  }
+  order.sort((a, b) => key[a] - key[b]);      // ascending z = furthest first
+
+  for (const name of Object.keys(src)) {
+    const attr = geo.getAttribute(name);
+    const size = attr.itemSize;
+    const dst = attr.array;
+    const from = src[name];
+    for (let i = 0; i < n; i++) {
+      const o = order[i] * size;
+      const d = i * size;
+      for (let c = 0; c < size; c++) dst[d + c] = from[o + c];
+    }
+    attr.needsUpdate = true;
+  }
+}
 
 // ---------------------------------------------------------------- placement
 // The group is parked in a corner of the viewport. anchor 1 = the edge exactly, so the
@@ -793,6 +912,13 @@ function place() {
   uniforms.uHalfDepth.value = Math.max(1e-3, CONFIG.boxDepth * vh * 0.5);
   hoverRadiusWorld = CONFIG.expandHoverRadius * vh;
 
+  // Typical mote diameter in device pixels. The mean of the size draw is
+  // sizeMin + (sizeMax - sizeMin) / (sizeBias + 1) — for a heavy tail that sits far below
+  // the middle of the range, because the largest motes are rare.
+  const meanMult = CONFIG.sizeMin
+    + (CONFIG.sizeMax - CONFIG.sizeMin) / (CONFIG.sizeBias + 1);
+  const typicalPx = (CONFIG.particleSize * meanMult * 0.01) / vh * renderer.domElement.height;
+  sortWorthwhile = typicalPx >= SORT_MIN_PX;
   hoverInnerWorld = CONFIG.expandHoverInner * vh;
 }
 
@@ -873,7 +999,6 @@ resize();
 
 // ---------------------------------------------------------------- loop
 const clock = new THREE.Clock();
-const _v = new THREE.Vector3();
 let elapsed = 0;
 
 // Yaw and pitch on different periods so the pair never repeats. Everything downstream of
@@ -895,6 +1020,7 @@ function tick() {
   parallax();
   uniforms.uCentreViewZ.value =
     _v.setFromMatrixPosition(group.matrixWorld).applyMatrix4(camera.matrixWorldInverse).z;
+  sortByDepth();
   updateCursor(dt);
   renderer.render(scene, camera);
   if (firstFrame) { firstFrame = false; dismissLoading(); }

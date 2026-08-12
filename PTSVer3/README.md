@@ -24,8 +24,6 @@ found here transfers to the build by typing it in. `?ui=0` hides the panel.
 | quantity | `particleCount` | 14 000, range 14 000–30 000 |
 | size | `particleSize` | 0.9 |
 
-`size` scales the base; the spread around it comes from `sizeMin` / `sizeMax` / `sizeBias`.
-
 Colour is **one** bar rather than three because the material only ever varies in hue: the
 spheres are shaded in greyscale and tinted, so saturation and value belong to the lighting
 rig, not to the choice of colour. The bar drives hue, holds S and V at the shipped red's,
@@ -60,58 +58,46 @@ Everything is lit in view space from a fixed direction, so every mote catches it
 in the same place. That consistency is what makes them read as objects under one light
 rather than as separately decorated discs, and it is why the light is not jittered per mote.
 
-## Overlap deepens the colour
-
-Each mote outputs a **transmittance** — how much of the page it lets through per channel —
-rather than a colour to paint on top. 1 passes everything and is invisible; the body colour
-absorbs its complement. The blend is a multiply, so two motes over the same pixel multiply
-their filters and the colour goes deeper instead of settling on the first one's value.
-
-That is why the canvas is cleared to **opaque white** and carries `mix-blend-mode: multiply`
-in CSS. White absorbs nothing, so untouched areas leave the page exactly as it is, and the
-cloud tints whatever it lies over. With a transparent canvas the motes would sit *on top* of
-the page and stacked motes would converge on their own colour — which is the thing being
-fixed.
-
-Measured over the rendered frame, grouped by how many layers deep the pixel is:
-
-| layering | R | G | B | red excess |
-|---|---|---|---|---|
-| sparse | 230.0 | 202.2 | 199.5 | 27.8 |
-| medium | 230.0 | 199.0 | 196.4 | 31.0 |
-| dense | 230.0 | 169.5 | 167.3 | 60.5 |
-
-Red holds at 230 while green and blue are progressively absorbed — filters stacking, not
-paint accumulating.
-
-The lighting is driven as **density**, not brightness: lit faces hold less pigment, the rim
-holds more, and the specular clears it to nothing so the page shows through as a glint.
-
-Two consequences worth knowing. Multiplication commutes, so the result no longer depends on
-draw order and the back-to-front sort is gone — which also removes the main-thread cost that
-was scaling with `particleCount`. And a bright value can no longer be *added*: under a
-multiply, "bright" means "absorbs less", so the highlight is an absence rather than a glow.
-
 ## Size, small and large everywhere
 
 Sizes come from a heavy-tailed draw, `sizeMin + (sizeMax − sizeMin) × rand^sizeBias`, rather
-than a ± spread around the base. A symmetric spread has to raise its mean to widen its range,
-so the whole cloud gets heavier as the big motes get bigger; a biased tail decouples the two.
+than a ± spread around the base. A symmetric spread has to raise its **mean** to widen its
+**range**, so the whole cloud gets heavier as the big motes get bigger and there is a limit
+to how far it can be pushed. A biased tail decouples the two: most motes stay small while a
+few reach right out to `sizeMax`.
 
 `edgeShare` of the population is also seated by a **uniform** draw instead of the
-centre-biased one. The centre-biased draw is what rounds the cloud off, but on its own it
-leaves the outer reaches thin, so the few large motes almost never landed there and the edge
-read as fine dust only.
+centre-biased one. The centre-biased draw is what rounds the mass off, but on its own it
+leaves the outer reaches thin — so the rare large motes almost never landed there and the
+perimeter came out as fine dust only.
 
-Both together, sampled over 200 000 motes:
+Sampled over 200 000 motes, against the symmetric spread this replaced:
 
 | | motes in the outer band | large motes there | largest there | mean size | 99th pct |
 |---|---|---|---|---|---|
-| symmetric spread, centre-biased seats | 38.0% | **0.00%** | 5.0 | 2.12 | 4.92 |
-| heavy tail + `edgeShare` 0.45 | 53.3% | **10.2%** | 14.0 | 2.58 | 13.32 |
+| symmetric spread | 38.0% | **0.00%** | 5.0 | 2.12 | 4.92 |
+| heavy tail + `edgeShare` | 53.3% | **10.2%** | 14.0 | 2.58 | 13.32 |
 
-The extremes grow nearly threefold while the mean barely moves, which is the point: more
-variety without a heavier cloud.
+The extremes grow nearly threefold while the mean barely moves — more variety without a
+heavier cloud.
+
+## A noisier interior
+
+Seats are rejection-sampled against a low-frequency value-noise field, so motes gather in
+some places and thin out in others instead of falling in a smooth radial gradient.
+`shapeNoise` is the amount, `shapeNoiseScale` the feature size. `?noise=<0..1>` overrides it.
+
+Measured with the radial trend divided out — so this is *local* texture, not the falloff:
+
+| | local variation |
+|---|---|
+| `shapeNoise` 0 | 0.564 |
+| `shapeNoise` 0.62 | 0.609 |
+
+Retries are bounded at six rather than looping until a seat is accepted: in a heavily carved
+field a seat can be unlucky many times over and the cost of insisting is unbounded. Taking
+the last candidate biases the result slightly toward the smooth distribution, which is the
+harmless direction to be wrong in.
 
 ## What makes it read as a volume
 
@@ -139,6 +125,12 @@ while the cloud yaws — measured in local space it would swing round with the r
 against raw view z every mote is ~10 units from the camera, the ratio saturates and the
 whole cloud gets the same value.
 
+On top of those, motes are drawn **back to front**. Transparency is order-dependent, and at
+this size they overlap constantly: drawn in creation order a far sphere composites over a
+near one and the volume reads as a sheet of stickers. The sort runs on the seat positions
+(the final ones only exist in the vertex shader) every fourth frame, which is ample for how
+slowly the volume turns.
+
 ## Movement
 
 Everything is solved in the vertex shader on instanced quads — no simulation buffer and no
@@ -160,12 +152,9 @@ Two responses, composed rather than competing.
 
 **The push** measures each mote against its distance to the *ray* from the camera through
 the pointer, so the cloud opens as a tube through its whole depth rather than at a single
-z. Inside the radius a mote is driven straight off the ray on a `pow(1 - d/r, falloffPower)`
+z. `mouseRadius` is 0.078, half what it was: the cleared core measures about 20 px where it
+was about 45 px. Inside the radius a mote is driven straight off the ray on a `pow(1 - d/r, falloffPower)`
 falloff, with its curl amplified so the opening boils instead of sliding apart.
-
-`mouseRadius` is 0.078, half what it was. Measured on the same frame and cursor position,
-the radius at which coverage recovers to half its surrounding value moves from about 48 px
-to about 26 px.
 
 **The bloom** grows the whole volume out of the screen corner while the pointer is near it.
 It scales about the *corner*, not the cloud's own centre — about the centre the near edge

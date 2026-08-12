@@ -8,11 +8,7 @@
   html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #e6e4e1; }
   /* The canvas is transparent and sits above whatever is behind it, so this drops over an
      existing page as an overlay. The page background here only stands in for that. */
-  /* The motes are filters, so the canvas is rendered opaque on white and multiplied onto
-     the page: white leaves what is behind untouched and the cloud tints it. Painting with
-     a transparent canvas instead would put the motes ON TOP of the page, and stacked motes
-     would settle on their own colour rather than deepening. */
-  canvas { display: block; position: fixed; inset: 0; mix-blend-mode: multiply; }
+  canvas { display: block; position: fixed; inset: 0; }
   #hint {
     position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
     font: 12px/1.4 Helvetica, Arial, sans-serif; letter-spacing: .08em;
