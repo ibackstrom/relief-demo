@@ -160,6 +160,11 @@ const CONFIG = {
   shininess: 40.0,          // specular exponent. High = a small tight glint, low = a broad
                             //   sheen. Small and tight is what reads as glass.
   specular: 0.85,           // highlight strength
+  specMinPx: 3.0,           // below this on-screen diameter the highlight is switched off
+  specFullPx: 9.0,          //   and above it runs at full strength. A tight glint on a
+                            //   mote a couple of pixels across cannot be resolved — it
+                            //   falls between samples and flickers as the mote drifts,
+                            //   which is what reads as sparkle.
   specOpacity: 0.9,         // how much of the highlight survives into ALPHA. The glint has
                             //   to be opaque or it vanishes on the thin part of the shell.
   fresnelPower: 4.2,        // rim tightness. Low spreads the rim over the whole sphere.
@@ -398,6 +403,7 @@ uniform float uMouseStrength;    // already scaled by the fade
 uniform float uFalloffPower;
 uniform float uMouseCurlBoost;
 uniform float uParticleSize;
+uniform float uViewportPx;       // drawing-buffer height, for on-screen size
 uniform float uHalfDepth;        // half the volume's depth
 uniform float uCentreViewZ;      // view-space z of the volume's own centre
 uniform vec3  uExpandOrigin;     // the screen corner, in this object's local space
@@ -408,6 +414,7 @@ uniform float uExpandCurlBoost;
 varying vec2  vUv;
 varying float vBrightness;
 varying float vDensity;
+varying float vPx;              // this mote's diameter on screen, in pixels
 varying float vFade;
 varying vec3  vPos;
 varying float vDepth;           // 0 at the front of the volume, 1 at the back
@@ -498,7 +505,15 @@ void main(){
 
   // ---- 4. billboard ----------------------------------------------------------
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-  mv.xy += position.xy * (uParticleSize * aSize * 0.01);
+  float worldSize = uParticleSize * aSize * 0.01;
+  mv.xy += position.xy * worldSize;
+
+  // How big this mote lands on screen. NDC spans 2 over the viewport height, so the
+  // projected size is worldSize * P[1][1] / -z, and half of that times the height is
+  // pixels. The specular needs it: a tight highlight on a mote only a couple of pixels
+  // across falls between samples and flickers on and off as the mote drifts — which is
+  // the sparkle. It has to be faded out down there rather than left to alias.
+  vPx = worldSize * projectionMatrix[1][1] / max(1e-4, -mv.z) * 0.5 * uViewportPx;
   gl_Position = projectionMatrix * mv;
 }
 `;
@@ -522,10 +537,13 @@ uniform float uOpacity;
 varying vec2  vUv;
 varying float vBrightness;
 varying float vDensity;
+varying float vPx;              // this mote's diameter on screen, in pixels
 varying float vFade;
 varying vec3  vPos;
 varying float vDepth;
 
+uniform float uSpecMinPx;
+uniform float uSpecFullPx;
 uniform float uDepthFade;
 uniform float uDepthDarken;
 
@@ -596,7 +614,9 @@ void main(){
 
   // Specular — the strongest "this is a ball" cue. A small bright spot sitting at a fixed
   // point on every sphere, which the eye reads as a light source reflected in each one.
-  float spec = pow(max(dot(n, H), 0.0), uShininess) * uSpecular;
+  // Faded out on motes too small to resolve a highlight — see vPx in the vertex shader.
+  float specAtten = smoothstep(uSpecMinPx, uSpecFullPx, vPx);
+  float spec = pow(max(dot(n, H), 0.0), uShininess) * uSpecular * specAtten;
 
   // Fresnel: grazing angles sit at the silhouette, so this is the rim. Bubbles are dense
   // at the rim and thin through the middle, and driving ALPHA with it — not just colour —
@@ -893,6 +913,9 @@ const uniforms = {
   uWrap: { value: CONFIG.wrap },
   uShininess: { value: CONFIG.shininess },
   uSpecular: { value: CONFIG.specular },
+  uSpecMinPx: { value: CONFIG.specMinPx },
+  uSpecFullPx: { value: CONFIG.specFullPx },
+  uViewportPx: { value: 1 },
   uSpecOpacity: { value: CONFIG.specOpacity },
   uFresnelPower: { value: CONFIG.fresnelPower },
   uRim: { value: CONFIG.rim },
@@ -961,7 +984,7 @@ group.add(mesh);
 // mote is big enough that you can see one in front of another; at a couple of pixels the
 // overlap is a blend either way, and the sort is pure cost — and it is exactly at small
 // sizes that the population tends to be large, so it is the worst case that pays most.
-const SORT_MIN_PX = 3.5;
+const SORT_MIN_PX = 4.0;
 const SORT_EVERY = 4;
 let sortTick = 0;
 let sortWorthwhile = true;
@@ -1028,7 +1051,11 @@ function place() {
   // the middle of the range, because the largest motes are rare.
   const meanMult = CONFIG.sizeMin
     + (CONFIG.sizeMax - CONFIG.sizeMin) / (CONFIG.sizeBias + 1);
-  const typicalPx = (CONFIG.particleSize * meanMult * 0.01) / vh * renderer.domElement.height;
+  // CSS pixels, not device pixels. domElement.height is the drawing buffer, so on a 2x
+  // display it reads double and the guard lets the sort run on motes that are far too
+  // small to need it — at this population that is a re-sort and a full attribute rewrite
+  // every fourth frame, which shows up as a stutter and pops the blend order with it.
+  const typicalPx = (CONFIG.particleSize * meanMult * 0.01) / vh * innerHeight;
   sortWorthwhile = typicalPx >= SORT_MIN_PX;
   hoverInnerWorld = CONFIG.expandHoverInner * vh;
 }
@@ -1103,6 +1130,7 @@ function resize() {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  uniforms.uViewportPx.value = renderer.domElement.height;
   place();
 }
 addEventListener('resize', resize);
