@@ -24,7 +24,7 @@ const CONFIG = {
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
   particleCount: 30000,
-  particleSize: 0.9,        // sphere diameter, world units, before the per-mote multiplier
+  particleSize: 0.4,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
   // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
@@ -159,7 +159,11 @@ const CONFIG = {
                             //   hole punched in a light page. Above ~0.7 it goes flat.
   shininess: 40.0,          // specular exponent. High = a small tight glint, low = a broad
                             //   sheen. Small and tight is what reads as glass.
-  specular: 0.85,           // highlight strength
+  specular: 0.38,           // highlight strength. Low on purpose: on motes this small
+                            //   a hot glint is the first thing that aliases, and it reads
+                            //   as glitter rather than as gloss.
+  minPx: 1.3,               // smallest footprint a mote is drawn at, in device pixels.
+                            //   Under 1 they blink; much over 2 the fine spray blurs.
   specMinPx: 3.0,           // below this on-screen diameter the highlight is switched off
   specFullPx: 9.0,          //   and above it runs at full strength. A tight glint on a
                             //   mote a couple of pixels across cannot be resolved — it
@@ -168,7 +172,7 @@ const CONFIG = {
   specOpacity: 0.9,         // how much of the highlight survives into ALPHA. The glint has
                             //   to be opaque or it vanishes on the thin part of the shell.
   fresnelPower: 4.2,        // rim tightness. Low spreads the rim over the whole sphere.
-  rim: 0.22,                // rim strength
+  rim: 0.18,                // rim strength
   fillDirX: 0.55,           // the bounce light, opposite the key and below it
   fillDirY: -0.55,
   fillDirZ: 0.30,
@@ -386,6 +390,7 @@ uniform float uFalloffPower;
 uniform float uMouseCurlBoost;
 uniform float uParticleSize;
 uniform float uViewportPx;       // drawing-buffer height, for on-screen size
+uniform float uMinPx;            // smallest footprint a mote may be drawn at
 uniform float uHalfDepth;        // half the volume's depth
 uniform float uCentreViewZ;      // view-space z of the volume's own centre
 uniform vec3  uExpandOrigin;     // the screen corner, in this object's local space
@@ -395,7 +400,8 @@ uniform float uExpandCurlBoost;
 
 varying vec2  vUv;
 varying float vBrightness;
-varying float vPx;              // this mote's diameter on screen, in pixels
+varying float vPx;              // this mote's TRUE diameter on screen, in pixels
+varying float vAlphaScale;      // <1 when a mote was grown off sub-pixel size
 varying float vFade;
 varying vec3  vPos;
 varying float vDepth;           // 0 at the front of the volume, 1 at the back
@@ -486,13 +492,23 @@ void main(){
   // ---- 4. billboard ----------------------------------------------------------
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
   float worldSize = uParticleSize * aSize * 0.01;
-  mv.xy += position.xy * worldSize;
+  // (the billboard offset is applied below, after any sub-pixel growth)
 
   // How big this mote lands on screen. NDC spans 2 over the viewport height, so the
   // projected size is worldSize * P[1][1] / -z, and half of that times the height gives
   // pixels. The specular needs it: a tight highlight on a mote a couple of pixels across
   // falls between samples and flickers on and off as the mote drifts — the sparkle.
   vPx = worldSize * projectionMatrix[1][1] / max(1e-4, -mv.z) * 0.5 * uViewportPx;
+
+  // Sub-pixel motes cannot be drawn honestly: a quad smaller than a pixel lands on the
+  // sample grid or misses it, so it blinks as it drifts. Grow anything below uMinPx up to
+  // it and pay for the extra area in alpha — the mote keeps the same total presence, so
+  // the cloud's weight is unchanged, but it now has a stable footprint to be sampled on.
+  // vPx stays the TRUE size, because the specular fade has to judge the real one.
+  float grow = max(1.0, uMinPx / max(vPx, 1e-4));
+  worldSize *= grow;
+  vAlphaScale = 1.0 / (grow * grow);
+  mv.xy += position.xy * worldSize;
   gl_Position = projectionMatrix * mv;
 }
 `;
@@ -516,6 +532,7 @@ uniform float uOpacity;
 varying vec2  vUv;
 varying float vBrightness;
 varying float vPx;
+varying float vAlphaScale;
 varying float vFade;
 varying vec3  vPos;
 varying float vDepth;
@@ -627,7 +644,8 @@ void main(){
   // and without it the discs have visibly stepped edges.
   float shell = mix(uCoreAlpha, 1.0, fres);
   float edge = smoothstep(1.0, 1.0 - uEdgeSoftness, r);
-  float alpha = shell * edge * vBrightness * vFade * uOpacity * (1.0 - uDepthFade * vDepth);
+  float alpha = shell * edge * vBrightness * vFade * uOpacity * vAlphaScale
+              * (1.0 - uDepthFade * vDepth);
   alpha = min(1.0, alpha + spec * uSpecOpacity);   // the highlight carries its own opacity
 
   gl_FragColor = vec4(mixed, alpha);
@@ -845,6 +863,7 @@ const uniforms = {
   uSpecMinPx: { value: CONFIG.specMinPx },
   uSpecFullPx: { value: CONFIG.specFullPx },
   uViewportPx: { value: 1 },
+  uMinPx: { value: CONFIG.minPx },
   uSpecOpacity: { value: CONFIG.specOpacity },
   uFresnelPower: { value: CONFIG.fresnelPower },
   uRim: { value: CONFIG.rim },
@@ -1139,7 +1158,7 @@ if (uiEl && PARAMS.get('ui') === '0') {
     { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
       min: 14000, max: 30000, step: 100, value: CONFIG.particleCount, rebuild: true },
     { key: 'particleSize', name: 'size', cst: 'CONFIG.particleSize',
-      min: 0.6, max: 12, step: 0.1, value: CONFIG.particleSize, uni: 'uParticleSize' },
+      min: 0.1, max: 0.7, step: 0.01, value: CONFIG.particleSize, uni: 'uParticleSize' },
   ];
 
   const rgbAt = (h) => hsvToRgb(h, satFixed, valFixed);
