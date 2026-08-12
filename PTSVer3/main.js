@@ -39,9 +39,16 @@ const CONFIG = {
                             //   sizeMin while leaving the top of the range where it is
 
   // Spread of the Gaussian, in box halves. The mass has NO boundary — density falls off
-  // smoothly forever — so there is no edge to give away. Roughly 99% of motes land inside
-  // 2.6 of these, and the last per cent is the scatter that makes the outline dissolve.
-  radialSigma: 0.52,
+  // smoothly forever — so there is no edge to give away, and the last per cent of motes
+  // is the scatter that makes the outline dissolve.
+  //
+  // Matched to the spread of the box draw this replaced. That draw was triangular over
+  // the box, standard deviation 1/sqrt(6) = 0.41 of a half-extent; a Gaussian at the same
+  // number reads WIDER, because its tails run on where the triangle stopped dead. 0.35
+  // lines the two up at the 90th percentile, which is where the eye reads the size — and
+  // it has to go a little under that, because at this count there are simply more motes
+  // out in the tail to be seen.
+  radialSigma: 0.31,
 
   // How clumpy the interior is. Seats are rejection-sampled against a low-frequency noise
   // field, so motes gather in some places and thin out in others instead of falling in a
@@ -130,7 +137,7 @@ const CONFIG = {
   //
   // Radius and push are fractions of viewport HEIGHT, not world units, so the opening
   // holds its size on screen at any window. Don't put world units here.
-  mouseRadius: 0.078,       // radius of the tube that opens
+  mouseRadius: 0.050,       // radius of the tube that opens
   mouseStrength: 0.055,     // how far a mote at the centre of it is pushed
   falloffPower: 2.0,        // 1 = linear, 2 = soft outer edge with a firm core
   mouseSmoothing: 0.12,     // lag on the cursor the motes actually see, per frame. Low

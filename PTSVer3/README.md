@@ -86,6 +86,12 @@ Measured as how far the left boundary wanders row to row, with its slow trend re
 
 Most of the gain is losing the box; the noise field adds the rest.
 
+`radialSigma` is matched to the spread of the box draw it replaced. That draw was
+triangular over the box — standard deviation 1/√6 = 0.41 of a half-extent — but a Gaussian
+at the same number reads *wider*, because its tails run on where the triangle stopped dead,
+and at 30 000 there are more motes out there to be seen. 0.31 lines the two up at the 90th
+percentile, which is where the eye reads the size: 125.9 px against 121.3 px, within 4%.
+
 Sampled over 200 000 motes, against the symmetric spread this replaced:
 
 | | motes in the outer band | large motes there | largest there | mean size | 99th pct |
@@ -167,7 +173,7 @@ Two responses, composed rather than competing.
 
 **The push** measures each mote against its distance to the *ray* from the camera through
 the pointer, so the cloud opens as a tube through its whole depth rather than at a single
-z. `mouseRadius` is 0.078, half what it was: the cleared core measures about 20 px where it
+z. `mouseRadius` is 0.050, down from 0.155: the cleared core measures about 12 px where it
 was about 45 px. Inside the radius a mote is driven straight off the ray on a `pow(1 - d/r, falloffPower)`
 falloff, with its curl amplified so the opening boils instead of sliding apart.
 
