@@ -103,7 +103,7 @@ const CONFIG = {
   // 0 leaves the model's even coverage alone. Each step up crowds the population cornerward
   // and, since the count is fixed, thins the far side by exactly as much. It is a power on
   // the radius of the throw, so it has no ceiling to fall off.
-  cornerDensity: 1.4,
+  cornerDensity: 2.4,
 
   // How clumpy the sheet is. Seats are rejection-sampled against a low-frequency noise
   // field, so motes gather in some places and thin out in others instead of covering
@@ -269,6 +269,13 @@ const CONFIG = {
   anchorX: 1.00,
   anchorY: 0.97,
   anchorZ: 0.0,
+
+  // How fast the motes do everything they do on their own — the swirl, the travel along
+  // their threads, the birth-to-death. One dial rather than four, because it scales the
+  // CLOCK the motes are read from rather than any one of their speeds, so their motion stays
+  // in proportion however fast it runs. The cloud's own sway is deliberately not included:
+  // that is the camera's relationship to the volume, not the particles' own life.
+  speed: 1.0,
 
   // ------------------------------------------------------------ parallax
   // A slow sway of the whole volume. With a fixed camera this is the only thing that
@@ -489,6 +496,8 @@ if (numParam('push', 0, 5) !== null) CONFIG.mouseStrength = numParam('push', 0, 
 if (numParam('noise', 0, 1) !== null) CONFIG.shapeNoise = numParam('noise', 0, 1);
 if (numParam('blob', 0, 1) !== null) CONFIG.blob = numParam('blob', 0, 1);
 if (numParam('life', 0, 1) !== null) CONFIG.lifeFraction = numParam('life', 0, 1);
+if (numParam('speed', 0, 3) !== null) CONFIG.speed = numParam('speed', 0, 3);
+if (numParam('gs', 0.02, 0.8) !== null) CONFIG.bloomRadius = numParam('gs', 0.02, 0.8);
 if (numParam('strand', 0, 1) !== null) CONFIG.strandFraction = numParam('strand', 0, 1);
 if (PARAMS.get('bloom') === '0') CONFIG.bloom = false;
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
@@ -2378,7 +2387,9 @@ function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.1);
   elapsed += dt;
-  uniforms.uTime.value += dt;
+  // the motes' own clock, which the speed control scales. Accumulated rather than
+  // multiplied at read time, so changing the pace never jumps their phase.
+  uniforms.uTime.value += dt * CONFIG.speed;
   parallax();
   uniforms.uCentreViewZ.value =
     _v.setFromMatrixPosition(group.matrixWorld).applyMatrix4(camera.matrixWorldInverse).z;
@@ -2391,7 +2402,8 @@ function tick() {
 tick();
 
 // ---------------------------------------------------------------- panel
-// Four controls and no more: colour, quantity, size, glow. Each prints the CONFIG value it
+// Six controls: colour, quantity, size, glow, glow size, speed. Each prints the CONFIG
+// value it
 // writes, so a look found here transfers to the build by typing. Nothing is persisted —
 // a reload is the shipped build again. ?ui=0 hides the panel.
 //
@@ -2443,13 +2455,21 @@ if (uiEl && PARAMS.get('ui') === '0') {
     { key: 'bloomStrength', name: 'glow', cst: 'CONFIG.bloomStrength',
       min: 0, max: 4, step: 0.01, value: CONFIG.bloomStrength,
       apply: (v) => { if (bloomChain) bloomChain.composite.uniforms.uStrength.value = v; } },
+    // Read straight out of CONFIG by the blur pass every frame, so there is nothing to
+    // push anywhere — the bar just writes the value.
+    { key: 'bloomRadius', name: 'glow size', cst: 'CONFIG.bloomRadius',
+      min: 0.05, max: 0.7, step: 0.005, value: CONFIG.bloomRadius },
+    { key: 'speed', name: 'speed', cst: 'CONFIG.speed',
+      min: 0, max: 3, step: 0.01, value: CONFIG.speed },
   ];
 
   const rgbAt = (h) => hsvToRgb(h, satFixed, valFixed);
   const text = (r, v) => {
     if (r.key === 'hue') return rgbAt(v).map((c) => c.toFixed(3)).join('  ');
     if (r.key === 'particleCount') return String(Math.round(v));
-    if (r.key === 'bloomStrength') return v.toFixed(2);
+    if (r.key === 'bloomStrength' || r.key === 'bloomRadius' || r.key === 'speed') {
+      return v.toFixed(2);
+    }
     return v.toFixed(1);
   };
 

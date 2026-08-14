@@ -21,7 +21,7 @@ as an overlay; the grey here is only a stand-in.
 
 ## Controls
 
-Four bars, top-left, and nothing else. Each prints the `CONFIG` value it writes so a look
+Six bars, top-left, and nothing else. Each prints the `CONFIG` value it writes so a look
 found here transfers to the build by typing it in. `?ui=0` hides the panel.
 
 | bar | writes | default |
@@ -30,6 +30,19 @@ found here transfers to the build by typing it in. `?ui=0` hides the panel.
 | quantity | `particleCount` | 60 000, range 14 000–90 000 |
 | size | `particleSize` | 0.6, range 0.1–0.7 |
 | glow | `bloomStrength` | 1.55, range 0–4 |
+| glow size | `bloomRadius` | 0.22, range 0.05–0.7 |
+| speed | `speed` | 1.0, range 0–3 |
+
+**Speed** is one dial rather than four. It scales the CLOCK the motes are read from, not any
+one of their speeds, so the swirl, the travel along their threads and the birth-to-death all
+stay in proportion however fast it runs. It is accumulated rather than multiplied at read
+time, so moving the bar never jumps their phase. The cloud's own sway is deliberately outside
+it — that is the camera's relationship to the volume, not the particles' own life. Measured
+over three frames, the frame-to-frame change goes from 15.0% at `speed` 0, which is the sway
+alone, to 21.3% at 1.
+
+**Glow size** is `bloomRadius`, read straight out of `CONFIG` by the blur pass every frame,
+so the bar just writes the value. Between 0.08 and 0.65 the halo doubles in area.
 
 The glow bar is the odd one out mechanically: the glow is a post pass, so its strength is
 not a property of the particle material at all — the bar reaches through the bloom chain to
@@ -555,6 +568,15 @@ strength is simply a power on the radius. Motes per 1000 px², by distance from 
 Read it as a redistribution rather than a gain: the count is fixed, so the steeper falloff at
 the outside is what pays for the weight at the corner. Note that *coverage* is a misleading
 measure here — it fell while density rose, because the motes out there are now much smaller.
+
+**This dial has less leverage than it looks like it should, and the reason is the framing.**
+The concentration is radial about the corner, but the corner is the middle of the model's
+plane and only the one quadrant is on screen — so three quarters of everything gathered at
+the corner is gathered off-screen. Measured across `cornerDensity` 1.4, 2.2 and 3.6, the share
+of drawn mass inside 80 px of the corner sat at 23.6%, 26.2% and 26.0%: the differences are
+inside the run-to-run variance, since the cloud re-seeds on every load. Past about 2.4 the
+setting is paying for motes nobody sees. The lever that would actually move it is the anchor —
+bringing the mass in off the corner, which is a framing decision rather than a constant.
 
 ### Clumping
 
