@@ -93,6 +93,37 @@ the same seat array as before, and nothing here costs a frame.
 
 `?strand=<0..1>` overrides the share; `?strand=0` is ver5's scatter exactly.
 
+### Where the threads lie
+
+Measured on Ref2, the filaments are neither parallel nor arbitrary: they hold a common
+diagonal, concentration **R = 0.54** on a scale where 0 is an isotropic tangle and 1 is a
+comb. `strandBias` and `strandBiasAngle` add a constant vector to the field's own direction
+before it is normalised, which is what produces a broad band of one heading.
+
+Ref2 also sets the thread's build: at a matched scale its filaments run about **14 px thick
+against 66 px of gap**, a ratio near 5. Ours were a single mote wide — nearer a two-hundredth
+of the gap, a drawn wire rather than a rope of particles — so `strandJitter` went up.
+
+It cannot go up on its own, and that is the trap here: lateral spread has to be paid for with
+motes per unit length, or the thread stops being a line and becomes a vague cloud. At
+`strandJitter` 0.012 with the spacing unchanged the structure dissolved outright. Thickness
+and `strandStep` move together, and the real ceiling is the population: 16 500 strand motes
+over ~110 threads is 150 each, where the reference has orders of magnitude more. Ropes as
+solid as Ref1's want a higher `particleCount`, not a wider jitter.
+
+### The field is a sum of sines, in two languages
+
+The strands are laid out on the CPU and travelled along in the vertex shader, so both halves
+must agree on the field exactly. A hashed value noise cannot do that: its hash multiplies by
+43 758 before taking a fraction, so the last bit of a double on the CPU becomes a completely
+different value in a GPU float, and the motes would stream off the threads they were laid on.
+A sum of sines has no such cliff — every term is a sine of a moderate argument, both sides
+agree to about a millionth, and the field is smooth so a millionth stays a millionth.
+
+The shader integrates from the SEAT every frame, in six fixed hops, rather than from last
+frame's position. That is what lets a mote follow a curving thread with no simulation state
+at all: its position stays a pure function of the clock.
+
 ### The mass had to grow to show them
 
 A thread needs room to be read as a thread. The box doubles on every length against ver5,
@@ -150,8 +181,8 @@ the clock, like everything else here.
 | `lifeSeconds` | one full birth-to-death (6.0) |
 | `lifeGrow` | share of the life spent swelling in (0.12) |
 | `lifeFadeStart` | where it starts shrinking away (0.68) |
-| `lifeDrift` | how far it travels off its seat over one life, in plane widths |
-| `lifeFraction` | share of motes that cycle at all (0.55) |
+| `lifeDrift` | how far it travels along the flow over one life, in plane widths |
+| `lifeFraction` | share of motes that cycle at all (1.0) |
 
 `?life=0` turns the turnover off and returns every mote to permanent.
 
@@ -159,21 +190,33 @@ the clock, like everything else here.
 below `minPx`, at which point the sub-pixel guard inflates it back up and holds it on screen
 at full opacity — so it would never actually go away.
 
-**A strand mote grows ACROSS its thread, never along it.** The direction is a random one with
-its component on the local flow removed. Sent along the flow instead, motes slide down the
-thread and the thread looks like it is travelling — which is the one thing the reference's
-stationary envelope says it is not doing.
+**Motes travel ALONG their thread.** This was got backwards first, on the theory that moving
+along a thread would drag the thread with it, so the first pass moved them across it. Dense
+optical flow on Ref1 settles it: **97.8% of the motion runs along the filaments**, mean |cos|
+0.974 over 27 000 samples. A crease is a *streamline* — motes stream down it while the line
+itself stays exactly where it is, because the mote leaving a point is replaced by the one
+behind it arriving. Nothing has to be held still for the structure to persist.
 
-**Two settings that fought each other**, and the reason the numbers landed where they did:
-the first pass cycled 72% of the motes and drifted them 0.06 plane widths, and the threads
-dissolved — the motes drawing the line kept wandering off it. Holding more of the population
-permanent (0.55 cycling) and cutting the drift to 0.022 keeps the line drawn while the
-turnover happens around and along it. The permanent motes draw the thread; the cycling ones
-are what is happening to it.
+That also removed a trade the previous pass was stuck with. Travel across the thread had to
+be kept tiny and most of the population left permanent, or the motes drawing the line
+wandered off it and the structure dissolved. Travelling along the flow, `lifeFraction` goes to
+**1.0** — every mote lives, dies and moves — and the threads still hold.
 
-Measured on the same three moments, false-coloured by which of them each mote appears in: the
-thread structure comes out solid — present in all three — while about **46%** of the lit
-pixels differ between frames, which is the turnover.
+### Measured, ours against theirs
+
+| | ours | reference |
+|---|---|---|
+| motion along the filament | 0.999, 100% of samples | 0.974, 97.8% (Ref1) |
+| speed | 4.7% of the plane width per second | ~39% of the mass radius per second (Ref1) |
+| flow field steadiness | steady, evolving only with the sway | 0.71 direction correlation over 1.6 s (Ref1) |
+
+Ours is deliberately slower. At the reference's rate the threads read as a smear at this
+size — `lifeDrift` is the dial if the customer wants it faster.
+
+The orientation of our own structure could not be measured the same way: a structure tensor
+needs continuous ink, and a field of discrete motes leaves it with a few dozen usable
+samples, at which point it reports whatever it likes. The reference numbers are solid
+(n = 27 000); ours is set against them by eye.
 
 ## Motes are not perfect circles
 

@@ -124,8 +124,18 @@ const CONFIG = {
   strandStep: 0.006,        // distance between motes along a strand, in plane widths. This
                             //   is thread LENGTH per mote: raise it and threads reach
                             //   further but go dotty
-  strandJitter: 0.0022,     // lateral scatter around the path, same units. 0 draws a
-                            //   one-mote wire; this is what gives a thread its thickness
+  strandJitter: 0.004,      // lateral scatter around the path, same units — a thread's
+                            //   THICKNESS. Measured on Ref2 a filament is about an eighth
+                            //   as thick as the gap to its neighbour; ours were a single
+                            //   mote wide, nearer a two-hundredth, which is a drawn wire
+                            //   rather than a rope of particles
+  // Measured on Ref2: the filaments hold a common diagonal, concentration 0.44 — a broad
+  // band of one direction rather than parallel lines or no preference at all. 0 is an
+  // isotropic tangle, 1 is a comb.
+  strandBias: 0.45,
+  strandBiasAngle: 40,      // degrees, counter-clockwise from the +x axis. Set so the
+                            //   structure measures the same lean the reference's does
+
   strandFlowScale: 4.2,     // features per plane width in the field the strands walk.
                             //   Higher curls them tighter, so the creases come closer
                             //   together; low and broad is what gives sweeping folds
@@ -140,21 +150,27 @@ const CONFIG = {
   // Each mote runs its own birth-to-death on a loop, phased off its own seed so the
   // population is spread across the cycle. There is no spawner and nothing is allocated:
   // a mote's life is a function of the clock, exactly like everything else here.
-  lifeSeconds: 6.0,         // one full birth-to-death. Long enough that a mote is a thing
+  lifeSeconds: 3.2,         // one full birth-to-death. Long enough that a mote is a thing
                             //   that lived rather than a flicker
   lifeGrow: 0.12,           // fraction of the life spent swelling in from nothing
   lifeFadeStart: 0.68,      // where it starts shrinking away again. Between grow and this
                             //   the mote is at full size, which is where the cloud gets
                             //   its body — bring the two together and it reads as twinkle
-  lifeDrift: 0.022,         // how far it travels off its seat over one life, in plane
-                            //   widths. This is the "growing OUT of the strand" part: the
-                            //   thread stays where it is and its motes leave it
+  lifeDrift: 0.150,         // how far a mote travels over one life, in plane widths, ALONG
+                            //   the flow. Measured on Ref1 the motes cover about 39% of the
+                            //   mass radius per second; this is 4.7% of the plane width per
+                            //   second, well under that, and the reason is legibility rather
+                            //   than fidelity — at the reference's rate the threads read as
+                            //   a smear at this size. It is the first dial to raise if the
+                            //   customer wants the streaming faster
 
-  // Share of motes that live and die at all. The remainder are permanent, and they are what
-  // keeps the threads legible: with every mote cycling, the structure itself dissolves and
-  // reforms and the eye never gets to hold on to a thread. The permanent ones draw the
-  // line; the cycling ones are what is happening to it.
-  lifeFraction: 0.55,
+  // Share of motes that live and die at all. This used to have to stay low to keep the
+  // threads from dissolving, back when a mote's travel was a straight line off its seat.
+  // Travelling ALONG the flow removes that trade completely: a mote leaving a point on a
+  // thread is replaced by the one behind it arriving, so the thread is preserved BY the
+  // motion rather than in spite of it. That is what a streamline is, and it is why the
+  // reference can move everything at once and still hold its shape.
+  lifeFraction: 1.0,
 
   // The loose motes that ignore the maps, and how far they spread. The share is the
   // reference's own ratio — 8000 unmasked against 40000 masked. The reach is a standard
@@ -543,6 +559,39 @@ vec3 curlNoise(vec3 position, float frequency, float time, float amplitude){
 }
 `;
 
+// ---------------------------------------------------------------- GLSL: the flow field
+// The GLSL half of FLOW. These constants are duplicated from the JS object on purpose and
+// have to be edited together: the strands are laid out by that one and travelled along by
+// this one, and if they disagree the motes stream off their own threads.
+const GLSL_FLOW = /* glsl */`
+uniform float uFlowScale;        // features per plane width, over world units
+uniform float uFlowBias;         // how hard the field leans on one direction
+uniform vec2  uFlowBiasDir;      // that direction
+
+vec3 flowDir(vec3 p) {
+  vec3 q = p * uFlowScale;
+  float th = 1.60 * sin(dot(q, vec3( 0.90,  1.30,  0.70)) + 0.70)
+           + 0.90 * sin(dot(q, vec3(-1.70,  0.80,  1.10)) + 2.30)
+           + 0.50 * sin(dot(q, vec3( 1.10, -1.90,  0.50)) + 4.10);
+  float ph = 0.55 * sin(dot(q, vec3( 1.30,  0.70, -1.10)) + 1.90);
+  float cp = cos(ph);
+  vec3 d = vec3(cos(th) * cp, sin(th) * cp, sin(ph) * 0.35);
+  d.xy += uFlowBiasDir * uFlowBias;
+  return normalize(d);
+}
+
+// Follow the field for a given distance, in a few straight hops. Fixed iteration count so
+// this compiles everywhere, and few of them because each is two sines: at six the path
+// tracks a thread over the distance a mote covers in one life, which is all it has to do.
+// Integrating from the SEAT every frame rather than from last frame's position is what lets
+// this work with no simulation state at all — the position is a pure function of the clock.
+vec3 advect(vec3 p, float dist) {
+  float dt = dist / 6.0;
+  for (int i = 0; i < 6; i++) p += flowDir(p) * dt;
+  return p;
+}
+`;
+
 // ---------------------------------------------------------------- GLSL: vertex
 // Instanced camera-facing quads. Sizing is in WORLD units (not gl_PointSize), so motes
 // grow and shrink with perspective and there is no driver cap on how large one can get.
@@ -551,7 +600,7 @@ vec3 curlNoise(vec3 position, float frequency, float time, float amplitude){
 // computed six times over, once per corner. Consistent, so the quad never tears, but it
 // is 6x the arithmetic. Fine at a few thousand motes; past ~20k move the solve to a
 // ping-pong pass and read the result back as an instance attribute.
-const VERT = /* glsl */`
+const VERT = GLSL_FLOW + /* glsl */`
 ${GLSL_SNOISE}
 
 // The attribute named position is the quad corner, -0.5..0.5 in xy with z unused. It
@@ -566,7 +615,6 @@ attribute float aBrightness;
 attribute float aCurlResp;       // 0 or 1
 attribute float aDensity;        // 0..1, how crowded this mote's neighbourhood is
 attribute float aShape;          // 0..1, the seed for this mote's outline
-attribute vec3  aGrowDir;        // the way this mote leaves its seat over its life
 attribute float aLife;           // 1 if it lives and dies, 0 if it is permanent
 
 uniform float uTime;
@@ -624,9 +672,15 @@ void main(){
                  * (1.0 - smoothstep(uLifeFadeStart, 1.0, lifePhase));
   envelope = mix(1.0, envelope, aLife);
 
-  // Travel off the seat as it lives. Linear in the phase, so a mote is still moving when it
-  // goes — easing it to a stop first reads as the mote parking and then being switched off.
-  vec3 pos = aInitPos + aGrowDir * (uLifeDrift * lifePhase * aLife);
+  // Travel ALONG THE FLOW as it lives, which is the whole correction of this pass. Measured
+  // on Ref1, 97.8% of the motion runs along the filaments rather than across them: a crease
+  // is a streamline, so its motes stream down it while the line itself stays exactly where
+  // it is. Moving them across the thread — which looked like the safe choice, on the theory
+  // that moving along would drag the thread with them — is what a fluid never does.
+  //
+  // Linear in the phase, so a mote is still moving when it goes; easing it to a stop first
+  // reads as the mote parking and then being switched off.
+  vec3 pos = advect(aInitPos, uLifeDrift * lifePhase * aLife);
 
   // ---- 1. drift, on a 5-second recycle -------------------------------------
   // Age is the mote's own phase, so the population is spread across the cycle instead
@@ -952,39 +1006,56 @@ function valueNoise3(x, y, z) {
     w);
 }
 
-// ---------------------------------------------------------------- the flow the strands walk
-// The noise gives a DIRECTION directly — two smooth fields read as a heading and a tilt —
-// rather than a vector whose length means anything. That choice is the difference between
-// threads and clumps, and it was made the expensive way.
+// ---------------------------------------------------------------- the flow field
+// One field, written twice: here for laying the strands out, and again in GLSL so the motes
+// can travel along the very threads they were laid on. The two MUST agree, and that is what
+// dictates the form of it.
 //
-// The first attempt took the curl of a noise field and normalised it. A curl is the right
-// instinct (it swirls, and unlike a gradient it has no sinks for every strand to drain
-// into), but its magnitude passes through zero along whole surfaces, and a normalised
-// direction is meaningless where the magnitude vanishes: the walk turns to noise, reverses
-// into itself and stops. Every one of those stalls dropped its remaining motes on one spot,
-// so the render came out as a scatter with a dozen hard blobs in it.
+// A hashed value noise cannot be used for this. Its hash is fract(sin(dot(p,k)) * 43758.5),
+// and multiplying by forty-three thousand before taking a fraction turns the last bit of a
+// double on the CPU into a completely different value on a GPU float. The strands would be
+// laid along one field and the motes would travel along another.
 //
-// An angle field cannot degenerate. It is unit length everywhere by construction, it varies
-// as smoothly as the noise behind it, and a walk through it curves continuously — which is
-// what a filament is.
+// A sum of sines has no such cliff. Every term is a sine of a moderate argument, both sides
+// agree to about a millionth, and the field is smooth so a millionth stays a millionth. It
+// is periodic, which a hash is not, but over the few features a corner cloud spans that is
+// invisible.
 //
-// This field is scaffolding, separate from the one animating the motes in the shader. It
-// decides where the threads lie, once, and is never read again.
+// The heading is the angle itself, never a vector to be normalised: a vector field's length
+// passes through zero along whole surfaces, and a normalised direction is meaningless where
+// it does — the walk turns to noise, reverses into itself and stops dead, dropping every
+// remaining mote of that strand on one spot. An angle cannot degenerate.
+const FLOW = {
+  f1: [ 0.90,  1.30,  0.70], a1: 1.60, p1: 0.70,
+  f2: [-1.70,  0.80,  1.10], a2: 0.90, p2: 2.30,
+  f3: [ 1.10, -1.90,  0.50], a3: 0.50, p3: 4.10,
+  g1: [ 1.30,  0.70, -1.10], b1: 0.55, q1: 1.90,
+};
+
 function flowAt(x, y, z, s, out) {
-  const heading = valueNoise3(x * s + 3.1, y * s + 7.7, z * s + 1.3);
-  const tilt    = valueNoise3(x * s + 19.4, y * s + 2.8, z * s + 11.9);
-  // A couple of full turns across a feature: enough that a thread curls back on itself
-  // within the mass, not so much that it scribbles.
-  const th = heading * Math.PI * 4.0;
-  const ph = (tilt - 0.5) * Math.PI;
+  const X = x * s, Y = y * s, Z = z * s;
+  const F = FLOW;
+  const th = F.a1 * Math.sin(F.f1[0]*X + F.f1[1]*Y + F.f1[2]*Z + F.p1)
+           + F.a2 * Math.sin(F.f2[0]*X + F.f2[1]*Y + F.f2[2]*Z + F.p2)
+           + F.a3 * Math.sin(F.f3[0]*X + F.f3[1]*Y + F.f3[2]*Z + F.p3);
+  const ph = F.b1 * Math.sin(F.g1[0]*X + F.g1[1]*Y + F.g1[2]*Z + F.q1);
   const cp = Math.cos(ph);
-  out[0] = Math.cos(th) * cp;
-  out[1] = Math.sin(th) * cp;
-  // Damped, because the shape the threads live in is a shallow relief: a walk free to climb
-  // in z spends most of its length outside the mass, where nothing can see it.
-  out[2] = Math.sin(ph) * 0.35;
-  const l = Math.hypot(out[0], out[1], out[2]) || 1;
-  out[0] /= l; out[1] /= l; out[2] /= l;
+  // Damped in z, because the shape the threads live in is a shallow relief: a walk free to
+  // climb spends most of its length outside the mass, where nothing can see it.
+  let dx = Math.cos(th) * cp, dy = Math.sin(th) * cp, dz = Math.sin(ph) * 0.35;
+
+  // A shared lean. Measured on Ref2, the filaments are neither parallel nor arbitrary: they
+  // hold a common diagonal with a concentration of 0.44, meaning most of the structure lies
+  // within a broad band of one direction. Adding a constant vector before normalising is
+  // what produces that — pull it to 1 and every thread is parallel, drop it to 0 and the
+  // field has no grain at all.
+  const b = CONFIG.strandBias;
+  if (b > 0) {
+    const a = THREE.MathUtils.degToRad(CONFIG.strandBiasAngle);
+    dx += Math.cos(a) * b; dy += Math.sin(a) * b;
+  }
+  const l = Math.hypot(dx, dy, dz) || 1;
+  out[0] = dx / l; out[1] = dy / l; out[2] = dz / l;
 }
 
 // ---------------------------------------------------------------- the model
@@ -1346,7 +1417,6 @@ function buildParticles(count) {
   const brights    = new Float32Array(count);
   const curlResp   = new Float32Array(count);
   const shapes     = new Float32Array(count);
-  const growDir    = new Float32Array(count * 3);
   const lives      = new Float32Array(count);
 
   const vh = viewHeightAt(CONFIG.anchorZ);
@@ -1524,19 +1594,6 @@ function buildParticles(count) {
     initPos[i3 + 1] = py;
     initPos[i3 + 2] = pz;
 
-    // Which way this mote leaves home over its life. For a strand mote that means ACROSS
-    // the thread, never along it: a random direction with its component on the flow removed,
-    // so the motes bloom sideways out of the line they were laid on and the line itself
-    // stays where it is. Sent along the flow instead they would slide down the thread and
-    // the thread would look like it was moving, which is the one thing the reference's
-    // stationary envelope says it is not doing.
-    let gx = gauss1(), gy = gauss1(), gz = gauss1();
-    if (isStrand) {
-      const d = gx * flow[0] + gy * flow[1] + gz * flow[2];
-      gx -= d * flow[0]; gy -= d * flow[1]; gz -= d * flow[2];
-    }
-    const gl = Math.hypot(gx, gy, gz) || 1;
-    growDir[i3] = gx / gl; growDir[i3 + 1] = gy / gl; growDir[i3 + 2] = gz / gl;
     lives[i] = Math.random() < CONFIG.lifeFraction ? 1 : 0;
 
     const travels = Math.random() < CONFIG.floatingParticles;
@@ -1631,7 +1688,6 @@ function buildParticles(count) {
   inst('aCurlResp', curlResp, 1);
   inst('aDensity', density, 1);
   inst('aShape', shapes, 1);
-  inst('aGrowDir', growDir, 3);
   inst('aLife', lives, 1);
 
   // the cloud moves in the shader, so nothing can be culled off its rest bounds
@@ -1650,7 +1706,7 @@ function buildParticles(count) {
     aTimeOffset: timeOffs.slice(),
     aBrightness: brights.slice(), aCurlResp: curlResp.slice(),
     aDensity: density.slice(), aShape: shapes.slice(),
-    aGrowDir: growDir.slice(), aLife: lives.slice(),
+    aLife: lives.slice(),
   };
   geo.userData.order = new Int32Array(count).map((_, i) => i);
   geo.userData.key = new Float32Array(count);
@@ -1714,6 +1770,9 @@ const uniforms = {
   uLifeGrow: { value: CONFIG.lifeGrow },
   uLifeFadeStart: { value: CONFIG.lifeFadeStart },
   uLifeDrift: { value: 0 },          // set in place(), where the plane's world size is known
+  uFlowScale: { value: 1 },          // likewise: it is given per plane width
+  uFlowBias: { value: CONFIG.strandBias },
+  uFlowBiasDir: { value: new THREE.Vector2(1, 0) },
   uDeepen: { value: CONFIG.deepen },
   uDeepenBias: { value: CONFIG.deepenBias },
   uDeepenSat: { value: CONFIG.deepenSat },
@@ -1977,6 +2036,12 @@ function place() {
   uniforms.uHalfDepth.value = seatHalfDepth || Math.max(1e-3, CONFIG.boxDepth * vh * 0.5);
   // lifeDrift is given in plane widths, like every other distance the model decides
   uniforms.uLifeDrift.value = CONFIG.lifeDrift * seatPlaneW;
+  // The shader has to read the field at the same scale the strands were laid at, or the
+  // motes travel along a coarser or finer field than the one under them.
+  uniforms.uFlowScale.value = CONFIG.strandFlowScale / Math.max(1e-6, seatPlaneW);
+  uniforms.uFlowBias.value = CONFIG.strandBias;
+  const ba = THREE.MathUtils.degToRad(CONFIG.strandBiasAngle);
+  uniforms.uFlowBiasDir.value.set(Math.cos(ba), Math.sin(ba));
   hoverRadiusWorld = CONFIG.expandHoverRadius * vh;
 
   // Typical mote diameter in device pixels. The mean of the size draw is
