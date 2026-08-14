@@ -91,6 +91,17 @@ const CONFIG = {
   // copying the number rather than the effect would give motes the size of the cloud.
   normalInfluence: 3.0,
 
+  // Denser toward the corner. The model's own sampling is even across its projected area,
+  // so density follows the SILHOUETTE rather than the corner — measured on the last build
+  // the coverage fell to 0.55 forty pixels out and rose again to 0.80 further along, which
+  // is the lens shape talking, not a gradient. This weights the draw by distance from the
+  // corner itself, on top of everything the model decides.
+  //
+  // 0 leaves the model's even coverage alone. Each step up crowds the population cornerward
+  // and, since the count is fixed, thins the far side by exactly as much.
+  cornerDensity: 1.6,
+  cornerDensityScale: 0.55, // the distance over which it falls away, in plane widths
+
   // How clumpy the sheet is. Seats are rejection-sampled against a low-frequency noise
   // field, so motes gather in some places and thin out in others instead of covering
   // evenly. Held over from the previous versions and lowered — the reference has no
@@ -180,7 +191,7 @@ const CONFIG = {
   //
   // Their position re-rolls on every load. That is the point of them — the mass is fixed by
   // the model, and this is the part that is different each time.
-  extraStrands: 3,
+  extraStrands: 4,
   extraStrandLength: 2200,  // motes each. Far more than a model strand gets: these have to
                             //   read as ONE line against a mass of thirty thousand, and at
                             //   the model strands' budget they simply joined the texture
@@ -1518,7 +1529,15 @@ function buildParticles(count) {
       // samples; ours has to be put in by hand.
       const k = CONFIG.shapeNoiseScale;
       const d = valueNoise3(u * k + 11.3, w * k + 4.7, mapDepth * k + 19.1);
-      const accept = 1 - CONFIG.shapeNoise + CONFIG.shapeNoise * d * 2;
+      let accept = 1 - CONFIG.shapeNoise + CONFIG.shapeNoise * d * 2;
+
+      // ...and weight what survives toward the corner. The group's origin sits on the
+      // screen corner, so distance from the origin IS distance from the corner.
+      if (CONFIG.cornerDensity > 0) {
+        const cx = (u - 0.5) * planeW, cy = -(w - 0.5) * planeH;
+        const rr = Math.hypot(cx, cy) / Math.max(1e-6, CONFIG.cornerDensityScale * planeW);
+        accept *= Math.exp(-CONFIG.cornerDensity * rr);
+      }
       if (Math.random() < accept) break;
     }
     // The map is an image: u runs left to right, w runs DOWN from the top, so the sign on

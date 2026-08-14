@@ -147,6 +147,13 @@ They needed their own build, and it took three passes:
   own footprint — measured, the strands reach 175 px from the corner at the 99th percentile
   where the whole cloud reaches 180 px.
 
+There are **four** of them now. They share one field, so they also share its diagonal, and
+at any moment two or three read as clearly separate arcs rather than four — threads that
+follow the same flow converge by nature, which is true of the reference's creases too. Giving
+the corner strands a field of their own would separate them further, but the strands are laid
+out on the CPU and travelled along in the shader, and the two halves have to read the same
+field or the motes stream off their own threads.
+
 **Each strand takes its own slice of the corner.** Seeding all three from the same crowded
 draw is what left only one of them visible: three threads starting within a few pixels of
 each other, walking the same field from nearly the same place, draw nearly the same line on
@@ -468,6 +475,27 @@ the deviation, in plane widths.
 Measured at the same frame, with the pointer away: footprint **410 → 545** four-pixel cells
 with the loose layer in, against ver4's unbounded draw at 795. Tighter than ver4 by design —
 the mass now has an outline — while keeping the dissolve at its edge.
+
+### Denser toward the corner
+
+The model's sampler is even across its projected area, so density follows the **silhouette**
+rather than the corner. Measured on the build before this one, coverage ran 0.86 in the first
+forty pixels, fell to **0.55** by eighty, and rose again to 0.80 further out — that dip is
+the lens shape talking, not a gradient.
+
+`cornerDensity` weights the surviving seats by distance from the corner itself, on top of
+everything the model decides. The profile comes out monotonic:
+
+| distance from the corner | before | after |
+|---|---|---|
+| 0–40 px | 0.86 | **0.98** |
+| 40–80 px | 0.55 | **0.93** |
+| 80–120 px | 0.80 | 0.78 |
+| 120–160 px | 0.69 | 0.71 |
+| 160–200 px | 0.37 | 0.40 |
+
+The count is fixed, so this is a redistribution: everything the corner gains, the far side
+gives up. `cornerDensityScale` sets how far the falloff reaches.
 
 ### Clumping
 
