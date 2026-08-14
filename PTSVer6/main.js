@@ -30,7 +30,7 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 30000,
+  particleCount: 60000,
   particleSize: 0.6,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
@@ -181,7 +181,7 @@ const CONFIG = {
   // Their position re-rolls on every load. That is the point of them — the mass is fixed by
   // the model, and this is the part that is different each time.
   extraStrands: 3,
-  extraStrandLength: 900,   // motes each. Far more than a model strand gets: these have to
+  extraStrandLength: 2200,  // motes each. Far more than a model strand gets: these have to
                             //   read as ONE line against a mass of thirty thousand, and at
                             //   the model strands' budget they simply joined the texture
   extraStrandStep: 0.0012,  // and packed closer along the path than the model's threads —
@@ -195,6 +195,10 @@ const CONFIG = {
   extraStrandBunch: 1.8,    // how hard their seeds crowd toward the corner. 1 scatters them
                             //   evenly through the box; each step up pulls the population
                             //   nearer the corner while leaving the box where it is
+  extraStrandInner: 0.40,   // and how far out they START, as a share of the box. Without a
+                            //   floor here the crowding piles all three on the same spot by
+                            //   the corner, where they overlap and read as ONE gathering —
+                            //   which is exactly what happened
   extraStrandHome: 0.28,    // where a thread turns back TO, in box widths from the corner.
                             //   Not the corner itself — aimed dead at it, a thread reaching
                             //   the wall slides along the screen edge and draws a rim
@@ -439,7 +443,7 @@ const numParam = (k, lo, hi) => {
   const v = parseFloat(PARAMS.get(k));
   return Number.isFinite(v) && v >= lo && v <= hi ? v : null;
 };
-if (numParam('p', 1, 40000) !== null) CONFIG.particleCount = Math.round(numParam('p', 1, 40000));
+if (numParam('p', 1, 120000) !== null) CONFIG.particleCount = Math.round(numParam('p', 1, 120000));
 if (numParam('curl', 0, 5) !== null) CONFIG.curlAmplitude = numParam('curl', 0, 5);
 if (numParam('push', 0, 5) !== null) CONFIG.mouseStrength = numParam('push', 0, 5);
 if (numParam('noise', 0, 1) !== null) CONFIG.shapeNoise = numParam('noise', 0, 1);
@@ -1546,12 +1550,25 @@ function buildParticles(count) {
   const cornerStep = CONFIG.extraStrandStep * planeW;
   const extraCount = Math.min(count,
     Math.max(0, Math.round(CONFIG.extraStrands)) * CONFIG.extraStrandLength);
+  let cornerIndex = 0;
   const startCornerStrand = () => {
-    // Crowded toward the corner rather than spread evenly through the box: a power on a
-    // uniform draw does it, and keeps the box as the outer bound rather than the target.
+    // Each strand gets its OWN slice of the quarter turn around the corner. Seeding all of
+    // them from the same crowded draw is what left only one visible: three threads started
+    // within a few pixels of each other, walked the same field from nearly the same place,
+    // and drew nearly the same line on top of each other. Fanning them guarantees the count
+    // asked for is the count seen.
+    const seg = Math.max(1, Math.round(CONFIG.extraStrands));
+    const slice = (cornerIndex++ % seg + Math.random()) / seg;
+    const ang = slice * Math.PI * 0.5;          // 0 = straight in from the corner, 90 = down
+
+    // Crowded toward the corner along that direction, but with a floor: a power draw alone
+    // puts every seed on the corner itself.
     const bunch = Math.max(1, CONFIG.extraStrandBunch);
-    walk[0] = -Math.pow(Math.random(), bunch) * cornerReach;
-    walk[1] = -Math.pow(Math.random(), bunch) * cornerReach;
+    const t = CONFIG.extraStrandInner
+            + (1 - CONFIG.extraStrandInner) * Math.pow(Math.random(), bunch);
+    const r = t * cornerReach;
+    walk[0] = -Math.cos(ang) * r;
+    walk[1] = -Math.sin(ang) * r;
     walk[2] = (Math.random() - 0.5) * depthSpan;
     strandNz = 1;
     strandLeft = CONFIG.extraStrandLength;
@@ -2304,7 +2321,7 @@ if (uiEl && PARAMS.get('ui') === '0') {
     { key: 'hue', name: 'colour', cst: 'CONFIG.colorOverlayRGB',
       min: 0, max: 1, step: 0.001, value: hueOf(...base) },
     { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
-      min: 14000, max: 30000, step: 100, value: CONFIG.particleCount, rebuild: true },
+      min: 14000, max: 90000, step: 500, value: CONFIG.particleCount, rebuild: true },
     { key: 'particleSize', name: 'size', cst: 'CONFIG.particleSize',
       min: 0.1, max: 0.7, step: 0.01, value: CONFIG.particleSize, uni: 'uParticleSize' },
   ];

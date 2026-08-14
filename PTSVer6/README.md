@@ -27,7 +27,7 @@ found here transfers to the build by typing it in. `?ui=0` hides the panel.
 | bar | writes | default |
 |---|---|---|
 | colour | `colorOverlayR/G/B` | `0.850 0.050 0.060` |
-| quantity | `particleCount` | 30 000, range 14 000–30 000 |
+| quantity | `particleCount` | 60 000, range 14 000–90 000 |
 | size | `particleSize` | 0.6, range 0.1–0.7 |
 
 Colour is **one** bar rather than three because the material only ever varies in hue: the
@@ -147,6 +147,13 @@ They needed their own build, and it took three passes:
   own footprint — measured, the strands reach 175 px from the corner at the 99th percentile
   where the whole cloud reaches 180 px.
 
+**Each strand takes its own slice of the corner.** Seeding all three from the same crowded
+draw is what left only one of them visible: three threads starting within a few pixels of
+each other, walking the same field from nearly the same place, draw nearly the same line on
+top of each other. Each now gets its own share of the quarter turn around the corner
+(`extraStrands` divides it), with `extraStrandInner` keeping the seed off the corner itself,
+so the count asked for is the count seen.
+
 Two settings put the particles where they belong rather than merely inside the box.
 `extraStrandBunch` is a power on the seed draw, crowding the threads toward the corner while
 leaving the box where it is; `extraStrandHome` is the point a thread turns back toward when
@@ -158,11 +165,15 @@ dead at the corner slides along the screen edge and draws a rim.
 A thread needs room to be read as a thread. The box doubles on every length against ver5,
 which is **four times the coverage**, and the mote size goes 0.4 → 0.6.
 
-The population is deliberately **not** raised to match. Holding 30 000 motes across four
-times the area is what opens space between the threads, and that space is the whole point —
-at ver5's density the threads touch and merge back into the even scatter they were meant to
-replace. If the mass wants more weight, `particleCount` is the dial, and it trades directly
-against how clearly the threading reads.
+The population is now **60 000**, doubled to give the corner strands enough motes to read as
+separate gatherings while the mass keeps its body.
+
+That is not free, and the cost is worth knowing: under the software rasteriser the headless
+harness uses, one frame goes from **0.58 s at 30 000 to 1.00 s at 60 000** — the drawing cost
+tracks the population almost directly, so this is not a rounding error hiding behind the
+bloom passes. A real GPU is a different regime and 60 000 instanced quads is routine there,
+but that has not been measured here, only reasoned about. If it stutters on the target
+machine, `?p=<n>` changes it without a rebuild and the quantity bar runs down to 14 000.
 
 Two constants travel with the box and are not free to stay behind:
 
