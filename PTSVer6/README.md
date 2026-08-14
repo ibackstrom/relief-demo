@@ -124,6 +124,24 @@ The shader integrates from the SEAT every frame, in six fixed hops, rather than 
 frame's position. That is what lets a mote follow a curving thread with no simulation state
 at all: its position stays a pure function of the clock.
 
+### Two or three of them are not the model's
+
+The threads above all start from seats inside the silhouette, so they read as the mass's own
+grain. `extraStrands` adds a few more — three by default — seeded at random out in the corner
+and held to a box there rather than to the model. They walk the same field, so they belong to
+the same weather, but their placement **re-rolls on every load**: the mass is fixed by the
+model, and this is the part that is different each time.
+
+They needed their own build, and two attempts to get there:
+
+- **Their own budget.** At a model strand's 150 motes they simply joined the texture — one
+  line in thirty thousand motes is not a line, it is noise. They get 500 each, packed under a
+  pixel apart (`extraStrandStep`), so each draws as one continuous stroke.
+- **Their own box, wider than the mass.** At 0.7 plane widths the box was shorter than the
+  path a strand walks, so each thread doubled back inside it and came out a clump. At 1.2 it
+  sweeps instead, and the part that runs past the mass is seen against the open page — which
+  is where a thread is most legible.
+
 ### The mass had to grow to show them
 
 A thread needs room to be read as a thread. The box doubles on every length against ver5,

@@ -172,6 +172,28 @@ const CONFIG = {
   // reference can move everything at once and still hold its shape.
   lifeFraction: 1.0,
 
+  // ------------------------------------------------------------ corner strands
+  // A few threads that are not the model's. The ones above all start from seats inside the
+  // silhouette, so they read as the mass's own grain; these are seeded at random out in the
+  // corner and kept there, which puts a line or two in the open space where nothing else is
+  // happening. They walk the same field, so they belong to the same weather.
+  //
+  // Their position re-rolls on every load. That is the point of them — the mass is fixed by
+  // the model, and this is the part that is different each time.
+  extraStrands: 3,
+  extraStrandLength: 500,   // motes each. Far more than a model strand gets: these have to
+                            //   read as ONE line against a mass of thirty thousand, and at
+                            //   the model strands' budget they simply joined the texture
+  extraStrandStep: 0.0027,  // and packed closer along the path than the model's threads —
+                            //   under a pixel apart at this size, so the line is continuous
+                            //   rather than a row of dots
+  extraStrandReach: 1.20,   // the corner box they are seeded in and held to, in plane widths
+                            //   measured from the screen corner itself. Wider than the mass
+                            //   on purpose: part of each thread is then seen against the
+                            //   open page, and — the reason this number had to go up — a
+                            //   thread confined to a box shorter than its own path just
+                            //   doubles back on itself and reads as a clump, not a line
+
   // The loose motes that ignore the maps, and how far they spread. The share is the
   // reference's own ratio — 8000 unmasked against 40000 masked. The reach is a standard
   // deviation in plane widths, set to land the dissolve where the previous version's
@@ -1506,6 +1528,24 @@ function buildParticles(count) {
   const walk = [0, 0, 0];           // where the strand being laid has got to
   let strandLeft = 0;               // motes still to lay along it
   let strandNz = 1;                 // the normal at its origin, kept for the size draw
+
+  // The corner strands: how many motes they take off the top, and the box they live in.
+  // The group's origin sits ON the screen corner, so the visible quadrant is the negative
+  // one — seeding into positive x or y would put the thread off-screen past the corner.
+  const cornerReach = CONFIG.extraStrandReach * planeW;
+  const cornerStep = CONFIG.extraStrandStep * planeW;
+  const extraCount = Math.min(count,
+    Math.max(0, Math.round(CONFIG.extraStrands)) * CONFIG.extraStrandLength);
+  const startCornerStrand = () => {
+    walk[0] = -Math.random() * cornerReach;
+    walk[1] = -Math.random() * cornerReach;
+    walk[2] = (Math.random() - 0.5) * depthSpan;
+    strandNz = 1;
+    strandLeft = CONFIG.extraStrandLength;
+    flowAt(walk[0], walk[1], walk[2], strandScale, flow);
+  };
+  const inCorner = (x, y) => x <= 0 && y <= 0 && x >= -cornerReach && y >= -cornerReach;
+
   const startStrand = () => {
     const s = sampleSeat();
     walk[0] = s.x; walk[1] = s.y; walk[2] = s.z;
@@ -1519,18 +1559,51 @@ function buildParticles(count) {
 
   for (let i = 0; i < count; i++) {
     const i3 = i * 3;
+    // the corner strands are laid first and finish together; whatever walk they left behind
+    // must not be picked up by the first model strand
+    if (i === extraCount) strandLeft = 0;
 
     // Each mote takes one of three roles, drawn from a single roll so the shares are
     // exclusive and read off the config directly. What is left over after the loose motes
     // and the strands is plain scatter — and it is not a remainder, it is the haze between
     // the threads that the reference clips have as much of as they have thread.
     const roll = Math.random();
-    const isStray = roll < CONFIG.strayFraction;
-    const isStrand = !isStray && roll < CONFIG.strayFraction + CONFIG.strandFraction;
+    const isCorner = i < extraCount;
+    const isStray = !isCorner && roll < CONFIG.strayFraction;
+    const isStrand = !isCorner && !isStray
+                  && roll < CONFIG.strayFraction + CONFIG.strandFraction;
 
     let px, py, pz, nz01;
 
-    if (isStray) {
+    if (isCorner) {
+      // Same walk as the model's strands, held to the corner box instead of to the
+      // silhouette. Turning back rather than ending keeps a thread whole; ending it here
+      // would spend the budget on stubs, and out in the open a stub is just a smudge.
+      if (strandLeft <= 0) {
+        startCornerStrand();
+      } else {
+        flowAt(walk[0], walk[1], walk[2], strandScale, flow);
+        const nx = walk[0] + flow[0] * cornerStep;
+        const ny = walk[1] + flow[1] * cornerStep;
+        const nz = walk[2] + flow[2] * cornerStep;
+        if (inCorner(nx, ny)) {
+          walk[0] = nx; walk[1] = ny; walk[2] = nz;
+        } else {
+          // back toward the middle of the corner box, clear of the wall it just met
+          const cx = -cornerReach * 0.5, cy = -cornerReach * 0.5;
+          const dx = cx - walk[0], dy = cy - walk[1];
+          const l = Math.hypot(dx, dy) || 1;
+          walk[0] += (dx / l) * cornerStep * 2.0;
+          walk[1] += (dy / l) * cornerStep * 2.0;
+          walk[2] += flow[2] * cornerStep * 0.5;
+        }
+      }
+      strandLeft--;
+      px = walk[0] + gauss1() * strandJit;
+      py = walk[1] + gauss1() * strandJit;
+      pz = walk[2] + gauss1() * strandJit;
+      nz01 = strandNz;
+    } else if (isStray) {
       // A share of the motes ignores the maps completely. This is the reference site's
       // SECOND particle system: alongside the 40000 it masks to the portrait it runs 8000
       // more with both thresholds at zero, which is to say unmasked, drifting hard and
