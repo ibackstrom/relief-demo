@@ -181,18 +181,28 @@ const CONFIG = {
   // Their position re-rolls on every load. That is the point of them — the mass is fixed by
   // the model, and this is the part that is different each time.
   extraStrands: 3,
-  extraStrandLength: 500,   // motes each. Far more than a model strand gets: these have to
+  extraStrandLength: 900,   // motes each. Far more than a model strand gets: these have to
                             //   read as ONE line against a mass of thirty thousand, and at
                             //   the model strands' budget they simply joined the texture
-  extraStrandStep: 0.0027,  // and packed closer along the path than the model's threads —
+  extraStrandStep: 0.0012,  // and packed closer along the path than the model's threads —
                             //   under a pixel apart at this size, so the line is continuous
                             //   rather than a row of dots
-  extraStrandReach: 1.20,   // the corner box they are seeded in and held to, in plane widths
-                            //   measured from the screen corner itself. Wider than the mass
-                            //   on purpose: part of each thread is then seen against the
-                            //   open page, and — the reason this number had to go up — a
-                            //   thread confined to a box shorter than its own path just
-                            //   doubles back on itself and reads as a clump, not a line
+  extraStrandReach: 0.60,   // the corner box they are seeded in and held to, in plane widths
+                            //   measured from the screen corner itself. Cut back from 1.2:
+                            //   a box that reaches well past the mass lets a thread wander
+                            //   out into open page on its own, which reads as a stray line
+                            //   rather than as part of the effect
+  extraStrandBunch: 1.8,    // how hard their seeds crowd toward the corner. 1 scatters them
+                            //   evenly through the box; each step up pulls the population
+                            //   nearer the corner while leaving the box where it is
+  extraStrandHome: 0.28,    // where a thread turns back TO, in box widths from the corner.
+                            //   Not the corner itself — aimed dead at it, a thread reaching
+                            //   the wall slides along the screen edge and draws a rim
+  extraStrandJitter: 0.010, // lateral spread, in plane widths — wider than the model
+                            //   threads use. These are meant to be seen as gatherings of
+                            //   particles rather than as drawn lines, and the spread is
+                            //   affordable here because the packing along the path is more
+                            //   than twice as tight
 
   // The loose motes that ignore the maps, and how far they spread. The share is the
   // reference's own ratio — 8000 unmasked against 40000 masked. The reach is a standard
@@ -1537,8 +1547,11 @@ function buildParticles(count) {
   const extraCount = Math.min(count,
     Math.max(0, Math.round(CONFIG.extraStrands)) * CONFIG.extraStrandLength);
   const startCornerStrand = () => {
-    walk[0] = -Math.random() * cornerReach;
-    walk[1] = -Math.random() * cornerReach;
+    // Crowded toward the corner rather than spread evenly through the box: a power on a
+    // uniform draw does it, and keeps the box as the outer bound rather than the target.
+    const bunch = Math.max(1, CONFIG.extraStrandBunch);
+    walk[0] = -Math.pow(Math.random(), bunch) * cornerReach;
+    walk[1] = -Math.pow(Math.random(), bunch) * cornerReach;
     walk[2] = (Math.random() - 0.5) * depthSpan;
     strandNz = 1;
     strandLeft = CONFIG.extraStrandLength;
@@ -1589,8 +1602,10 @@ function buildParticles(count) {
         if (inCorner(nx, ny)) {
           walk[0] = nx; walk[1] = ny; walk[2] = nz;
         } else {
-          // back toward the middle of the corner box, clear of the wall it just met
-          const cx = -cornerReach * 0.5, cy = -cornerReach * 0.5;
+          // back toward a point NEAR the corner, clear of the wall it just met. Aimed at
+          // the corner itself a thread would end up sliding along the screen edge.
+          const home = CONFIG.extraStrandHome * cornerReach;
+          const cx = -home, cy = -home;
           const dx = cx - walk[0], dy = cy - walk[1];
           const l = Math.hypot(dx, dy) || 1;
           walk[0] += (dx / l) * cornerStep * 2.0;
@@ -1599,9 +1614,10 @@ function buildParticles(count) {
         }
       }
       strandLeft--;
-      px = walk[0] + gauss1() * strandJit;
-      py = walk[1] + gauss1() * strandJit;
-      pz = walk[2] + gauss1() * strandJit;
+      const j = CONFIG.extraStrandJitter * planeW;
+      px = walk[0] + gauss1() * j;
+      py = walk[1] + gauss1() * j;
+      pz = walk[2] + gauss1() * j;
       nz01 = strandNz;
     } else if (isStray) {
       // A share of the motes ignores the maps completely. This is the reference site's

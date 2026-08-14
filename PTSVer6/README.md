@@ -132,15 +132,26 @@ and held to a box there rather than to the model. They walk the same field, so t
 the same weather, but their placement **re-rolls on every load**: the mass is fixed by the
 model, and this is the part that is different each time.
 
-They needed their own build, and two attempts to get there:
+They needed their own build, and it took three passes:
 
 - **Their own budget.** At a model strand's 150 motes they simply joined the texture — one
-  line in thirty thousand motes is not a line, it is noise. They get 500 each, packed under a
-  pixel apart (`extraStrandStep`), so each draws as one continuous stroke.
-- **Their own box, wider than the mass.** At 0.7 plane widths the box was shorter than the
-  path a strand walks, so each thread doubled back inside it and came out a clump. At 1.2 it
-  sweeps instead, and the part that runs past the mass is seen against the open page — which
-  is where a thread is most legible.
+  line in thirty thousand motes is not a line, it is noise. They get 900 each, packed at
+  `extraStrandStep`, about half a pixel apart, so each reads as a gathering rather than a
+  row of dots. `extraStrandJitter` spreads them sideways into a rope; the tight packing along
+  the path is what pays for that spread.
+- **Their own box.** At 0.7 plane widths the box was shorter than the path a strand walks, so
+  each doubled back inside it and came out a clump.
+- **But not a box wider than the effect.** Opening it to 1.2 fixed the clumping and created a
+  worse problem: a thread could wander well past the mass and sit alone on the page, reading
+  as a stray line rather than as part of the cloud. At **0.60** the box is inside the cloud's
+  own footprint — measured, the strands reach 175 px from the corner at the 99th percentile
+  where the whole cloud reaches 180 px.
+
+Two settings put the particles where they belong rather than merely inside the box.
+`extraStrandBunch` is a power on the seed draw, crowding the threads toward the corner while
+leaving the box where it is; `extraStrandHome` is the point a thread turns back toward when
+it meets a wall — deliberately *near* the corner rather than on it, because a thread aimed
+dead at the corner slides along the screen edge and draws a rim.
 
 ### The mass had to grow to show them
 
