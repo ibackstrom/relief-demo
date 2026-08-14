@@ -86,10 +86,13 @@ const CONFIG = {
   //
   // The normal's z is stored the usual way, (n + 1) / 2, so it runs 1 facing the camera
   // down to 0.5 edge-on and the multiplier at the rim is 1 + 0.25 * this. The reference
-  // uses 30, i.e. 8.5x at the rim, on a size draw that tops out at 2. Ours multiplies a
-  // heavy tail that already reaches 12, so 3 (1.75x at the rim) lands in the same place —
-  // copying the number rather than the effect would give motes the size of the cloud.
-  normalInfluence: 3.0,
+  // uses 30, i.e. 8.5x at the rim, on a size draw that tops out at 2.
+  //
+  // Cut to 0.6 here, and the reason is worth keeping: swelling the motes where the surface
+  // turns away from the camera puts the BIGGEST ones around the outside of the silhouette,
+  // which is where they are least wanted — the mass should gather at the corner and break
+  // up as it leaves. Faithful to the reference, wrong for this composition.
+  normalInfluence: 0.6,
 
   // Denser toward the corner. The model's own sampling is even across its projected area,
   // so density follows the SILHOUETTE rather than the corner — measured on the last build
@@ -98,9 +101,9 @@ const CONFIG = {
   // corner itself, on top of everything the model decides.
   //
   // 0 leaves the model's even coverage alone. Each step up crowds the population cornerward
-  // and, since the count is fixed, thins the far side by exactly as much.
-  cornerDensity: 1.6,
-  cornerDensityScale: 0.55, // the distance over which it falls away, in plane widths
+  // and, since the count is fixed, thins the far side by exactly as much. It is a power on
+  // the radius of the throw, so it has no ceiling to fall off.
+  cornerDensity: 1.4,
 
   // How clumpy the sheet is. Seats are rejection-sampled against a low-frequency noise
   // field, so motes gather in some places and thin out in others instead of covering
@@ -143,14 +146,21 @@ const CONFIG = {
   // Measured on Ref2: the filaments hold a common diagonal, concentration 0.44 — a broad
   // band of one direction rather than parallel lines or no preference at all. 0 is an
   // isotropic tangle, 1 is a comb.
-  strandBias: 0.45,
+  strandBias: 0.22,
   strandBiasAngle: 40,      // degrees, counter-clockwise from the +x axis. Set so the
                             //   structure measures the same lean the reference's does
 
-  strandFlowScale: 4.2,     // features per plane width in the field the strands walk.
-                            //   Higher curls them tighter, so the creases come closer
-                            //   together; low and broad is what gives sweeping folds
-                            //   rather than scribble
+  strandFlowScale: 5.6,     // features per plane width in the field the strands walk.
+                            //   Raised from 4.2: at a coarse feature size every strand in
+                            //   the corner sees nearly the same heading and they converge
+                            //   onto one line however far apart they start. Smaller
+                            //   features let them part company — which is what makes four
+                            //   of them read as four. There is a ceiling, found the hard
+                            //   way: at 8.0 the field turns so tightly that a strand coils
+                            //   in place instead of travelling, and four sweeping lines
+                            //   became four compact clumps. Most of the convergence was the
+                            //   shared LEAN anyway — see strandBias, which came down with
+                            //   this
 
   // ------------------------------------------------------------ life
   // In the reference the motes are not permanent fixtures. They swell out of the threads,
@@ -213,6 +223,11 @@ const CONFIG = {
   extraStrandHome: 0.28,    // where a thread turns back TO, in box widths from the corner.
                             //   Not the corner itself — aimed dead at it, a thread reaching
                             //   the wall slides along the screen edge and draws a rim
+  extraStrandSize: 1.4,     // and drawn heavier than the mass around them. They are
+                            //   deliberate features rather than part of the fade, so they
+                            //   are also exempt from the edge shrink above — shrunk with
+                            //   distance like everything else, the one thing meant to be
+                            //   READ as a line is the first thing to disappear
   extraStrandJitter: 0.010, // lateral spread, in plane widths — wider than the model
                             //   threads use. These are meant to be seen as gatherings of
                             //   particles rather than as drawn lines, and the spread is
@@ -225,6 +240,13 @@ const CONFIG = {
   // Gaussian had it, which is the part of that version the customer signed off on.
   strayFraction: 0.17,
   strayReach: 0.25,
+
+  // Motes shrink with distance from the corner. The size draw is otherwise uniform across
+  // the mass, so the fine spray and the big motes are equally likely anywhere — and a big
+  // mote out at the edge reads as a stray blob rather than as the mass thinning out. This
+  // keeps the weight where the mass is and lets the outside break into fine particles.
+  sizeEdge: 0.42,           // size multiplier at the far edge, against 1 at the corner
+  sizeEdgeScale: 0.75,      // distance over which it falls away, in plane widths
 
   // ------------------------------------------------------------ the box the model fits
   // The rasterised plane is scaled to fit inside this box, keeping the model's
@@ -1514,8 +1536,36 @@ function buildParticles(count) {
   function sampleSeat() {
     let u = 0, w = 0, mapDepth = 0, nz01 = 1;
     for (let tries = 0; tries < CONFIG.sampleAttempts; tries++) {
-      u = Math.random();
-      w = Math.random();
+      if (CONFIG.cornerDensity > 0) {
+        // THROW crowded toward the corner, rather than throwing evenly and rejecting what
+        // lands far out. Rejection was the first attempt and it fails in a way worth
+        // recording: every rejected throw still costs an attempt, the attempts are bounded,
+        // and a throw that runs out is kept wherever it last fell — which is uniform. Past
+        // a certain strength almost every mote ran out, so turning the dial up stopped
+        // concentrating the cloud and started scattering it. Coverage at the corner fell
+        // from 0.98 to 0.39 while it was supposedly being made denser.
+        //
+        // Weighting the draw has no such cliff: every throw lands where it is wanted, and
+        // the strength is just a power on the radius.
+        // Redrawn until it lands on the plane, inside this attempt rather than by spending
+        // one. Spending an attempt was the bug: the draw is radial and the plane is a
+        // rectangle, so a good share of throws fall outside it, and a mote that ran out of
+        // attempts kept the last REJECTED values — which put it far outside the mass. The
+        // cloud came out thinner everywhere while the dial was supposedly raising density.
+        let ok = false;
+        for (let t2 = 0; t2 < 12 && !ok; t2++) {
+          const ang = Math.random() * Math.PI * 2;
+          const rad = Math.pow(Math.random(), 1 + CONFIG.cornerDensity)
+                    * 0.5 * Math.hypot(planeW, planeH);
+          u = (Math.cos(ang) * rad) / planeW + 0.5;
+          w = 0.5 - (Math.sin(ang) * rad) / planeH;
+          ok = u >= 0 && u <= 1 && w >= 0 && w <= 1;
+        }
+        if (!ok) { u = Math.random(); w = Math.random(); }
+      } else {
+        u = Math.random();
+        w = Math.random();
+      }
       mapDepth = mapAt(maps.depth, u, w);
       nz01 = mapAt(maps.normZ, u, w);
       // Coverage stands in for the reference's brightness test. It samples a photograph
@@ -1529,15 +1579,7 @@ function buildParticles(count) {
       // samples; ours has to be put in by hand.
       const k = CONFIG.shapeNoiseScale;
       const d = valueNoise3(u * k + 11.3, w * k + 4.7, mapDepth * k + 19.1);
-      let accept = 1 - CONFIG.shapeNoise + CONFIG.shapeNoise * d * 2;
-
-      // ...and weight what survives toward the corner. The group's origin sits on the
-      // screen corner, so distance from the origin IS distance from the corner.
-      if (CONFIG.cornerDensity > 0) {
-        const cx = (u - 0.5) * planeW, cy = -(w - 0.5) * planeH;
-        const rr = Math.hypot(cx, cy) / Math.max(1e-6, CONFIG.cornerDensityScale * planeW);
-        accept *= Math.exp(-CONFIG.cornerDensity * rr);
-      }
+      const accept = 1 - CONFIG.shapeNoise + CONFIG.shapeNoise * d * 2;
       if (Math.random() < accept) break;
     }
     // The map is an image: u runs left to right, w runs DOWN from the top, so the sign on
@@ -1741,6 +1783,16 @@ function buildParticles(count) {
     // big motes and the face of the mass stays fine
     const normalScale = 0.5 + nz01 * 0.5;
     mult *= 1 - (normalScale - 1) * CONFIG.normalInfluence;
+
+    if (isCorner) mult *= CONFIG.extraStrandSize;
+
+    // then taken down with distance from the corner, so the mass carries its weight where
+    // it is dense and breaks into fine particles as it goes
+    if (!isCorner && CONFIG.sizeEdge < 1) {
+      const rr = Math.min(1, Math.hypot(px, py)
+                 / Math.max(1e-6, CONFIG.sizeEdgeScale * planeW));
+      mult *= 1 + (CONFIG.sizeEdge - 1) * rr;
+    }
     sizes[i] = mult;
 
     timeOffs[i] = Math.random() * 5.0;

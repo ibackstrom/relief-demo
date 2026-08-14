@@ -147,12 +147,17 @@ They needed their own build, and it took three passes:
   own footprint — measured, the strands reach 175 px from the corner at the 99th percentile
   where the whole cloud reaches 180 px.
 
-There are **four** of them now. They share one field, so they also share its diagonal, and
-at any moment two or three read as clearly separate arcs rather than four — threads that
-follow the same flow converge by nature, which is true of the reference's creases too. Giving
-the corner strands a field of their own would separate them further, but the strands are laid
-out on the CPU and travelled along in the shader, and the two halves have to read the same
-field or the motes stream off their own threads.
+There are **four** of them now, and getting them to read as four took two corrections.
+
+Finer noise features let strands part company instead of converging — but there is a ceiling,
+found the hard way: at `strandFlowScale` 8.0 the field turns so tightly that a strand coils
+in place instead of travelling, and four sweeping lines became four compact clumps. 5.6 is
+the working value.
+
+Most of the convergence was not the feature size at all, it was the shared **lean**:
+`strandBias` came down from 0.45 to 0.22, which lets each thread take its own heading while
+the mass keeps a grain. Between that and `extraStrandSize`, three or four now read as
+separate arcs at any moment.
 
 **Each strand takes its own slice of the corner.** Seeding all three from the same crowded
 draw is what left only one of them visible: three threads starting within a few pixels of
@@ -476,6 +481,26 @@ Measured at the same frame, with the pointer away: footprint **410 → 545** fou
 with the loose layer in, against ver4's unbounded draw at 795. Tighter than ver4 by design —
 the mass now has an outline — while keeping the dissolve at its edge.
 
+### Small at the edges, heavy at the corner
+
+Two things were putting the biggest motes on the OUTSIDE, which is exactly where they are
+least wanted.
+
+`normalInfluence` swells a mote where the surface turns away from the camera — and for this
+model that is the rim of the silhouette. It is the reference's own behaviour and it is
+faithful, but it is wrong for this composition, so it drops from 3.0 to 0.6.
+
+On top of that, `sizeEdge` takes the size down with distance from the corner, so the mass
+carries its weight where it is dense and breaks into fine particles as it leaves. Measured on
+the mass alone, the average mote area went from **1.52x** the near-corner size out at the
+edges to **0.42x** — an inversion, not a nudge.
+
+The corner strands are exempt and drawn heavier (`extraStrandSize`), because they are
+deliberate features rather than part of the fade: shrunk with distance like everything else,
+the one thing meant to be read as a line is the first thing to disappear. Counting everything
+together the figure comes to 1.20 rather than 0.42, and that difference is entirely those
+four threads.
+
 ### Denser toward the corner
 
 The model's sampler is even across its projected area, so density follows the **silhouette**
@@ -483,19 +508,26 @@ rather than the corner. Measured on the build before this one, coverage ran 0.86
 forty pixels, fell to **0.55** by eighty, and rose again to 0.80 further out — that dip is
 the lens shape talking, not a gradient.
 
-`cornerDensity` weights the surviving seats by distance from the corner itself, on top of
-everything the model decides. The profile comes out monotonic:
+`cornerDensity` crowds the population toward the corner, and **how** it does that matters.
 
-| distance from the corner | before | after |
-|---|---|---|
-| 0–40 px | 0.86 | **0.98** |
-| 40–80 px | 0.55 | **0.93** |
-| 80–120 px | 0.80 | 0.78 |
-| 120–160 px | 0.69 | 0.71 |
-| 160–200 px | 0.37 | 0.40 |
+The first version weighted the accept test — throw evenly, then reject what lands far out.
+That fails in a way worth recording. Every rejected throw still costs an attempt, the
+attempts are bounded, and a throw that runs out is kept wherever it last fell, which is
+uniform. Past a certain strength almost every mote ran out, so turning the dial up stopped
+concentrating the cloud and started scattering it: corner coverage fell from 0.98 to 0.39
+while the setting was supposedly raising it.
 
-The count is fixed, so this is a redistribution: everything the corner gains, the far side
-gives up. `cornerDensityScale` sets how far the falloff reaches.
+Weighting the **throw** has no such cliff — every throw lands where it is wanted and the
+strength is simply a power on the radius. Motes per 1000 px², by distance from the corner:
+
+| | 0–40 | 40–80 | 80–120 | 120–160 | 160–200 |
+|---|---|---|---|---|---|
+| before | 32.6 | 30.8 | 26.4 | 20.5 | 10.3 |
+| after | 33.4 | 30.5 | 29.4 | 20.2 | **6.2** |
+
+Read it as a redistribution rather than a gain: the count is fixed, so the steeper falloff at
+the outside is what pays for the weight at the corner. Note that *coverage* is a misleading
+measure here — it fell while density rose, because the motes out there are now much smaller.
 
 ### Clumping
 
