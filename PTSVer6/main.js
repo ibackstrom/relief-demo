@@ -201,8 +201,10 @@ const CONFIG = {
   //
   // Their position re-rolls on every load. That is the point of them — the mass is fixed by
   // the model, and this is the part that is different each time.
-  extraStrands: 4,
-  extraStrandLength: 2200,  // motes each. Far more than a model strand gets: these have to
+  extraStrands: 5,
+  extraStrandLength: 520,   // motes each, which at extraStrandStep is about one run from
+                            //   the corner to the edge of their box — so one strand is
+                            //   one ray. Far more than a model strand gets: these have to
                             //   read as ONE line against a mass of thirty thousand, and at
                             //   the model strands' budget they simply joined the texture
   extraStrandStep: 0.0012,  // and packed closer along the path than the model's threads —
@@ -216,10 +218,15 @@ const CONFIG = {
   extraStrandBunch: 1.8,    // how hard their seeds crowd toward the corner. 1 scatters them
                             //   evenly through the box; each step up pulls the population
                             //   nearer the corner while leaving the box where it is
-  extraStrandInner: 0.40,   // and how far out they START, as a share of the box. Without a
-                            //   floor here the crowding piles all three on the same spot by
-                            //   the corner, where they overlap and read as ONE gathering —
-                            //   which is exactly what happened
+  extraStrandInner: 0.06,   // and how far out they START, as a share of the box. Now that
+                            //   they travel outward they begin AT the corner; the floor is
+                            //   only there to keep them off the exact point, where an
+                            //   outward direction is undefined
+  extraStrandOutward: 1.60, // how hard they are pushed away from the corner as they walk.
+                            //   0 leaves them wandering the flow like any other thread; up
+                            //   here the flow only curves a path that is leaving the corner,
+                            //   so each one reads as a ray thrown out of it rather than as
+                            //   a thread that happens to be nearby
   extraStrandHome: 0.28,    // where a thread turns back TO, in box widths from the corner.
                             //   Not the corner itself — aimed dead at it, a thread reaching
                             //   the wall slides along the screen edge and draws a rim
@@ -654,9 +661,17 @@ vec3 flowDir(vec3 p) {
 // tracks a thread over the distance a mote covers in one life, which is all it has to do.
 // Integrating from the SEAT every frame rather than from last frame's position is what lets
 // this work with no simulation state at all — the position is a pure function of the clock.
-vec3 advect(vec3 p, float dist) {
+vec3 advect(vec3 p, float dist, float outward) {
   float dt = dist / 6.0;
-  for (int i = 0; i < 6; i++) p += flowDir(p) * dt;
+  for (int i = 0; i < 6; i++) {
+    vec3 d = flowDir(p);
+    // The corner rays were LAID with a push away from the corner, so they have to be
+    // travelled with it too — the same field walked two different ways is two different
+    // threads, and the motes would leave theirs within one life.
+    float l = length(p.xy);
+    if (outward > 0.0 && l > 1e-6) d = normalize(d + vec3(p.xy / l, 0.0) * outward);
+    p += d * dt;
+  }
   return p;
 }
 `;
@@ -685,6 +700,7 @@ attribute float aCurlResp;       // 0 or 1
 attribute float aDensity;        // 0..1, how crowded this mote's neighbourhood is
 attribute float aShape;          // 0..1, the seed for this mote's outline
 attribute float aLife;           // 1 if it lives and dies, 0 if it is permanent
+attribute float aOutward;        // 1 on a corner ray, 0 on everything else
 
 uniform float uTime;
 uniform float uFloatingSpeed;
@@ -708,6 +724,7 @@ uniform float uLifeSeconds;      // one birth-to-death
 uniform float uLifeGrow;         // share of it spent swelling in
 uniform float uLifeFadeStart;    // where it starts shrinking away
 uniform float uLifeDrift;        // how far it travels off its seat, world units
+uniform float uOutward;          // the corner rays' push away from the corner
 uniform float uCentreViewZ;      // view-space z of the volume's own centre
 uniform vec3  uExpandOrigin;     // the screen corner, in this object's local space
 uniform float uExpand;           // 0..1, eased hover state
@@ -749,7 +766,7 @@ void main(){
   //
   // Linear in the phase, so a mote is still moving when it goes; easing it to a stop first
   // reads as the mote parking and then being switched off.
-  vec3 pos = advect(aInitPos, uLifeDrift * lifePhase * aLife);
+  vec3 pos = advect(aInitPos, uLifeDrift * lifePhase * aLife, aOutward * uOutward);
 
   // ---- 1. drift, on a 5-second recycle -------------------------------------
   // Age is the mote's own phase, so the population is spread across the cycle instead
@@ -1487,6 +1504,7 @@ function buildParticles(count) {
   const curlResp   = new Float32Array(count);
   const shapes     = new Float32Array(count);
   const lives      = new Float32Array(count);
+  const outward    = new Float32Array(count);
 
   const vh = viewHeightAt(CONFIG.anchorZ);
   const halfW = CONFIG.boxWidth  * vh * 0.5;
@@ -1633,9 +1651,34 @@ function buildParticles(count) {
     walk[2] = (Math.random() - 0.5) * depthSpan;
     strandNz = 1;
     strandLeft = CONFIG.extraStrandLength;
+    rayReach = cornerReach * (0.55 + 0.45 * Math.random());
     flowAt(walk[0], walk[1], walk[2], strandScale, flow);
   };
-  const inCorner = (x, y) => x <= 0 && y <= 0 && x >= -cornerReach && y >= -cornerReach;
+  // A ray runs until it passes its OWN reach, drawn per strand. With one shared limit every
+  // ray stopped at the same radius and their tips lined up into an arc — which reads as a
+  // band around the corner, the opposite of rays thrown out of it.
+  let rayReach = cornerReach;
+  const inCorner = (x, y) =>
+    x <= 0 && y <= 0 && Math.hypot(x, y) <= rayReach;
+
+  // Flow plus a push straight away from the corner. Written as its own step because the
+  // vertex shader has to reproduce it exactly: these motes travel along their thread, and a
+  // thread built with an outward lean has to be travelled with the same lean or the motes
+  // walk off it.
+  const dir = [0, 0, 0];
+  const cornerDir = (at, fl, out) => {
+    const l = Math.hypot(at[0], at[1]);
+    const k = CONFIG.extraStrandOutward;
+    if (l > 1e-6 && k > 0) {
+      out[0] = fl[0] + (at[0] / l) * k;
+      out[1] = fl[1] + (at[1] / l) * k;
+      out[2] = fl[2];
+    } else {
+      out[0] = fl[0]; out[1] = fl[1]; out[2] = fl[2];
+    }
+    const n = Math.hypot(out[0], out[1], out[2]) || 1;
+    out[0] /= n; out[1] /= n; out[2] /= n;
+  };
 
   const startStrand = () => {
     const s = sampleSeat();
@@ -1674,21 +1717,17 @@ function buildParticles(count) {
         startCornerStrand();
       } else {
         flowAt(walk[0], walk[1], walk[2], strandScale, flow);
-        const nx = walk[0] + flow[0] * cornerStep;
-        const ny = walk[1] + flow[1] * cornerStep;
-        const nz = walk[2] + flow[2] * cornerStep;
+        cornerDir(walk, flow, dir);
+        const nx = walk[0] + dir[0] * cornerStep;
+        const ny = walk[1] + dir[1] * cornerStep;
+        const nz = walk[2] + dir[2] * cornerStep;
         if (inCorner(nx, ny)) {
           walk[0] = nx; walk[1] = ny; walk[2] = nz;
         } else {
-          // back toward a point NEAR the corner, clear of the wall it just met. Aimed at
-          // the corner itself a thread would end up sliding along the screen edge.
-          const home = CONFIG.extraStrandHome * cornerReach;
-          const cx = -home, cy = -home;
-          const dx = cx - walk[0], dy = cy - walk[1];
-          const l = Math.hypot(dx, dy) || 1;
-          walk[0] += (dx / l) * cornerStep * 2.0;
-          walk[1] += (dy / l) * cornerStep * 2.0;
-          walk[2] += flow[2] * cornerStep * 0.5;
+          // A ray that reaches the edge of its box is FINISHED, and the next one starts
+          // back at the corner. Turning it back was right when these wandered; for a thread
+          // that is meant to be leaving, a return trip reads as the ray folding over itself.
+          startCornerStrand();
         }
       }
       strandLeft--;
@@ -1762,6 +1801,7 @@ function buildParticles(count) {
     initPos[i3 + 2] = pz;
 
     lives[i] = Math.random() < CONFIG.lifeFraction ? 1 : 0;
+    outward[i] = isCorner ? 1 : 0;
 
     const travels = Math.random() < CONFIG.floatingParticles;
     driftSpeed[i] = travels ? CONFIG.floatingSpeed * (0.6 + Math.random() * 0.8) : 0.0;
@@ -1866,6 +1906,7 @@ function buildParticles(count) {
   inst('aDensity', density, 1);
   inst('aShape', shapes, 1);
   inst('aLife', lives, 1);
+  inst('aOutward', outward, 1);
 
   // the cloud moves in the shader, so nothing can be culled off its rest bounds
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Math.max(halfW, halfH, halfD) * 4);
@@ -1883,7 +1924,7 @@ function buildParticles(count) {
     aTimeOffset: timeOffs.slice(),
     aBrightness: brights.slice(), aCurlResp: curlResp.slice(),
     aDensity: density.slice(), aShape: shapes.slice(),
-    aLife: lives.slice(),
+    aLife: lives.slice(), aOutward: outward.slice(),
   };
   geo.userData.order = new Int32Array(count).map((_, i) => i);
   geo.userData.key = new Float32Array(count);
@@ -1950,6 +1991,7 @@ const uniforms = {
   uFlowScale: { value: 1 },          // likewise: it is given per plane width
   uFlowBias: { value: CONFIG.strandBias },
   uFlowBiasDir: { value: new THREE.Vector2(1, 0) },
+  uOutward: { value: CONFIG.extraStrandOutward },
   uDeepen: { value: CONFIG.deepen },
   uDeepenBias: { value: CONFIG.deepenBias },
   uDeepenSat: { value: CONFIG.deepenSat },
@@ -2217,6 +2259,7 @@ function place() {
   // motes travel along a coarser or finer field than the one under them.
   uniforms.uFlowScale.value = CONFIG.strandFlowScale / Math.max(1e-6, seatPlaneW);
   uniforms.uFlowBias.value = CONFIG.strandBias;
+  uniforms.uOutward.value = CONFIG.extraStrandOutward;
   const ba = THREE.MathUtils.degToRad(CONFIG.strandBiasAngle);
   uniforms.uFlowBiasDir.value.set(Math.cos(ba), Math.sin(ba));
   hoverRadiusWorld = CONFIG.expandHoverRadius * vh;
@@ -2348,7 +2391,7 @@ function tick() {
 tick();
 
 // ---------------------------------------------------------------- panel
-// Three controls and no more: colour, quantity, size. Each prints the CONFIG value it
+// Four controls and no more: colour, quantity, size, glow. Each prints the CONFIG value it
 // writes, so a look found here transfers to the build by typing. Nothing is persisted —
 // a reload is the shipped build again. ?ui=0 hides the panel.
 //
@@ -2395,12 +2438,18 @@ if (uiEl && PARAMS.get('ui') === '0') {
       min: 14000, max: 90000, step: 500, value: CONFIG.particleCount, rebuild: true },
     { key: 'particleSize', name: 'size', cst: 'CONFIG.particleSize',
       min: 0.1, max: 0.7, step: 0.01, value: CONFIG.particleSize, uni: 'uParticleSize' },
+    // The glow is a post pass, so its strength does not live in the particle material —
+    // it is a uniform on the composite, reached through the bloom chain.
+    { key: 'bloomStrength', name: 'glow', cst: 'CONFIG.bloomStrength',
+      min: 0, max: 4, step: 0.01, value: CONFIG.bloomStrength,
+      apply: (v) => { if (bloomChain) bloomChain.composite.uniforms.uStrength.value = v; } },
   ];
 
   const rgbAt = (h) => hsvToRgb(h, satFixed, valFixed);
   const text = (r, v) => {
     if (r.key === 'hue') return rgbAt(v).map((c) => c.toFixed(3)).join('  ');
     if (r.key === 'particleCount') return String(Math.round(v));
+    if (r.key === 'bloomStrength') return v.toFixed(2);
     return v.toFixed(1);
   };
 
@@ -2449,6 +2498,7 @@ if (uiEl && PARAMS.get('ui') === '0') {
       }
       CONFIG[r.key] = r.key === 'particleCount' ? Math.round(v) : v;
       if (r.uni) uniforms[r.uni].value = CONFIG[r.key];
+      if (r.apply) r.apply(CONFIG[r.key]);
       if (r.rebuild) { clearTimeout(pending); pending = setTimeout(rebuild, 110); }
     });
   });

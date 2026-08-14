@@ -21,7 +21,7 @@ as an overlay; the grey here is only a stand-in.
 
 ## Controls
 
-Three bars, top-left, and nothing else. Each prints the `CONFIG` value it writes so a look
+Four bars, top-left, and nothing else. Each prints the `CONFIG` value it writes so a look
 found here transfers to the build by typing it in. `?ui=0` hides the panel.
 
 | bar | writes | default |
@@ -29,6 +29,11 @@ found here transfers to the build by typing it in. `?ui=0` hides the panel.
 | colour | `colorOverlayR/G/B` | `0.850 0.050 0.060` |
 | quantity | `particleCount` | 60 000, range 14 000–90 000 |
 | size | `particleSize` | 0.6, range 0.1–0.7 |
+| glow | `bloomStrength` | 1.55, range 0–4 |
+
+The glow bar is the odd one out mechanically: the glow is a post pass, so its strength is
+not a property of the particle material at all — the bar reaches through the bloom chain to
+the composite's own uniform. Nothing rebuilds and nothing re-seeds, so it is smooth to drag.
 
 Colour is **one** bar rather than three because the material only ever varies in hue: the
 spheres are shaded in greyscale and tinted, so saturation and value belong to the lighting
@@ -123,6 +128,28 @@ agree to about a millionth, and the field is smooth so a millionth stays a milli
 The shader integrates from the SEAT every frame, in six fixed hops, rather than from last
 frame's position. That is what lets a mote follow a curving thread with no simulation state
 at all: its position stays a pure function of the clock.
+
+### Five rays thrown out of the corner
+
+The threads above all start from seats inside the silhouette and wander wherever the field
+takes them. `extraStrands` adds five more that do something different: they start **at** the
+corner and travel away from it, so each reads as a ray thrown out of the corner rather than a
+thread that happens to be near it. `extraStrandOutward` is how hard they lean away as they
+walk — 0 leaves them wandering like any other thread, and at 1.6 the flow only curves a path
+that is already leaving.
+
+Three details each fixed a way this failed to read:
+
+- **A ray that reaches the end is finished**, and the next starts back at the corner. Turning
+  it back was right when these wandered; for a thread that is meant to be leaving, a return
+  trip reads as the ray folding over itself.
+- **Each ray gets its own reach.** With one shared limit every ray stopped at the same radius
+  and their tips lined up into an arc around the corner — a band, which is the opposite of
+  rays thrown out of one.
+- **The shader travels the same leaned path.** These motes advect along their own thread, and
+  a thread built with an outward push has to be travelled with the same push, or the motes
+  walk off it inside one life. The push is carried to the vertex shader as an attribute, so
+  only the rays get it.
 
 ### Two or three of them are not the model's
 
