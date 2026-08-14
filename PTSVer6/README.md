@@ -133,6 +133,48 @@ Two constants travel with the box and are not free to stay behind:
   leaves the walk sitting on the edge, exiting again every step, laying the rest of its
   motes along the rim.
 
+## Motes live and die
+
+In the reference the motes are not permanent fixtures. They swell out of the threads, travel
+a little way off them and vanish, and others take their place — which is what lets the mass
+churn while its outline stays put. A cloud of permanent motes can only slide its motes
+around; it cannot do that.
+
+Each mote runs its own birth-to-death on a loop, phased off its own seed, so the population
+is spread right across the cycle and there is never a frame where all of it is young or all
+of it is dying. There is no spawner and nothing is allocated: a mote's life is a function of
+the clock, like everything else here.
+
+| | |
+|---|---|
+| `lifeSeconds` | one full birth-to-death (6.0) |
+| `lifeGrow` | share of the life spent swelling in (0.12) |
+| `lifeFadeStart` | where it starts shrinking away (0.68) |
+| `lifeDrift` | how far it travels off its seat over one life, in plane widths |
+| `lifeFraction` | share of motes that cycle at all (0.55) |
+
+`?life=0` turns the turnover off and returns every mote to permanent.
+
+**The envelope has to drive alpha as well as size.** On size alone a dying mote shrinks
+below `minPx`, at which point the sub-pixel guard inflates it back up and holds it on screen
+at full opacity — so it would never actually go away.
+
+**A strand mote grows ACROSS its thread, never along it.** The direction is a random one with
+its component on the local flow removed. Sent along the flow instead, motes slide down the
+thread and the thread looks like it is travelling — which is the one thing the reference's
+stationary envelope says it is not doing.
+
+**Two settings that fought each other**, and the reason the numbers landed where they did:
+the first pass cycled 72% of the motes and drifted them 0.06 plane widths, and the threads
+dissolved — the motes drawing the line kept wandering off it. Holding more of the population
+permanent (0.55 cycling) and cutting the drift to 0.022 keeps the line drawn while the
+turnover happens around and along it. The permanent motes draw the thread; the cycling ones
+are what is happening to it.
+
+Measured on the same three moments, false-coloured by which of them each mote appears in: the
+thread structure comes out solid — present in all three — while about **46%** of the lit
+pixels differ between frames, which is the turnover.
+
 ## Motes are not perfect circles
 
 `blob` rolls each mote's outline in and out with two low harmonics of the angle, phased off

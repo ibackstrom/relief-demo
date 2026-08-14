@@ -131,6 +131,31 @@ const CONFIG = {
                             //   together; low and broad is what gives sweeping folds
                             //   rather than scribble
 
+  // ------------------------------------------------------------ life
+  // In the reference the motes are not permanent fixtures. They swell out of the threads,
+  // travel a little way off them and vanish, and others take their place — which is what
+  // makes the mass churn while its outline stays put. A cloud of permanent motes can only
+  // ever slide its motes around; it cannot do that.
+  //
+  // Each mote runs its own birth-to-death on a loop, phased off its own seed so the
+  // population is spread across the cycle. There is no spawner and nothing is allocated:
+  // a mote's life is a function of the clock, exactly like everything else here.
+  lifeSeconds: 6.0,         // one full birth-to-death. Long enough that a mote is a thing
+                            //   that lived rather than a flicker
+  lifeGrow: 0.12,           // fraction of the life spent swelling in from nothing
+  lifeFadeStart: 0.68,      // where it starts shrinking away again. Between grow and this
+                            //   the mote is at full size, which is where the cloud gets
+                            //   its body — bring the two together and it reads as twinkle
+  lifeDrift: 0.022,         // how far it travels off its seat over one life, in plane
+                            //   widths. This is the "growing OUT of the strand" part: the
+                            //   thread stays where it is and its motes leave it
+
+  // Share of motes that live and die at all. The remainder are permanent, and they are what
+  // keeps the threads legible: with every mote cycling, the structure itself dissolves and
+  // reforms and the eye never gets to hold on to a thread. The permanent ones draw the
+  // line; the cycling ones are what is happening to it.
+  lifeFraction: 0.55,
+
   // The loose motes that ignore the maps, and how far they spread. The share is the
   // reference's own ratio — 8000 unmasked against 40000 masked. The reach is a standard
   // deviation in plane widths, set to land the dissolve where the previous version's
@@ -371,6 +396,7 @@ if (numParam('curl', 0, 5) !== null) CONFIG.curlAmplitude = numParam('curl', 0, 
 if (numParam('push', 0, 5) !== null) CONFIG.mouseStrength = numParam('push', 0, 5);
 if (numParam('noise', 0, 1) !== null) CONFIG.shapeNoise = numParam('noise', 0, 1);
 if (numParam('blob', 0, 1) !== null) CONFIG.blob = numParam('blob', 0, 1);
+if (numParam('life', 0, 1) !== null) CONFIG.lifeFraction = numParam('life', 0, 1);
 if (numParam('strand', 0, 1) !== null) CONFIG.strandFraction = numParam('strand', 0, 1);
 if (PARAMS.get('bloom') === '0') CONFIG.bloom = false;
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
@@ -540,6 +566,8 @@ attribute float aBrightness;
 attribute float aCurlResp;       // 0 or 1
 attribute float aDensity;        // 0..1, how crowded this mote's neighbourhood is
 attribute float aShape;          // 0..1, the seed for this mote's outline
+attribute vec3  aGrowDir;        // the way this mote leaves its seat over its life
+attribute float aLife;           // 1 if it lives and dies, 0 if it is permanent
 
 uniform float uTime;
 uniform float uFloatingSpeed;
@@ -559,6 +587,10 @@ uniform float uParticleSize;
 uniform float uViewportPx;       // drawing-buffer height, for on-screen size
 uniform float uMinPx;            // smallest footprint a mote may be drawn at
 uniform float uHalfDepth;        // half the volume's depth
+uniform float uLifeSeconds;      // one birth-to-death
+uniform float uLifeGrow;         // share of it spent swelling in
+uniform float uLifeFadeStart;    // where it starts shrinking away
+uniform float uLifeDrift;        // how far it travels off its seat, world units
 uniform float uCentreViewZ;      // view-space z of the volume's own centre
 uniform vec3  uExpandOrigin;     // the screen corner, in this object's local space
 uniform float uExpand;           // 0..1, eased hover state
@@ -578,7 +610,23 @@ varying float vDepth;           // 0 at the front of the volume, 1 at the back
 const float CYCLE = 5.0;
 
 void main(){
-  vec3 pos = aInitPos;
+  // ---- 0. life: swell out of the thread, travel, vanish ----------------------
+  // The phase comes from the mote's own seed, so the population is spread right across the
+  // cycle and there is never a frame where the whole cloud is young or the whole cloud is
+  // dying. aTimeOffset is already a random 0..5, which is exactly one cycle's worth of
+  // spread once divided down.
+  float lifePhase = fract(uTime / max(0.0001, uLifeSeconds) + aTimeOffset * 0.2);
+
+  // Swell in, hold, shrink away. The hold in the middle is deliberate and is most of the
+  // cycle: with grow and fade meeting in the middle every mote is always on its way
+  // somewhere and the cloud reads as twinkle rather than as a thing with a body.
+  float envelope = smoothstep(0.0, uLifeGrow, lifePhase)
+                 * (1.0 - smoothstep(uLifeFadeStart, 1.0, lifePhase));
+  envelope = mix(1.0, envelope, aLife);
+
+  // Travel off the seat as it lives. Linear in the phase, so a mote is still moving when it
+  // goes — easing it to a stop first reads as the mote parking and then being switched off.
+  vec3 pos = aInitPos + aGrowDir * (uLifeDrift * lifePhase * aLife);
 
   // ---- 1. drift, on a 5-second recycle -------------------------------------
   // Age is the mote's own phase, so the population is spread across the cycle instead
@@ -600,7 +648,7 @@ void main(){
   // fade at a different rate and the wrap becomes visible as a pop.
   float hasVelocity = step(1e-6, aDriftSpeed);
   float driftFade = 1.0 - smoothstep(CYCLE * 0.7, CYCLE, age);
-  vFade = mix(1.0, driftFade, hasVelocity);
+  vFade = mix(1.0, driftFade, hasVelocity) * envelope;
 
   // ---- 2. cursor: distance to the pointer RAY -------------------------------
   float pushFalloff = 0.0;
@@ -662,7 +710,7 @@ void main(){
 
   // ---- 4. billboard ----------------------------------------------------------
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-  float worldSize = uParticleSize * aSize * 0.01;
+  float worldSize = uParticleSize * aSize * 0.01 * envelope;
   // (the billboard offset is applied below, after any sub-pixel growth)
 
   // How big this mote lands on screen. NDC spans 2 over the viewport height, so the
@@ -1279,6 +1327,7 @@ function rasteriseMaps(res) {
 // One quad, instanced. Per-mote values are generated once on the CPU: seat on the model,
 // size multiplier, brightness, and which of the two roles it takes.
 let seatHalfDepth = 0;    // half the depth the seats came out occupying, in world units
+let seatPlaneW = 0;       // world width of the plane the model was fitted to
 function buildParticles(count) {
   const geo = new THREE.InstancedBufferGeometry();
   geo.instanceCount = count;
@@ -1297,6 +1346,8 @@ function buildParticles(count) {
   const brights    = new Float32Array(count);
   const curlResp   = new Float32Array(count);
   const shapes     = new Float32Array(count);
+  const growDir    = new Float32Array(count * 3);
+  const lives      = new Float32Array(count);
 
   const vh = viewHeightAt(CONFIG.anchorZ);
   const halfW = CONFIG.boxWidth  * vh * 0.5;
@@ -1311,6 +1362,7 @@ function buildParticles(count) {
   const planeH = fit;
   const planeW = fit * maps.aspect;
   const depthSpan = CONFIG.depthDisplacement * planeW;
+  seatPlaneW = planeW;
   const mapAt = (arr, x, y) => {
     // nearest cell. Bilinear would only smooth a map whose resolution is already finer
     // than the motes it seats, and the depth map has a hard edge at the silhouette that
@@ -1389,6 +1441,10 @@ function buildParticles(count) {
     walk[0] = s.x; walk[1] = s.y; walk[2] = s.z;
     strandNz = s.nz01;
     strandLeft = CONFIG.strandLength;
+    // Read the flow at the new head before laying anything: the first mote of a strand
+    // takes its growth direction across the thread, and without this it would be measured
+    // against the PREVIOUS strand's tangent, which points somewhere else entirely.
+    flowAt(walk[0], walk[1], walk[2], strandScale, flow);
   };
 
   for (let i = 0; i < count; i++) {
@@ -1467,6 +1523,21 @@ function buildParticles(count) {
     initPos[i3]     = px;
     initPos[i3 + 1] = py;
     initPos[i3 + 2] = pz;
+
+    // Which way this mote leaves home over its life. For a strand mote that means ACROSS
+    // the thread, never along it: a random direction with its component on the flow removed,
+    // so the motes bloom sideways out of the line they were laid on and the line itself
+    // stays where it is. Sent along the flow instead they would slide down the thread and
+    // the thread would look like it was moving, which is the one thing the reference's
+    // stationary envelope says it is not doing.
+    let gx = gauss1(), gy = gauss1(), gz = gauss1();
+    if (isStrand) {
+      const d = gx * flow[0] + gy * flow[1] + gz * flow[2];
+      gx -= d * flow[0]; gy -= d * flow[1]; gz -= d * flow[2];
+    }
+    const gl = Math.hypot(gx, gy, gz) || 1;
+    growDir[i3] = gx / gl; growDir[i3 + 1] = gy / gl; growDir[i3 + 2] = gz / gl;
+    lives[i] = Math.random() < CONFIG.lifeFraction ? 1 : 0;
 
     const travels = Math.random() < CONFIG.floatingParticles;
     driftSpeed[i] = travels ? CONFIG.floatingSpeed * (0.6 + Math.random() * 0.8) : 0.0;
@@ -1560,6 +1631,8 @@ function buildParticles(count) {
   inst('aCurlResp', curlResp, 1);
   inst('aDensity', density, 1);
   inst('aShape', shapes, 1);
+  inst('aGrowDir', growDir, 3);
+  inst('aLife', lives, 1);
 
   // the cloud moves in the shader, so nothing can be culled off its rest bounds
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Math.max(halfW, halfH, halfD) * 4);
@@ -1577,6 +1650,7 @@ function buildParticles(count) {
     aTimeOffset: timeOffs.slice(),
     aBrightness: brights.slice(), aCurlResp: curlResp.slice(),
     aDensity: density.slice(), aShape: shapes.slice(),
+    aGrowDir: growDir.slice(), aLife: lives.slice(),
   };
   geo.userData.order = new Int32Array(count).map((_, i) => i);
   geo.userData.key = new Float32Array(count);
@@ -1636,6 +1710,10 @@ const uniforms = {
   uCoreAlpha: { value: CONFIG.coreAlpha },
   uEdgeSoftness: { value: CONFIG.edgeSoftness },
   uBlob: { value: CONFIG.blob },
+  uLifeSeconds: { value: CONFIG.lifeSeconds },
+  uLifeGrow: { value: CONFIG.lifeGrow },
+  uLifeFadeStart: { value: CONFIG.lifeFadeStart },
+  uLifeDrift: { value: 0 },          // set in place(), where the plane's world size is known
   uDeepen: { value: CONFIG.deepen },
   uDeepenBias: { value: CONFIG.deepenBias },
   uDeepenSat: { value: CONFIG.deepenSat },
@@ -1897,6 +1975,8 @@ function place() {
   group.worldToLocal(uniforms.uExpandOrigin.value);
 
   uniforms.uHalfDepth.value = seatHalfDepth || Math.max(1e-3, CONFIG.boxDepth * vh * 0.5);
+  // lifeDrift is given in plane widths, like every other distance the model decides
+  uniforms.uLifeDrift.value = CONFIG.lifeDrift * seatPlaneW;
   hoverRadiusWorld = CONFIG.expandHoverRadius * vh;
 
   // Typical mote diameter in device pixels. The mean of the size draw is
