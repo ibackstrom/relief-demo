@@ -21,13 +21,12 @@ as an overlay; the grey here is only a stand-in.
 
 ## Controls
 
-Nine bars, top-left, and nothing else. Each prints the `CONFIG` value it writes so a look
+Eight bars, top-left, and nothing else. Each prints the `CONFIG` value it writes so a look
 found here transfers to the build by typing it in. `?ui=0` hides the panel.
 
 | bar | writes | default |
 |---|---|---|
-| colour | `colorOverlayR/G/B` | `0.850 0.050 0.060` |
-| quantity | `particleCount` | 3 000, range 14 000–90 000 (the bar starts above the shipped value; `?p=` reaches it) |
+| quantity | `particleCount` | 14 000, range 14 000–90 000 (the bar starts above the shipped value; `?p=` reaches it) |
 | size | `particleSize` | 0.6, range 0.1–0.7 |
 | glow | `bloomStrength` | 1.55, range 0–4 |
 | glow size | `bloomRadius` | 0.22, range 0.05–0.7 |
@@ -72,11 +71,14 @@ The glow bar is the odd one out mechanically: the glow is a post pass, so its st
 not a property of the particle material at all — the bar reaches through the bloom chain to
 the composite's own uniform. Nothing rebuilds and nothing re-seeds, so it is smooth to drag.
 
-Colour is **one** bar rather than three because the material only ever varies in hue: the
-spheres are shaded in greyscale and tinted, so saturation and value belong to the lighting
-rig, not to the choice of colour. The bar drives hue, holds S and V at the shipped red's,
-and prints the RGB triple to paste back. Quantity re-seeds the whole population, so a drag
-is coalesced into one rebuild rather than one per input event.
+The **colour bar is gone**. It drove the hue of the overlay and printed the RGB triple to
+paste back, which earned its place while the colour was still being chosen; the red is
+settled now, and a control nobody moves is a control in the way of the ones they do. The
+colour itself is still `colorOverlayR/G/B` in `CONFIG`, and `?original` still swaps the whole
+palette.
+
+The panel scrolls if the window is short enough that eight rows would run off the bottom —
+with this many controls, the last one has to stay reachable.
 
 ## `?original` — the reference's palette
 
