@@ -1,4 +1,4 @@
-# PTSVer7 — corner particle cloud, on drawn curves
+# PTSVer7 — corner particle cloud, on a drawn shape
 
 A volume of drifting, curling lit spheres wedged into the top-right corner. It opens a hole
 around the cursor and blooms outward when the pointer reaches it.
@@ -27,7 +27,7 @@ found here transfers to the build by typing it in. `?ui=0` hides the panel.
 | bar | writes | default |
 |---|---|---|
 | colour | `colorOverlayR/G/B` | `0.850 0.050 0.060` |
-| quantity | `particleCount` | 60 000, range 14 000–90 000 |
+| quantity | `particleCount` | 24 000, range 14 000–90 000 |
 | size | `particleSize` | 0.6, range 0.1–0.7 |
 | glow | `bloomStrength` | 1.55, range 0–4 |
 | glow size | `bloomRadius` | 0.22, range 0.05–0.7 |
@@ -141,43 +141,6 @@ agree to about a millionth, and the field is smooth so a millionth stays a milli
 The shader integrates from the SEAT every frame, in six fixed hops, rather than from last
 frame's position. That is what lets a mote follow a curving thread with no simulation state
 at all: its position stays a pure function of the clock.
-
-### The strands are drawn, not generated
-
-`Corner_1.fbx` holds **three open NURBS curves** — no surface, no faces. That is worth
-saying plainly, because it was asked for as a scatter surface: there is nothing in the file
-to scatter *over*. What there is, is better — three lines someone drew, which is what every
-previous version was trying to approximate out of noise.
-
-So they are used as the strands. Their control points are resampled evenly along arc length,
-quantised, and embedded the same way the mesh is; the mass still takes its silhouette from
-`Corner.fbx`, which remains the only surface in the project.
-
-They arrive in the **mesh's** frame — centred on Corner.fbx's bounding box rather than their
-own — and take the same rotation and fit, so a curve drawn against the shape lands against
-the shape.
-
-**They are then fitted into the visible quadrant** (`curveFit`). Drawn centred on the model,
-and the model centred on the screen corner, three quarters of each curve sits off-screen past
-the corner and what remains reads as a scribble rather than as the line someone drew. The fit
-keeps the set's proportions and the three curves' relationship to one another.
-
-Motes sit at a random point along their curve, spread over the whole length, so the line is
-continuous while every mote on it is at a different point of its own life. Over that life a
-mote **slides along the line** — for the same reason the model's threads do: measured on
-Ref1, 97.8% of the motion follows the filament rather than crossing it.
-
-The slide is baked as a per-mote **tangent** rather than read from the curve at draw time.
-The honest version of that: reading the line itself means a texture fetch in the vertex
-stage, and that route cost an afternoon — `THREE.RGBFormat` no longer exists, a 256x3 float
-texture is non-power-of-two on both axes, and the driver reported the resulting incomplete
-texture as a *framebuffer feedback loop*, with the entire population invisible. The travel
-over one life is short against the curve's own bends, so the straight version is the same
-line, and it needs none of that.
-
-`curveMotes` is deliberately modest. At 2600 per curve the three of them fill the quadrant
-solid and read as one blob; the structure only appears when the line is thin enough to see
-around.
 
 ### Five rays thrown out of the corner
 
@@ -577,6 +540,29 @@ deliberate features rather than part of the fade: shrunk with distance like ever
 the one thing meant to be read as a line is the first thing to disappear. Counting everything
 together the figure comes to 1.20 rather than 0.42, and that difference is entirely those
 four threads.
+
+### The model is a drawing now
+
+ver7 scatters on **`Corner_1.fbx`** — 2712 vertices, 5376 triangles, and unlike `Corner.fbx`
+it is not a blob with a silhouette. It is three drawn strands converted to tubes, covering
+**under a third** of its own bounding box. Everything below is tuned around that difference,
+and three settings had to move a long way:
+
+- **`particleCount` 60 000 → 24 000.** A shape covering a third of its box takes the same
+  count three times as densely: the ribbons filled in solid and the drawing read as one red
+  mass. It only reads while its motes are still separable.
+- **`modelOffsetX/Y` −0.46.** The plane is centred on the group's origin and the origin is
+  the screen corner, so a model left at zero has three quarters of itself off-screen. That
+  was harmless for a blob — any quarter of a blob is a blob — but the quarter of *this* model
+  that happened to be on screen was its dense middle, with every loop outside the frame. At
+  −0.46 the drawing sits in the visible quadrant while still running off the corner.
+- **`cornerDensity` 2.4 → 0.6.** Crowding motes at the corner made sense when the corner was
+  the mass's own densest part. Against a drawn shape it piles them where the drawing is
+  *not*, and buries it.
+
+`strandFraction` drops to 0.22 and `extraStrands` to 0 for the same reason: both mechanisms
+exist to invent threads inside a blob, and this model already is the threads. Rays walked out
+of the corner on top of drawn ones read as a second, disagreeing set.
 
 ### Denser toward the corner
 
