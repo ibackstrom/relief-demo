@@ -30,7 +30,7 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 9000,      // far fewer than ver6's 60000, and the model is why: this one
+  particleCount: 3000,      // far fewer than ver6's 60000, and the model is why: this one
                             //   covers under a third of its own box, so the same count
                             //   lands three times as densely and the ribbons fill in
                             //   solid. The drawing only reads while its motes are still
@@ -287,9 +287,9 @@ const CONFIG = {
   // The rasterised plane is scaled to fit inside this box, keeping the model's
   // proportions, in units of the viewport HEIGHT at the cloud's depth — so the cloud keeps
   // its share of the frame at every window size. Only the tightest axis touches its wall.
-  boxWidth: 0.288,
-  boxHeight: 0.252,
-  boxDepth: 0.288,
+  boxWidth: 0.144,
+  boxHeight: 0.126,
+  boxDepth: 0.144,
 
   // ------------------------------------------------------------ placement
   // Viewport halves from centre: 1 is exactly the right/top edge. Past 1 the centre of
@@ -452,7 +452,7 @@ const CONFIG = {
   //
   // Because it is fixed per mote it also cannot flicker as the cloud turns, and it costs
   // nothing per frame.
-  densityRadius: 0.025,     // neighbourhood size, as a fraction of viewport height
+  densityRadius: 0.013,     // neighbourhood size, as a fraction of viewport height
   deepen: 0.62,             // how far the most crowded motes are taken toward the deep
                             //   colour. 0 is off; 1 makes the core nearly black.
   deepenBias: 0.85,         // curve on the normalised count. Under 1 spreads the effect
@@ -498,7 +498,7 @@ const CONFIG = {
   // Halved from 0.667. The pairing with the box still holds — the box is a fraction of the
   // size the cloud reaches when open, and this is the trip back — but the fraction is now
   // 0.75 rather than 0.6, so the cloud grows half as far off its resting size.
-  expandAmount: 0.333,
+  expandAmount: 0.167,
   // How near the pointer must come, as fractions of viewport height measured from the
   // cloud's centre. FULL strength anywhere inside expandHoverInner, then fading to
   // nothing at expandHoverRadius.
@@ -508,8 +508,8 @@ const CONFIG = {
   // never get near zero: against a bare falloff from the centre, hovering the particles
   // themselves reached 0.66 of full and the cloud opened to two thirds of where it
   // should. The plateau has to cover the resting cloud's own extent.
-  expandHoverInner: 0.126,
-  expandHoverRadius: 0.240,
+  expandHoverInner: 0.063,
+  expandHoverRadius: 0.120,
   expandSeconds: 0.55,      // ease in/out. Slower than the ray push on purpose: the
                             //   growth is the slow gesture, the hole is the quick one.
   expandCurlBoost: 0.8,     // extra curl while expanded, as a multiple of curlAmplitude.
