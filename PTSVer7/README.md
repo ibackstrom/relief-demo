@@ -545,7 +545,9 @@ four threads.
 
 ver7 scatters on **`Corner_1.fbx`** — 2712 vertices, 5376 triangles, and unlike `Corner.fbx`
 it is not a blob with a silhouette. It is three drawn strands converted to tubes, covering
-**under a third** of its own bounding box. Everything below is tuned around that difference,
+**under a third** of its own bounding box. The shipped bake is the revised geometry:
+2.46 x 1.13 x 2.61, near enough square seen face-on, where the first version of it was 4.50
+wide and read as a landscape band. Everything below is tuned around that difference,
 and three settings had to move a long way:
 
 - **`particleCount` 60 000 → 24 000.** A shape covering a third of its box takes the same
@@ -556,6 +558,12 @@ and three settings had to move a long way:
   was harmless for a blob — any quarter of a blob is a blob — but the quarter of *this* model
   that happened to be on screen was its dense middle, with every loop outside the frame. At
   −0.46 the drawing sits in the visible quadrant while still running off the corner.
+- **Smaller, and closer in.** The box comes down to 0.48 x 0.42 x 0.48 and `modelOffset` from
+  −0.46 to −0.32, which pulls the drawing back toward the corner rather than sitting it out
+  in the frame. Measured against the previous build: footprint **3565 → 2221** four-pixel
+  cells, and the mass's median distance from the corner **196 → 119 px** (p90 297 → 216).
+  `expandHoverInner` and `densityRadius` scale with it, as they must — the hover plateau has
+  to cover the resting cloud and the crowding neighbourhood has to match its density.
 - **`cornerDensity` 2.4 → 0.6.** Crowding motes at the corner made sense when the corner was
   the mass's own densest part. Against a drawn shape it piles them where the drawing is
   *not*, and buries it.
