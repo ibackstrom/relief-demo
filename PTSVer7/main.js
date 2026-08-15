@@ -30,12 +30,12 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 14000,     // far fewer than ver6's 60000, and the model is why: this one
+  particleCount: 24500,     // far fewer than ver6's 60000, and the model is why: this one
                             //   covers under a third of its own box, so the same count
                             //   lands three times as densely and the ribbons fill in
                             //   solid. The drawing only reads while its motes are still
                             //   separable
-  particleSize: 0.6,        // sphere diameter, world units, before the per-mote multiplier
+  particleSize: 0.5,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
   // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
@@ -282,12 +282,12 @@ const CONFIG = {
   // The population is deliberately NOT scaled by it. Motes per projected area is what sets
   // how the drawing reads, so shrinking with the count held makes the cloud denser — which
   // is sometimes what you want. The quantity bar is next to it.
-  scale: 1.0,
+  scale: 1.96,
 
   // How far the drawing sits from the corner, in plane widths and heights. The plane is
   // centred on the group's origin and the origin is the screen corner, so 0 puts three
   // quarters of the model off-screen; larger values walk it into the frame.
-  position: 0.32,
+  position: 0.315,
 
   // ------------------------------------------------------------ the box the model fits
   // The rasterised plane is scaled to fit inside this box, keeping the model's
@@ -309,7 +309,7 @@ const CONFIG = {
   // CLOCK the motes are read from rather than any one of their speeds, so their motion stays
   // in proportion however fast it runs. The cloud's own sway is deliberately not included:
   // that is the camera's relationship to the volume, not the particles' own life.
-  speed: 1.0,
+  speed: 1.13,
 
   // ------------------------------------------------------------ parallax
   // A slow sway of the whole volume. With a fixed camera this is the only thing that
@@ -440,11 +440,11 @@ const CONFIG = {
   // rather than as highlights picked out of it.
   bloom: true,
   bloomThreshold: 0.011,
-  bloomStrength: 1.15,      // above the reference's 0.62 on purpose: theirs glows against
+  bloomStrength: 0.98,      // above the reference's 0.62 on purpose: theirs glows against
                             //   black, where added light is all there is. Against a light
                             //   page there is nothing to add light TO, so the pass has to
                             //   work by spreading colour instead, and that costs more.
-  bloomRadius: 0.22,        // blur spread, in half-res texels per step
+  bloomRadius: 0.44,        // blur spread, in half-res texels per step
   bloomAlpha: 1.70,         // how much the glow raises the canvas's own alpha. The page
                             //   behind is light, so without this the glow has nothing to
                             //   show up against and simply disappears into it.
@@ -504,7 +504,7 @@ const CONFIG = {
   // Halved from 0.667. The pairing with the box still holds — the box is a fraction of the
   // size the cloud reaches when open, and this is the trip back — but the fraction is now
   // 0.75 rather than 0.6, so the cloud grows half as far off its resting size.
-  expandAmount: 0.167,
+  expandAmount: 0.08,
   // How near the pointer must come, as fractions of viewport height measured from the
   // cloud's centre. FULL strength anywhere inside expandHoverInner, then fading to
   // nothing at expandHoverRadius.

@@ -21,19 +21,21 @@ as an overlay; the grey here is only a stand-in.
 
 ## Controls
 
-Eight bars, top-left, and nothing else. Each prints the `CONFIG` value it writes so a look
+Eight bars, top-left, and nothing else. **The shipped defaults are a set found on these
+bars** — dialled in on the live page and read straight back into `CONFIG`, which is what the
+readouts under each label are for. Each prints the `CONFIG` value it writes so a look
 found here transfers to the build by typing it in. `?ui=0` hides the panel.
 
 | bar | writes | default |
 |---|---|---|
-| quantity | `particleCount` | 14 000, range 14 000–90 000 (the bar starts above the shipped value; `?p=` reaches it) |
-| size | `particleSize` | 0.6, range 0.1–0.7 |
-| glow | `bloomStrength` | 1.55, range 0–4 |
-| glow size | `bloomRadius` | 0.22, range 0.05–0.7 |
-| speed | `speed` | 1.0, range 0–3 |
-| scale | `scale` | 1.0, range 0.25–3 |
-| position | `position` | 0.32, range 0–0.7 |
-| reaction | `expandAmount` | 0.167, range 0–1.2 |
+| quantity | `particleCount` | 24 500, range 14 000–90 000 |
+| size | `particleSize` | 0.5, range 0.1–0.7 |
+| glow | `bloomStrength` | 0.98, range 0–4 |
+| glow size | `bloomRadius` | 0.44, range 0.05–0.7 |
+| speed | `speed` | 1.13, range 0–3 |
+| scale | `scale` | 1.96, range 0.25–3 |
+| position | `position` | 0.315, range 0–0.7 |
+| reaction | `expandAmount` | 0.08, range 0–1.2 |
 
 **Scale** is one multiplier over the box *and everything measured against it*. The panel
 drives this rather than the three box numbers, because the box is never the only thing that
