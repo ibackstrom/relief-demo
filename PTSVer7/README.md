@@ -27,7 +27,7 @@ found here transfers to the build by typing it in. `?ui=0` hides the panel.
 | bar | writes | default |
 |---|---|---|
 | colour | `colorOverlayR/G/B` | `0.850 0.050 0.060` |
-| quantity | `particleCount` | 9 000, range 14 000–90 000 (the bar starts above the shipped value; `?p=` reaches it) |
+| quantity | `particleCount` | 3 000, range 14 000–90 000 (the bar starts above the shipped value; `?p=` reaches it) |
 | size | `particleSize` | 0.6, range 0.1–0.7 |
 | glow | `bloomStrength` | 1.55, range 0–4 |
 | glow size | `bloomRadius` | 0.22, range 0.05–0.7 |
@@ -558,18 +558,18 @@ and three settings had to move a long way:
   was harmless for a blob — any quarter of a blob is a blob — but the quarter of *this* model
   that happened to be on screen was its dense middle, with every loop outside the frame. At
   −0.46 the drawing sits in the visible quadrant while still running off the corner.
-- **Smaller, twice.** First to 0.48 x 0.42 x 0.48 with `modelOffset` −0.32, pulling the
+- **Smaller, three times over.** First to 0.48 x 0.42 x 0.48 with `modelOffset` −0.32, pulling the
   drawing back toward the corner rather than sitting it out in the frame; then **40% off
   every length again**, to 0.288 x 0.252 x 0.288. Measured across the two steps: footprint
-  **3565 → 2221 → 862** four-pixel cells, median distance from the corner **196 → 119 → 72
+  **3565 → 2221 → 862 → 246** four-pixel cells, median distance from the corner **196 → 119 → 72 → 40
   px**. The second step is 0.60 on every length exactly, which is 0.36 of the area — worth
   keeping straight, because coverage is an area and halving what you see is a square-root
   job on the constants.
-- **`particleCount` follows the area, not the request.** 24 000 → 9 000, because what sets
+- **`particleCount` follows the area, not the request.** 24 000 → 9 000 → 3 000, because what sets
   how the drawing reads is motes per *projected area*: hold the count while the mass shrinks
   to a third and the ribbons fill in solid, which is the failure this version already had
   once. `?p=` overrides it if the mass wants more weight.
-- **The hover growth, halved.** `expandAmount` 0.667 → 0.333. Measured on the same frame, the
+- **The hover growth, halved twice.** `expandAmount` 0.667 → 0.333 → 0.167. Measured at each step, the
   cloud's 90th-percentile reach goes 126 → 165 px when hovered, a growth of **x1.31** against
   the x1.67 the old value predicts. The pairing with the box still holds — the box is a
   fraction of the size the cloud reaches when open, and this is the trip back — but that
