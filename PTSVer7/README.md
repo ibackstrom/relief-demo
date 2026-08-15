@@ -21,7 +21,7 @@ as an overlay; the grey here is only a stand-in.
 
 ## Controls
 
-Six bars, top-left, and nothing else. Each prints the `CONFIG` value it writes so a look
+Nine bars, top-left, and nothing else. Each prints the `CONFIG` value it writes so a look
 found here transfers to the build by typing it in. `?ui=0` hides the panel.
 
 | bar | writes | default |
@@ -32,6 +32,30 @@ found here transfers to the build by typing it in. `?ui=0` hides the panel.
 | glow | `bloomStrength` | 1.55, range 0–4 |
 | glow size | `bloomRadius` | 0.22, range 0.05–0.7 |
 | speed | `speed` | 1.0, range 0–3 |
+| scale | `scale` | 1.0, range 0.25–3 |
+| position | `position` | 0.32, range 0–0.7 |
+| reaction | `expandAmount` | 0.167, range 0–1.2 |
+
+**Scale** is one multiplier over the box *and everything measured against it*. The panel
+drives this rather than the three box numbers, because the box is never the only thing that
+has to move — the hover plateau has to keep covering the resting cloud, or the pointer can
+never get inside it, and the crowding neighbourhood has to keep matching the cloud's density
+or the colour deepening flattens. Those travel with it here so the bar cannot leave them
+behind. It re-seats every mote, so it rebuilds, and the rebuild runs `place()` after itself
+for the same reason.
+
+The population is deliberately **not** scaled by it: motes per projected area is what sets
+how the drawing reads, so shrinking with the count held makes the cloud denser, which is
+sometimes exactly what is wanted. The quantity bar sits next to it.
+
+**Position** is how far the drawing sits from the corner, in plane widths. The plane is
+centred on the group's origin and the origin is the screen corner, so 0 leaves three quarters
+of the model off-screen and larger values walk it into the frame.
+
+**Reaction** is the hover growth — how far the cloud opens when the pointer comes near.
+Nothing rebuilds; it is a uniform.
+
+`?scale=`, `?pos=` and `?react=` drive all three without the panel.
 
 **Speed** is one dial rather than four. It scales the CLOCK the motes are read from, not any
 one of their speeds, so the swirl, the travel along their threads and the birth-to-death all

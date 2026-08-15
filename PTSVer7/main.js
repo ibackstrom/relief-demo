@@ -272,16 +272,22 @@ const CONFIG = {
                             //   out from the corner and a hard shrink erases its far end
   sizeEdgeScale: 0.75,      // distance over which it falls away, in plane widths
 
-  // Where the model sits relative to the corner, in plane widths and heights. The plane is
-  // centred on the group's origin and the group's origin is the screen corner, so a model
-  // left at zero has three quarters of itself off-screen past the corner. That was fine for
-  // a blob — any quarter of a blob is a blob — but Corner_1 is a DRAWING, and the quarter
-  // that happened to be on screen was its dense middle with every loop outside the frame.
+
+  // A single multiplier over the box and everything measured against it. The panel drives
+  // this rather than the three box numbers, because the box is never the only thing that has
+  // to move: the hover plateau has to keep covering the resting cloud, and the crowding
+  // neighbourhood has to keep matching its density. Those travel with it here so the bar
+  // cannot leave them behind.
   //
-  // At -0.46 the shape sits almost entirely in the visible quadrant while still running off
-  // the corner, so the cloud spills from the corner as before and the drawing can be read.
-  modelOffsetX: -0.32,
-  modelOffsetY: -0.32,
+  // The population is deliberately NOT scaled by it. Motes per projected area is what sets
+  // how the drawing reads, so shrinking with the count held makes the cloud denser — which
+  // is sometimes what you want. The quantity bar is next to it.
+  scale: 1.0,
+
+  // How far the drawing sits from the corner, in plane widths and heights. The plane is
+  // centred on the group's origin and the origin is the screen corner, so 0 puts three
+  // quarters of the model off-screen; larger values walk it into the frame.
+  position: 0.32,
 
   // ------------------------------------------------------------ the box the model fits
   // The rasterised plane is scaled to fit inside this box, keeping the model's
@@ -529,6 +535,9 @@ if (numParam('blob', 0, 1) !== null) CONFIG.blob = numParam('blob', 0, 1);
 if (numParam('life', 0, 1) !== null) CONFIG.lifeFraction = numParam('life', 0, 1);
 if (numParam('speed', 0, 3) !== null) CONFIG.speed = numParam('speed', 0, 3);
 if (numParam('gs', 0.02, 0.8) !== null) CONFIG.bloomRadius = numParam('gs', 0.02, 0.8);
+if (numParam('scale', 0.1, 4) !== null) CONFIG.scale = numParam('scale', 0.1, 4);
+if (numParam('pos', 0, 1) !== null) CONFIG.position = numParam('pos', 0, 1);
+if (numParam('react', 0, 2) !== null) CONFIG.expandAmount = numParam('react', 0, 2);
 if (numParam('strand', 0, 1) !== null) CONFIG.strandFraction = numParam('strand', 0, 1);
 if (PARAMS.get('bloom') === '0') CONFIG.bloom = false;
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
@@ -2023,9 +2032,9 @@ function buildParticles(count) {
   const outward    = new Float32Array(count);
 
   const vh = viewHeightAt(CONFIG.anchorZ);
-  const halfW = CONFIG.boxWidth  * vh * 0.5;
-  const halfH = CONFIG.boxHeight * vh * 0.5;
-  const halfD = CONFIG.boxDepth  * vh * 0.5;
+  const halfW = CONFIG.boxWidth  * CONFIG.scale * vh * 0.5;
+  const halfH = CONFIG.boxHeight * CONFIG.scale * vh * 0.5;
+  const halfD = CONFIG.boxDepth  * CONFIG.scale * vh * 0.5;
 
   // The maps, and the plane they cover. The model is fitted to the box on its TIGHTEST
   // axis so its proportions survive — stretching it to fill the box would make the shape
@@ -2313,8 +2322,8 @@ function buildParticles(count) {
     }
 
     // every seat, whatever produced it, moves with the model
-    px += CONFIG.modelOffsetX * planeW;
-    py += CONFIG.modelOffsetY * planeH;
+    px -= CONFIG.position * planeW;
+    py -= CONFIG.position * planeH;
 
     initPos[i3]     = px;
     initPos[i3 + 1] = py;
@@ -2381,7 +2390,7 @@ function buildParticles(count) {
   // in the population and finishes in a few milliseconds, once, at build time.
   const density = new Float32Array(count);
   {
-    const R = CONFIG.densityRadius * viewHeightAt(CONFIG.anchorZ);
+    const R = CONFIG.densityRadius * CONFIG.scale * viewHeightAt(CONFIG.anchorZ);
     const R2 = R * R;
     const buckets = new Map();
     const cellOf = (v) => Math.floor(v / R);
@@ -2782,7 +2791,7 @@ function place() {
   uniforms.uOutward.value = CONFIG.extraStrandOutward;
   const ba = THREE.MathUtils.degToRad(CONFIG.strandBiasAngle);
   uniforms.uFlowBiasDir.value.set(Math.cos(ba), Math.sin(ba));
-  hoverRadiusWorld = CONFIG.expandHoverRadius * vh;
+  hoverRadiusWorld = CONFIG.expandHoverRadius * CONFIG.scale * vh;
 
   // Typical mote diameter in device pixels. The mean of the size draw is
   // sizeMin + (sizeMax - sizeMin) / (sizeBias + 1) — for a heavy tail that sits far below
@@ -2795,7 +2804,7 @@ function place() {
   // every fourth frame, which shows up as a stutter and pops the blend order with it.
   const typicalPx = (CONFIG.particleSize * meanMult * 0.01) / vh * innerHeight;
   sortWorthwhile = typicalPx >= SORT_MIN_PX;
-  hoverInnerWorld = CONFIG.expandHoverInner * vh;
+  hoverInnerWorld = CONFIG.expandHoverInner * CONFIG.scale * vh;
 }
 
 // ---------------------------------------------------------------- cursor
@@ -2972,15 +2981,25 @@ if (uiEl && PARAMS.get('ui') === '0') {
       min: 0.05, max: 0.7, step: 0.005, value: CONFIG.bloomRadius },
     { key: 'speed', name: 'speed', cst: 'CONFIG.speed',
       min: 0, max: 3, step: 0.01, value: CONFIG.speed },
+    // Scale and position re-seat every mote, so they rebuild — and the rebuild has to run
+    // place() after it, or the cloud changes size while the hover radii stay where they were.
+    { key: 'scale', name: 'scale', cst: 'CONFIG.scale',
+      min: 0.25, max: 3, step: 0.01, value: CONFIG.scale, rebuild: true },
+    { key: 'position', name: 'position', cst: 'CONFIG.position',
+      min: 0, max: 0.7, step: 0.005, value: CONFIG.position, rebuild: true },
+    { key: 'expandAmount', name: 'reaction', cst: 'CONFIG.expandAmount',
+      min: 0, max: 1.2, step: 0.005, value: CONFIG.expandAmount, uni: 'uExpandAmount' },
   ];
 
   const rgbAt = (h) => hsvToRgb(h, satFixed, valFixed);
   const text = (r, v) => {
     if (r.key === 'hue') return rgbAt(v).map((c) => c.toFixed(3)).join('  ');
     if (r.key === 'particleCount') return String(Math.round(v));
-    if (r.key === 'bloomStrength' || r.key === 'bloomRadius' || r.key === 'speed') {
+    if (r.key === 'bloomStrength' || r.key === 'bloomRadius' || r.key === 'speed'
+        || r.key === 'scale' || r.key === 'expandAmount') {
       return v.toFixed(2);
     }
+    if (r.key === 'position') return v.toFixed(3);
     return v.toFixed(1);
   };
 
@@ -3011,6 +3030,8 @@ if (uiEl && PARAMS.get('ui') === '0') {
     group.add(mesh);
     group.remove(old);
     old.geometry.dispose();
+    // the cloud's size may have just changed, and the cursor's reach is measured against it
+    place();
   };
 
   ROWS.forEach((r, i) => {
