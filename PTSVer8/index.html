@@ -36,14 +36,14 @@
              color: #a41010; white-space: nowrap; }
   #pui input[type=range] { width: 100%; margin: 5px 0 0; accent-color: #a41010; }
   #pui .foot { margin-top: 11px; font-size: 10px; color: rgba(0,0,0,.4); }
-  /* The label the cloud is gathered under. Positioned from JS onto the focus point the
-     particles are concentrated at, so the two cannot drift apart when the layout changes. */
+  /* The label sits in the upper-right corner, pinned here in CSS — this is where it has to
+     be, so it is the thing that does not move. The particles are gathered onto it instead:
+     main.js reads this element's box and puts the density focus at its centre. */
   #booknow {
     position: fixed; z-index: 30; pointer-events: none;
+    right: 44px; top: 64px;
     font: bold 22px/1 Arial, Helvetica, sans-serif;
     letter-spacing: .14em; color: #fff; white-space: nowrap;
-    transform: translate(-50%, -50%);
-    opacity: 0; transition: opacity .5s ease;
   }
   #loading {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;

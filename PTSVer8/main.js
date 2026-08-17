@@ -294,11 +294,7 @@ const CONFIG = {
   // How far the drawing sits from the corner, in plane widths and heights. The plane is
   // centred on the group's origin and the origin is the screen corner, so 0 puts three
   // quarters of the model off-screen; larger values walk it into the frame.
-  // Raised from 0.150, and the label is why. At 0.150 the drawing's densest patch sat 12 px
-  // from the right edge, so a sign centred on it hung half off the page. The mass and the
-  // label move in together — the label is placed on the focus — so this is the one number
-  // that buys the sign room to sit over the cloud rather than beside it.
-  position: 0.550,
+  position: 0.300,
 
   // ------------------------------------------------------------ the box the model fits
   // The rasterised plane is scaled to fit inside this box, keeping the model's
@@ -2175,6 +2171,27 @@ function buildParticles(count) {
   const planeW = fit * maps.aspect;
   const depthSpan = CONFIG.depthDisplacement * planeW;
   seatPlaneW = planeW;
+
+  // Put the density peak under the label. The label is pinned to the upper-right corner in
+  // CSS because that is where it has to be, so it is the fixed thing and the cloud gathers to
+  // it — the reverse of the first attempt, which placed the label on the focus and then had
+  // to drag the whole mass inward to give the sign room. Read here rather than in place()
+  // because it has to be known before a single seat is drawn.
+  {
+    const el = document.getElementById('booknow');
+    if (el) {
+      const r = el.getBoundingClientRect();
+      const ppw = innerHeight / vh;                 // pixels per world unit at the cloud's depth
+      const wx = (r.left + r.width / 2 - innerWidth / 2) / ppw;
+      const wy = (innerHeight / 2 - (r.top + r.height / 2)) / ppw;
+      // the group sits on the screen corner, so take that off to get the cloud's own space,
+      // then undo the offset every seat gets, landing in the same units as focusX/focusY
+      const cornerX = CONFIG.anchorX * vh * camera.aspect * 0.5;
+      const cornerY = CONFIG.anchorY * vh * 0.5;
+      CONFIG.focusX = (wx - cornerX) / planeW + CONFIG.position;
+      CONFIG.focusY = (wy - cornerY) / planeH + CONFIG.position;
+    }
+  }
   seatAspect = maps.aspect;
   const mapAt = (arr, x, y) => {
     // nearest cell. Bilinear would only smooth a map whose resolution is already finer
@@ -2940,24 +2957,6 @@ function place() {
   sortWorthwhile = typicalPx >= SORT_MIN_PX;
   hoverInnerWorld = CONFIG.expandHoverInner * CONFIG.scale * vh;
 
-  // Put the label on the focus. The motes are crowded toward that point, so projecting it
-  // and placing the label there is what makes "concentrated under the label" true by
-  // construction rather than by two numbers being kept in step by hand.
-  //
-  // The group's ROTATION is deliberately left out: the cloud sways, and a label that swayed
-  // with it would read as loose type rather than as part of the page.
-  const label = document.getElementById('booknow');
-  if (label && seatPlaneW) {
-    const planeHNow = seatPlaneW / Math.max(1e-6, seatAspect);
-    _v.set(
-      group.position.x + (CONFIG.focusX - CONFIG.position) * seatPlaneW,
-      group.position.y + (CONFIG.focusY - CONFIG.position) * planeHNow,
-      CONFIG.anchorZ
-    ).project(camera);
-    label.style.left = ((_v.x * 0.5 + 0.5) * innerWidth).toFixed(1) + 'px';
-    label.style.top = ((-_v.y * 0.5 + 0.5) * innerHeight).toFixed(1) + 'px';
-    label.style.opacity = 1;
-  }
 }
 
 // ---------------------------------------------------------------- cursor

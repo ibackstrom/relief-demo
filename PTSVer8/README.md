@@ -562,19 +562,28 @@ four threads.
 
 ### The label, and the mass under it
 
-**BOOK NOW**, white, Arial bold caps, placed from JS onto the focus point the motes crowd
-toward — so it cannot drift from the density peak when the layout changes. The group's sway
-is left out of that projection: the cloud breathes, and a label breathing with it would read
-as loose type.
+**BOOK NOW**, white, Arial bold caps, **pinned to the upper-right corner in CSS** — right 44,
+top 64. That is where it has to be, so it is the fixed thing, and the cloud gathers to *it*.
 
-Getting the mass *under* the sign cost one constant, and the measurement is why. At
-`position` 0.150 the drawing's densest patch sat **12 px from the right edge**, so a sign
-centred on it hung half off the page. At 0.550 the mass and the label move in together — the
-label follows the focus — and a 130 px sign centred there spans x 1235–1365 on a 1384 canvas.
+That is the reverse of the first attempt, which placed the label on the focus and then had to
+drag the whole mass inward to give the sign room; the cloud ended up off its corner to suit
+the type. Now `buildParticles` reads the label's own bounding box, converts its centre into
+the cloud's space and puts the density focus there, before a single seat is drawn.
 
-Measured on the same frame: the mass centroid lands **16 px** from the label's centre, and
-**20%** of all drawn alpha falls inside a 130x30 box behind the text, which is 0.4% of the
-canvas by area.
+Measured on the same frame, with and without the label present:
+
+| | densest patch → label | alpha behind the text |
+|---|---|---|
+| focus left at the mass centre | 102 px | 12.8% |
+| focus read from the label | **14 px** | **20.7%** |
+
+The centroid stays about 50 px away, and that is correct rather than a miss: the drawing
+extends down and left, so its *average* is not its *peak*. What sits under the sign is the
+peak.
+
+`_shot.html` carries a copy of the label for this reason — a harness without it measures a
+cloud with nowhere to gather, which is exactly the wrong answer this measurement gave first
+time round.
 
 ### The density peaks under the label
 
