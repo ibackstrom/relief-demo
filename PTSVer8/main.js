@@ -294,7 +294,9 @@ const CONFIG = {
   // How far the drawing sits from the corner, in plane widths and heights. The plane is
   // centred on the group's origin and the origin is the screen corner, so 0 puts three
   // quarters of the model off-screen; larger values walk it into the frame.
-  position: 0.300,
+  // Back to where it was before the label pushed it around: the cloud belongs in the corner,
+  // and it is the SIGN that moves to sit over it, not the other way about.
+  position: 0.150,
 
   // ------------------------------------------------------------ the box the model fits
   // The rasterised plane is scaled to fit inside this box, keeping the model's
