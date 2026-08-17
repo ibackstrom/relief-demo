@@ -21,66 +21,24 @@ as an overlay; the grey here is only a stand-in.
 
 ## Controls
 
-Eight bars, top-left, and nothing else. **The shipped defaults are a set found on these
-bars** — dialled in on the live page and read straight back into `CONFIG`, which is what the
-readouts under each label are for. Each prints the `CONFIG` value it writes so a look
-found here transfers to the build by typing it in. `?ui=0` hides the panel.
+One bar, top-left: **opacity**.
 
 | bar | writes | default |
 |---|---|---|
-| quantity | `particleCount` | 60 500, range 14 000–90 000 |
-| size | `particleSize` | 0.7, range 0.1–0.7 |
-| glow | `bloomStrength` | 0.04, range 0–4 |
-| glow size | `bloomRadius` | 0.32, range 0.05–0.7 |
-| speed | `speed` | 0.81, range 0–3 |
-| scale | `scale` | 1.93, range 0.25–3 |
-| position | `position` | 0.150, range 0–0.7 |
-| reaction | `expandAmount` | 0.71, range 0–1.2 |
+| opacity | `CONFIG.opacity` | 0.72, range 0–1 |
 
-**Scale** is one multiplier over the box *and everything measured against it*. The panel
-drives this rather than the three box numbers, because the box is never the only thing that
-has to move — the hover plateau has to keep covering the resting cloud, or the pointer can
-never get inside it, and the crowding neighbourhood has to keep matching the cloud's density
-or the colour deepening flattens. Those travel with it here so the bar cannot leave them
-behind. It re-seats every mote, so it rebuilds, and the rebuild runs `place()` after itself
-for the same reason.
+Everything the panel used to carry — quantity, size, glow, glow size, speed, scale, position,
+reaction — is settled and lives in `CONFIG`, where a value that will not be dragged again
+belongs. A panel of eight bars is a panel nobody reads.
 
-The population is deliberately **not** scaled by it: motes per projected area is what sets
-how the drawing reads, so shrinking with the count held makes the cloud denser, which is
-sometimes exactly what is wanted. The quantity bar sits next to it.
+Opacity is the alpha of the whole field, from invisible at 0 to fully opaque at 1. It is the
+*field's* alpha rather than the mote's own shading: `coreAlpha` still decides how hollow a
+sphere looks through its middle, which is a property of the material, while this decides how
+present the cloud is on the page. Measured across the range, the mean alpha over lit motes
+runs 89 → 176 of 255, and the count of fully opaque pixels goes 219 → 2112.
 
-**Position** is how far the drawing sits from the corner, in plane widths. The plane is
-centred on the group's origin and the origin is the screen corner, so 0 leaves three quarters
-of the model off-screen and larger values walk it into the frame.
-
-**Reaction** is the hover growth — how far the cloud opens when the pointer comes near.
-Nothing rebuilds; it is a uniform.
-
-`?scale=`, `?pos=` and `?react=` drive all three without the panel.
-
-**Speed** is one dial rather than four. It scales the CLOCK the motes are read from, not any
-one of their speeds, so the swirl, the travel along their threads and the birth-to-death all
-stay in proportion however fast it runs. It is accumulated rather than multiplied at read
-time, so moving the bar never jumps their phase. The cloud's own sway is deliberately outside
-it — that is the camera's relationship to the volume, not the particles' own life. Measured
-over three frames, the frame-to-frame change goes from 15.0% at `speed` 0, which is the sway
-alone, to 21.3% at 1.
-
-**Glow size** is `bloomRadius`, read straight out of `CONFIG` by the blur pass every frame,
-so the bar just writes the value. Between 0.08 and 0.65 the halo doubles in area.
-
-The glow bar is the odd one out mechanically: the glow is a post pass, so its strength is
-not a property of the particle material at all — the bar reaches through the bloom chain to
-the composite's own uniform. Nothing rebuilds and nothing re-seeds, so it is smooth to drag.
-
-The **colour bar is gone**. It drove the hue of the overlay and printed the RGB triple to
-paste back, which earned its place while the colour was still being chosen; the red is
-settled now, and a control nobody moves is a control in the way of the ones they do. The
-colour itself is still `colorOverlayR/G/B` in `CONFIG`, and `?original` still swaps the whole
-palette.
-
-The panel scrolls if the window is short enough that eight rows would run off the bottom —
-with this many controls, the last one has to stay reachable.
+Nothing rebuilds — it is a uniform, so it is smooth to drag. `?op=<0..1>` sets it without the
+panel, and `?ui=0` hides the panel entirely.
 
 ## `?original` — the reference's palette
 

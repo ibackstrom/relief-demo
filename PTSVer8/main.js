@@ -557,6 +557,7 @@ if (numParam('scale', 0.1, 4) !== null) CONFIG.scale = numParam('scale', 0.1, 4)
 if (numParam('pos', 0, 1) !== null) CONFIG.position = numParam('pos', 0, 1);
 if (numParam('react', 0, 2) !== null) CONFIG.expandAmount = numParam('react', 0, 2);
 if (numParam('blur', 0, 1) !== null) CONFIG.mouseEdgeBlur = numParam('blur', 0, 1);
+if (numParam('op', 0, 1) !== null) CONFIG.opacity = numParam('op', 0, 1);
 if (numParam('strand', 0, 1) !== null) CONFIG.strandFraction = numParam('strand', 0, 1);
 if (PARAMS.get('bloom') === '0') CONFIG.bloom = false;
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
@@ -2949,52 +2950,24 @@ function tick() {
 tick();
 
 // ---------------------------------------------------------------- panel
-// Eight controls: quantity, size, glow, glow size, speed, scale, position, reaction. Each
-// prints the CONFIG value it writes, so a look found here transfers to the build by typing.
-// Nothing is persisted — a reload is the shipped build again. ?ui=0 hides the panel.
+// One control: opacity. Everything else the panel used to carry has been settled and lives
+// in CONFIG above, where a value that is not going to be dragged again belongs — a panel of
+// eight bars is a panel nobody reads.
 //
-// The colour bar is gone. It drove the hue of the overlay and printed the RGB triple to
-// paste back, which was useful while the colour was still being chosen; the red is settled
-// now, and a control nobody moves is a control in the way of the ones they do.
+// This is the alpha of the whole field, from invisible at 0 to fully opaque at 1. It is the
+// field's alpha rather than the mote's own shading: coreAlpha still decides how hollow a
+// sphere looks through its middle, which is a property of the material, while this decides
+// how present the cloud is on the page. ?ui=0 hides the panel.
 const uiEl = document.getElementById('ui');
 if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
   const ROWS = [
-    { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
-      min: 14000, max: 90000, step: 500, value: CONFIG.particleCount, rebuild: true },
-    { key: 'particleSize', name: 'size', cst: 'CONFIG.particleSize',
-      min: 0.1, max: 0.7, step: 0.01, value: CONFIG.particleSize, uni: 'uParticleSize' },
-    // The glow is a post pass, so its strength does not live in the particle material —
-    // it is a uniform on the composite, reached through the bloom chain.
-    { key: 'bloomStrength', name: 'glow', cst: 'CONFIG.bloomStrength',
-      min: 0, max: 4, step: 0.01, value: CONFIG.bloomStrength,
-      apply: (v) => { if (bloomChain) bloomChain.composite.uniforms.uStrength.value = v; } },
-    // Read straight out of CONFIG by the blur pass every frame, so there is nothing to
-    // push anywhere — the bar just writes the value.
-    { key: 'bloomRadius', name: 'glow size', cst: 'CONFIG.bloomRadius',
-      min: 0.05, max: 0.7, step: 0.005, value: CONFIG.bloomRadius },
-    { key: 'speed', name: 'speed', cst: 'CONFIG.speed',
-      min: 0, max: 3, step: 0.01, value: CONFIG.speed },
-    // Scale and position re-seat every mote, so they rebuild — and the rebuild has to run
-    // place() after it, or the cloud changes size while the hover radii stay where they were.
-    { key: 'scale', name: 'scale', cst: 'CONFIG.scale',
-      min: 0.25, max: 3, step: 0.01, value: CONFIG.scale, rebuild: true },
-    { key: 'position', name: 'position', cst: 'CONFIG.position',
-      min: 0, max: 0.7, step: 0.005, value: CONFIG.position, rebuild: true },
-    { key: 'expandAmount', name: 'reaction', cst: 'CONFIG.expandAmount',
-      min: 0, max: 1.2, step: 0.005, value: CONFIG.expandAmount, uni: 'uExpandAmount' },
+    { key: 'opacity', name: 'opacity', cst: 'CONFIG.opacity',
+      min: 0, max: 1, step: 0.005, value: CONFIG.opacity, uni: 'uOpacity' },
   ];
 
-  const text = (r, v) => {
-    if (r.key === 'particleCount') return String(Math.round(v));
-    if (r.key === 'bloomStrength' || r.key === 'bloomRadius' || r.key === 'speed'
-        || r.key === 'scale' || r.key === 'expandAmount') {
-      return v.toFixed(2);
-    }
-    if (r.key === 'position') return v.toFixed(3);
-    return v.toFixed(1);
-  };
+  const text = (r, v) => v.toFixed(3);
 
   uiEl.innerHTML = '<h2>particle cloud</h2>' + ROWS.map((r, i) =>
     '<div class="row"><div class="lbl">'
@@ -3005,29 +2978,13 @@ if (uiEl && PARAMS.get('ui') === '0') {
     + ' step="' + r.step + '" value="' + r.value + '"></div>'
   ).join('') + '<div class="foot">?ui=0 hides this</div>';
 
-  // Rebuilding allocates new buffers and re-seeds every mote, so a drag is coalesced into
-  // one rebuild at the end rather than one per input event.
-  let pending = null;
-  const rebuild = () => {
-    const old = mesh;
-    mesh = new THREE.Mesh(buildParticles(CONFIG.particleCount), material);
-    mesh.frustumCulled = false;
-    group.add(mesh);
-    group.remove(old);
-    old.geometry.dispose();
-    // the cloud's size may have just changed, and the cursor's reach is measured against it
-    place();
-  };
-
   ROWS.forEach((r, i) => {
     const slider = document.getElementById('pr' + i);
     slider.addEventListener('input', () => {
       const v = parseFloat(slider.value);
       document.getElementById('pv' + i).textContent = text(r, v);
-      CONFIG[r.key] = r.key === 'particleCount' ? Math.round(v) : v;
+      CONFIG[r.key] = v;
       if (r.uni) uniforms[r.uni].value = CONFIG[r.key];
-      if (r.apply) r.apply(CONFIG[r.key]);
-      if (r.rebuild) { clearTimeout(pending); pending = setTimeout(rebuild, 110); }
     });
   });
 }
