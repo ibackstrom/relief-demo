@@ -15,27 +15,36 @@
     color: rgba(0,0,0,.4); text-transform: uppercase; pointer-events: none;
   }
   /* three controls, nothing else: colour, quantity, size */
-  #ui {
+  #pui {
     position: fixed; top: 14px; left: 14px; width: 244px; z-index: 20;
     max-height: calc(100vh - 28px); overflow-y: auto;
     background: rgba(255,255,255,.84); backdrop-filter: blur(6px);
     border: 1px solid rgba(0,0,0,.12); border-radius: 4px; padding: 11px 13px 13px;
     font: 11px/1.35 Helvetica, Arial, sans-serif; color: rgba(0,0,0,.75);
   }
-  #ui h2 {
+  #pui h2 {
     margin: 0 0 4px; font-size: 10px; font-weight: 600; letter-spacing: .12em;
     text-transform: uppercase; color: rgba(0,0,0,.5);
   }
-  #ui .row { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(0,0,0,.10); }
-  #ui .row:first-of-type { margin-top: 6px; padding-top: 0; border-top: 0; }
-  #ui .lbl { display: flex; justify-content: space-between; align-items: center; gap: 7px; }
-  #ui .name { font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 10px; }
-  #ui .cst { display: block; margin-top: 2px; font-family: Consolas, Menlo, monospace;
+  #pui .row { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(0,0,0,.10); }
+  #pui .row:first-of-type { margin-top: 6px; padding-top: 0; border-top: 0; }
+  #pui .lbl { display: flex; justify-content: space-between; align-items: center; gap: 7px; }
+  #pui .name { font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 10px; }
+  #pui .cst { display: block; margin-top: 2px; font-family: Consolas, Menlo, monospace;
              font-size: 10px; color: rgba(0,0,0,.42); }
-  #ui .val { margin-left: auto; font-family: Consolas, Menlo, monospace; font-size: 11px;
+  #pui .val { margin-left: auto; font-family: Consolas, Menlo, monospace; font-size: 11px;
              color: #a41010; white-space: nowrap; }
-  #ui input[type=range] { width: 100%; margin: 5px 0 0; accent-color: #a41010; }
-  #ui .foot { margin-top: 11px; font-size: 10px; color: rgba(0,0,0,.4); }
+  #pui input[type=range] { width: 100%; margin: 5px 0 0; accent-color: #a41010; }
+  #pui .foot { margin-top: 11px; font-size: 10px; color: rgba(0,0,0,.4); }
+  /* The label the cloud is gathered under. Positioned from JS onto the focus point the
+     particles are concentrated at, so the two cannot drift apart when the layout changes. */
+  #booknow {
+    position: fixed; z-index: 30; pointer-events: none;
+    font: bold 22px/1 Arial, Helvetica, sans-serif;
+    letter-spacing: .14em; color: #1a1a1a; white-space: nowrap;
+    transform: translate(-50%, -50%);
+    opacity: 0; transition: opacity .5s ease;
+  }
   #loading {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     font: 12px/1 Helvetica, Arial, sans-serif; letter-spacing: .12em; color: rgba(0,0,0,.5);
@@ -53,14 +62,14 @@
   }
   html[data-original] #loading { background: #01121f; color: rgba(255,255,255,.55); }
   html[data-original] #hint { color: rgba(255,255,255,.45); }
-  html[data-original] #ui { background: rgba(6,20,38,.82); border-color: rgba(255,255,255,.16);
+  html[data-original] #pui { background: rgba(6,20,38,.82); border-color: rgba(255,255,255,.16);
                             color: rgba(255,255,255,.8); }
-  html[data-original] #ui h2,
-  html[data-original] #ui .cst,
-  html[data-original] #ui .foot { color: rgba(255,255,255,.45); }
-  html[data-original] #ui .row { border-top-color: rgba(255,255,255,.14); }
-  html[data-original] #ui .val { color: #6fb2ff; }
-  html[data-original] #ui input[type=range] { accent-color: #0072ff; }
+  html[data-original] #pui h2,
+  html[data-original] #pui .cst,
+  html[data-original] #pui .foot { color: rgba(255,255,255,.45); }
+  html[data-original] #pui .row { border-top-color: rgba(255,255,255,.14); }
+  html[data-original] #pui .val { color: #6fb2ff; }
+  html[data-original] #pui input[type=range] { accent-color: #0072ff; }
 </style>
 <script type="importmap">
 {
@@ -74,7 +83,14 @@
 <body>
 <div id="loading">loading…</div>
 <div id="hint">move the cursor into the cloud</div>
-<div id="ui"></div>
+<div id="pui"></div>
+<div id="booknow">BOOK NOW</div>
+<!-- ver20's relief wall underneath, then our motes over it. Two independent apps sharing a
+     page rather than one merged renderer: each keeps its own scene and loop, the later canvas
+     paints on top, and both listen to the pointer on window so both still react to it.
+     ver20's own assets resolve through ../shared/, which is the same from here as from
+     /ver20/ — nothing is duplicated. -->
+<script type="module" src="../ver20/main.js"></script>
 <script type="module" src="./main.js"></script>
 </body>
 </html>

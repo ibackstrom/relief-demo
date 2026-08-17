@@ -510,11 +510,12 @@ const CONFIG = {
   // The draw is per mote and fixed, so a mote does not flicker — it fades in over its life
   // until it crosses its own threshold, appears at full colour, and goes again on the way
   // down. 0 is the ordinary blended cloud.
-  solidity: 1.0,
+  solidity: 0.0,
 
   // ------------------------------------------------------------ the wall behind
   // ver20's own numbers, so the two builds show the same surface.
-  background: true,
+  background: false,        // ver20 draws the wall now; this is the fallback for running
+                            //   this page on its own, and ?bg=1 brings it back
   bgTextureStrength: 1.0,   // how much of the plaster shows through the flat base
   bgGradientStrength: 0.17, // the off-centre lift
   bgBrightness: 1.1,        // ver20's whole-scene multiply
@@ -580,7 +581,7 @@ if (numParam('react', 0, 2) !== null) CONFIG.expandAmount = numParam('react', 0,
 if (numParam('blur', 0, 1) !== null) CONFIG.mouseEdgeBlur = numParam('blur', 0, 1);
 if (numParam('op', 0, 1) !== null) CONFIG.opacity = numParam('op', 0, 1);
 if (numParam('solid', 0, 1) !== null) CONFIG.solidity = numParam('solid', 0, 1);
-if (PARAMS.get('bg') === '0') CONFIG.background = false;
+if (PARAMS.get('bg') === '1') CONFIG.background = true;
 if (numParam('strand', 0, 1) !== null) CONFIG.strandFraction = numParam('strand', 0, 1);
 if (PARAMS.get('bloom') === '0') CONFIG.bloom = false;
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
@@ -2134,6 +2135,7 @@ function rasteriseMaps(res) {
 // size multiplier, brightness, and which of the two roles it takes.
 let seatHalfDepth = 0;    // half the depth the seats came out occupying, in world units
 let seatPlaneW = 0;       // world width of the plane the model was fitted to
+let seatAspect = 1;       // and its aspect, so the height can be recovered in place()
 function buildParticles(count) {
   const geo = new THREE.InstancedBufferGeometry();
   geo.instanceCount = count;
@@ -2169,6 +2171,7 @@ function buildParticles(count) {
   const planeW = fit * maps.aspect;
   const depthSpan = CONFIG.depthDisplacement * planeW;
   seatPlaneW = planeW;
+  seatAspect = maps.aspect;
   const mapAt = (arr, x, y) => {
     // nearest cell. Bilinear would only smooth a map whose resolution is already finer
     // than the motes it seats, and the depth map has a hard edge at the silhouette that
@@ -2932,6 +2935,25 @@ function place() {
   const typicalPx = (CONFIG.particleSize * meanMult * 0.01) / vh * innerHeight;
   sortWorthwhile = typicalPx >= SORT_MIN_PX;
   hoverInnerWorld = CONFIG.expandHoverInner * CONFIG.scale * vh;
+
+  // Put the label on the focus. The motes are crowded toward that point, so projecting it
+  // and placing the label there is what makes "concentrated under the label" true by
+  // construction rather than by two numbers being kept in step by hand.
+  //
+  // The group's ROTATION is deliberately left out: the cloud sways, and a label that swayed
+  // with it would read as loose type rather than as part of the page.
+  const label = document.getElementById('booknow');
+  if (label && seatPlaneW) {
+    const planeHNow = seatPlaneW / Math.max(1e-6, seatAspect);
+    _v.set(
+      group.position.x + (CONFIG.focusX - CONFIG.position) * seatPlaneW,
+      group.position.y + (CONFIG.focusY - CONFIG.position) * planeHNow,
+      CONFIG.anchorZ
+    ).project(camera);
+    label.style.left = ((_v.x * 0.5 + 0.5) * innerWidth).toFixed(1) + 'px';
+    label.style.top = ((-_v.y * 0.5 + 0.5) * innerHeight).toFixed(1) + 'px';
+    label.style.opacity = 1;
+  }
 }
 
 // ---------------------------------------------------------------- cursor
@@ -3053,7 +3075,7 @@ tick();
 // motes at full colour at 1. Everything else, opacity included, is settled and lives in
 // CONFIG above, where a value that will not be dragged again belongs. ?ui=0 hides the panel,
 // and ?op= still reaches the field's overall alpha without it.
-const uiEl = document.getElementById('ui');
+const uiEl = document.getElementById('pui');
 if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
