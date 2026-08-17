@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>particle cloud — PTSVer8</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #e6e4e1; }
+  /* The canvas is transparent and sits above whatever is behind it, so this drops over an
+     existing page as an overlay. The page background here only stands in for that. */
+  canvas { display: block; position: fixed; inset: 0; }
+  #hint {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    font: 12px/1.4 Helvetica, Arial, sans-serif; letter-spacing: .08em;
+    color: rgba(0,0,0,.4); text-transform: uppercase; pointer-events: none;
+  }
+  /* three controls, nothing else: colour, quantity, size */
+  #ui {
+    position: fixed; top: 14px; left: 14px; width: 244px; z-index: 20;
+    max-height: calc(100vh - 28px); overflow-y: auto;
+    background: rgba(255,255,255,.84); backdrop-filter: blur(6px);
+    border: 1px solid rgba(0,0,0,.12); border-radius: 4px; padding: 11px 13px 13px;
+    font: 11px/1.35 Helvetica, Arial, sans-serif; color: rgba(0,0,0,.75);
+  }
+  #ui h2 {
+    margin: 0 0 4px; font-size: 10px; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; color: rgba(0,0,0,.5);
+  }
+  #ui .row { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(0,0,0,.10); }
+  #ui .row:first-of-type { margin-top: 6px; padding-top: 0; border-top: 0; }
+  #ui .lbl { display: flex; justify-content: space-between; align-items: center; gap: 7px; }
+  #ui .name { font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 10px; }
+  #ui .cst { display: block; margin-top: 2px; font-family: Consolas, Menlo, monospace;
+             font-size: 10px; color: rgba(0,0,0,.42); }
+  #ui .val { margin-left: auto; font-family: Consolas, Menlo, monospace; font-size: 11px;
+             color: #a41010; white-space: nowrap; }
+  #ui input[type=range] { width: 100%; margin: 5px 0 0; accent-color: #a41010; }
+  #ui .foot { margin-top: 11px; font-size: 10px; color: rgba(0,0,0,.4); }
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font: 12px/1 Helvetica, Arial, sans-serif; letter-spacing: .12em; color: rgba(0,0,0,.5);
+    text-transform: uppercase; background: #e6e4e1; transition: opacity .6s ease; z-index: 10;
+  }
+
+  /* ?original — the reference site's own ground, set by main.js on <html>. Dark blue on the
+     left falling to black on the right, with a blue light rising from the bottom centre.
+     Only the page dresses up; the canvas stays transparent and paints no background. */
+  html[data-original] { background: #000; }
+  html[data-original] body {
+    background:
+      radial-gradient(ellipse 90% 65% at 50% 100%, rgba(0,42,110,.9), rgba(0,42,110,0) 70%),
+      linear-gradient(to right, rgb(2,34,69), rgb(0,0,0));
+  }
+  html[data-original] #loading { background: #01121f; color: rgba(255,255,255,.55); }
+  html[data-original] #hint { color: rgba(255,255,255,.45); }
+  html[data-original] #ui { background: rgba(6,20,38,.82); border-color: rgba(255,255,255,.16);
+                            color: rgba(255,255,255,.8); }
+  html[data-original] #ui h2,
+  html[data-original] #ui .cst,
+  html[data-original] #ui .foot { color: rgba(255,255,255,.45); }
+  html[data-original] #ui .row { border-top-color: rgba(255,255,255,.14); }
+  html[data-original] #ui .val { color: #6fb2ff; }
+  html[data-original] #ui input[type=range] { accent-color: #0072ff; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="loading">loading…</div>
+<div id="hint">move the cursor into the cloud</div>
+<div id="ui"></div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
