@@ -498,6 +498,20 @@ const CONFIG = {
   minBrightness: 0.0,
   opacity: 0.72,            // overall alpha of the field
 
+  // How much of the cloud's transparency is spent on FEWER motes rather than on paler ones.
+  //
+  // Every mote's alpha is built from its shading, its place in its own life and its depth in
+  // the volume, so most of the population is drawn part-way transparent — which is what makes
+  // the cloud read as washed out rather than as a lot of small solid things. At 1 that alpha
+  // stops tinting the mote and starts deciding whether it is there at all: a mote whose alpha
+  // would have been 0.3 is drawn at FULL strength three times in ten and not drawn at all the
+  // rest, so the cloud thins by losing motes instead of by fading every one of them.
+  //
+  // The draw is per mote and fixed, so a mote does not flicker — it fades in over its life
+  // until it crosses its own threshold, appears at full colour, and goes again on the way
+  // down. 0 is the ordinary blended cloud.
+  solidity: 1.0,
+
   // ------------------------------------------------------------ scan
   // A band that sweeps the cloud and tints what it crosses; drive uProgress off scroll
   // to use it as a reveal. Off by default — the glow colour fights a warm overlay.
@@ -558,6 +572,7 @@ if (numParam('pos', 0, 1) !== null) CONFIG.position = numParam('pos', 0, 1);
 if (numParam('react', 0, 2) !== null) CONFIG.expandAmount = numParam('react', 0, 2);
 if (numParam('blur', 0, 1) !== null) CONFIG.mouseEdgeBlur = numParam('blur', 0, 1);
 if (numParam('op', 0, 1) !== null) CONFIG.opacity = numParam('op', 0, 1);
+if (numParam('solid', 0, 1) !== null) CONFIG.solidity = numParam('solid', 0, 1);
 if (numParam('strand', 0, 1) !== null) CONFIG.strandFraction = numParam('strand', 0, 1);
 if (PARAMS.get('bloom') === '0') CONFIG.bloom = false;
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
@@ -963,6 +978,7 @@ uniform float uContrast;
 uniform float uBrightness;
 uniform float uMinBrightness;
 uniform float uOpacity;
+uniform float uSolidity;
 
 varying vec2  vUv;
 varying float vBrightness;
@@ -1112,6 +1128,16 @@ void main(){
   float alpha = shell * edge * vBrightness * vFade * uOpacity * vAlphaScale
               * (1.0 - uDepthFade * vDepth);
   alpha = min(1.0, alpha + spec * uSpecOpacity);   // the highlight carries its own opacity
+
+  // Spend that transparency on the population instead of on the paint. The threshold is the
+  // mote's OWN number, decorrelated from the seed its outline uses so the two do not agree,
+  // and it does not change from frame to frame — so a mote crosses it once on the way up and
+  // once on the way down rather than flickering across it.
+  if (uSolidity > 0.0) {
+    float draw = step(fract(vShape * 91.7), alpha);
+    alpha = mix(alpha, draw, uSolidity);
+  }
+  if (alpha < 0.004) discard;                      // nothing left to blend
 
   gl_FragColor = vec4(mixed, alpha);
 }
@@ -2571,6 +2597,7 @@ const uniforms = {
   uBrightness: { value: CONFIG.brightness },
   uMinBrightness: { value: CONFIG.minBrightness },
   uOpacity: { value: CONFIG.opacity },
+  uSolidity: { value: CONFIG.solidity },
 };
 
 // ShaderMaterial rather than RawShaderMaterial: it declares projectionMatrix,
@@ -2950,14 +2977,12 @@ function tick() {
 tick();
 
 // ---------------------------------------------------------------- panel
-// One control: opacity. Everything else the panel used to carry has been settled and lives
-// in CONFIG above, where a value that is not going to be dragged again belongs — a panel of
-// eight bars is a panel nobody reads.
+// Two controls, and they answer different questions about the same transparency.
 //
-// This is the alpha of the whole field, from invisible at 0 to fully opaque at 1. It is the
-// field's alpha rather than the mote's own shading: coreAlpha still decides how hollow a
-// sphere looks through its middle, which is a property of the material, while this decides
-// how present the cloud is on the page. ?ui=0 hides the panel.
+// OPACITY is how present the cloud is: the alpha of the whole field, invisible at 0 to fully
+// opaque at 1. SOLIDITY is what that alpha is spent on — pale motes at 0, fewer motes at
+// full colour at 1. Everything else the panel used to carry is settled and lives in CONFIG
+// above, where a value that will not be dragged again belongs. ?ui=0 hides the panel.
 const uiEl = document.getElementById('ui');
 if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
@@ -2965,6 +2990,8 @@ if (uiEl && PARAMS.get('ui') === '0') {
   const ROWS = [
     { key: 'opacity', name: 'opacity', cst: 'CONFIG.opacity',
       min: 0, max: 1, step: 0.005, value: CONFIG.opacity, uni: 'uOpacity' },
+    { key: 'solidity', name: 'solidity', cst: 'CONFIG.solidity',
+      min: 0, max: 1, step: 0.005, value: CONFIG.solidity, uni: 'uSolidity' },
   ];
 
   const text = (r, v) => v.toFixed(3);

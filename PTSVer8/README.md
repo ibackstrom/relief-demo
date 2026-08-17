@@ -21,24 +21,41 @@ as an overlay; the grey here is only a stand-in.
 
 ## Controls
 
-One bar, top-left: **opacity**.
+Two bars, top-left. They answer different questions about the same transparency.
 
 | bar | writes | default |
 |---|---|---|
 | opacity | `CONFIG.opacity` | 0.72, range 0–1 |
+| solidity | `CONFIG.solidity` | 1.0, range 0–1 |
 
-Everything the panel used to carry — quantity, size, glow, glow size, speed, scale, position,
-reaction — is settled and lives in `CONFIG`, where a value that will not be dragged again
-belongs. A panel of eight bars is a panel nobody reads.
+**Opacity** is how present the cloud is — the alpha of the whole field, invisible at 0 to
+fully opaque at 1. Across the range the mean alpha over lit motes runs 89 → 176 of 255.
 
-Opacity is the alpha of the whole field, from invisible at 0 to fully opaque at 1. It is the
-*field's* alpha rather than the mote's own shading: `coreAlpha` still decides how hollow a
-sphere looks through its middle, which is a property of the material, while this decides how
-present the cloud is on the page. Measured across the range, the mean alpha over lit motes
-runs 89 → 176 of 255, and the count of fully opaque pixels goes 219 → 2112.
+**Solidity** is what that alpha is spent on. Every mote's alpha is built from its shading, its
+place in its own life and its depth in the volume, so most of the population is drawn part-way
+transparent — which is what makes the cloud read as washed out rather than as a lot of small
+solid things. At 1 that alpha stops tinting the mote and starts deciding whether it is drawn
+at all: a mote whose alpha would have been 0.3 is drawn at **full strength** three times in
+ten, and not at all the rest. The cloud thins by losing motes instead of by fading every one
+of them.
 
-Nothing rebuilds — it is a uniform, so it is smooth to drag. `?op=<0..1>` sets it without the
-panel, and `?ui=0` hides the panel entirely.
+Measured on the same frame:
+
+| | lit pixels | mean alpha | part-transparent px | fully opaque px |
+|---|---|---|---|---|
+| `solidity` 0 | 8021 | 155 | 4772 | 1289 |
+| `solidity` 1 | 4768 | **255** | **0** | 4768 |
+
+At 1 there is no semi-transparency left anywhere in the frame — every drawn pixel is at full
+colour, and roughly four in ten motes are simply gone.
+
+The threshold is the mote's **own** number, decorrelated from the seed its outline uses so
+the two do not agree, and it does not change from frame to frame. That is what stops it
+flickering: a mote fades in over its life until it crosses its own threshold, appears at full
+colour, and goes again on the way down.
+
+Nothing rebuilds — both are uniforms, so they are smooth to drag. `?op=` and `?solid=` set
+them without the panel; `?ui=0` hides it.
 
 ## `?original` — the reference's palette
 
