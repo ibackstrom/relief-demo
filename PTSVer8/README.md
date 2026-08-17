@@ -14,6 +14,23 @@ Serve over HTTP — it will not run from `file://`:
 python -m http.server 8000     # then open http://localhost:8000/
 ```
 
+### The wall behind it
+
+The background is `immersiveg/ver20`'s, carried over so the cloud can be judged against the
+surface it will actually sit on rather than against a flat swatch. The shader is verbatim: the
+same flat base, the same plaster texture read off the green channel, the same off-centre
+gradient with noise on the lookup to stop it banding, and the same 0.6/0.4 lift at the end,
+under ver20's own constants — texture 1.0, gradient 0.17, brightness 1.1.
+
+It is a full-screen quad drawn before the motes with depth off, **not** a page background,
+because it has to be inside the frame the bloom composites: a wall painted underneath the
+canvas by CSS would sit under the glow rather than behind it.
+
+This is the one thing that stops the build being a transparent overlay — the canvas is now
+opaque. `?bg=0` turns the wall off and hands the page back its own background, which is the
+mode to ship in when this drops onto the real site. The wall costs one texture,
+`assets/plaster.jpg`, so this version is three files rather than two.
+
 `index.html` + `main.js` is still the whole thing — the model ships inside `main.js` as a
 quantised triangle soup, so there are no textures, no assets and nothing to fetch. The
 canvas is transparent and draws no background of its own, so it drops over an existing page
@@ -21,17 +38,16 @@ as an overlay; the grey here is only a stand-in.
 
 ## Controls
 
-Two bars, top-left. They answer different questions about the same transparency.
+One bar, top-left: **solidity**.
 
 | bar | writes | default |
 |---|---|---|
-| opacity | `CONFIG.opacity` | 0.72, range 0–1 |
 | solidity | `CONFIG.solidity` | 1.0, range 0–1 |
 
-**Opacity** is how present the cloud is — the alpha of the whole field, invisible at 0 to
-fully opaque at 1. Across the range the mean alpha over lit motes runs 89 → 176 of 255.
+Everything else is settled and lives in `CONFIG`, the field's overall `opacity` included —
+`?op=` still reaches it without the panel.
 
-**Solidity** is what that alpha is spent on. Every mote's alpha is built from its shading, its
+**Solidity** is what the cloud's transparency is spent on. Every mote's alpha is built from its shading, its
 place in its own life and its depth in the volume, so most of the population is drawn part-way
 transparent — which is what makes the cloud read as washed out rather than as a lot of small
 solid things. At 1 that alpha stops tinting the mote and starts deciding whether it is drawn

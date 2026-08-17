@@ -512,6 +512,13 @@ const CONFIG = {
   // down. 0 is the ordinary blended cloud.
   solidity: 1.0,
 
+  // ------------------------------------------------------------ the wall behind
+  // ver20's own numbers, so the two builds show the same surface.
+  background: true,
+  bgTextureStrength: 1.0,   // how much of the plaster shows through the flat base
+  bgGradientStrength: 0.17, // the off-centre lift
+  bgBrightness: 1.1,        // ver20's whole-scene multiply
+
   // ------------------------------------------------------------ scan
   // A band that sweeps the cloud and tints what it crosses; drive uProgress off scroll
   // to use it as a reveal. Off by default — the glow colour fights a warm overlay.
@@ -573,6 +580,7 @@ if (numParam('react', 0, 2) !== null) CONFIG.expandAmount = numParam('react', 0,
 if (numParam('blur', 0, 1) !== null) CONFIG.mouseEdgeBlur = numParam('blur', 0, 1);
 if (numParam('op', 0, 1) !== null) CONFIG.opacity = numParam('op', 0, 1);
 if (numParam('solid', 0, 1) !== null) CONFIG.solidity = numParam('solid', 0, 1);
+if (PARAMS.get('bg') === '0') CONFIG.background = false;
 if (numParam('strand', 0, 1) !== null) CONFIG.strandFraction = numParam('strand', 0, 1);
 if (PARAMS.get('bloom') === '0') CONFIG.bloom = false;
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
@@ -1143,6 +1151,47 @@ void main(){
 }
 `;
 
+// ---------------------------------------------------------------- the wall
+// The background from immersiveg/ver20, carried over so the cloud can be judged against the
+// surface it will actually sit on rather than against a flat swatch. Verbatim: the same flat
+// base, the same plaster texture on the green channel, the same off-centre gradient and the
+// same 0.6/0.4 lift at the end.
+//
+// It is a full-screen quad drawn before everything with depth off, not a page background,
+// because it has to be inside the frame the bloom composites — a wall painted underneath the
+// canvas by CSS would sit under the glow instead of behind it.
+//
+// This is the one thing that makes the build stop being a transparent overlay. ?bg=0 turns it
+// off and hands the page back its own background.
+const BG_VERT = /* glsl */`
+varying vec2 vUv;
+void main(){ vUv = uv; gl_Position = vec4(position, 1.0); }`;
+
+const BG_FRAG = /* glsl */`
+precision highp float;
+#define PI 3.141592653589793
+varying vec2 vUv;
+uniform float uGradientStrength;
+uniform sampler2D tPlaster;
+uniform float uTextureStrength;
+uniform float uBgBrightness;
+highp float rand(const in vec2 uv){
+  const highp float a = 12.9898, b = 78.233, c = 43758.5453;
+  highp float dt = dot(uv.xy, vec2(a, b)), sn = mod(dt, PI);
+  return fract(sin(sn) * c);
+}
+void main(){
+  vec3 color = vec3(0.54504);
+  float plaster = texture2D(tPlaster, vUv).g;
+  color = mix(color, color * plaster, uTextureStrength);
+  // the noise on the lookup is what keeps the gradient from banding on a flat wall
+  vec2 uv = vUv + rand(vUv) * 0.01;
+  float gradient = mix(1.0, 0.5, length(uv - vec2(0.0, 0.8)));
+  color += gradient * 0.7 * uGradientStrength;
+  color = (color * 0.6 + 0.4) * uBgBrightness;
+  gl_FragColor = vec4(color, 1.0);
+}`;
+
 // ---------------------------------------------------------------- scene
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -1157,6 +1206,29 @@ camera.position.set(0, 0, 10);
 
 const group = new THREE.Group();
 scene.add(group);
+
+if (CONFIG.background) {
+  const tPlaster = new THREE.TextureLoader().load('./assets/plaster.jpg');
+  tPlaster.wrapS = tPlaster.wrapT = THREE.RepeatWrapping;
+  const wall = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    new THREE.ShaderMaterial({
+      vertexShader: BG_VERT,
+      fragmentShader: BG_FRAG,
+      uniforms: {
+        tPlaster: { value: tPlaster },
+        uTextureStrength: { value: CONFIG.bgTextureStrength },
+        uGradientStrength: { value: CONFIG.bgGradientStrength },
+        uBgBrightness: { value: CONFIG.bgBrightness },
+      },
+      depthWrite: false,
+      depthTest: false,
+    })
+  );
+  wall.renderOrder = -1;         // before the motes, and it writes no depth
+  wall.frustumCulled = false;
+  scene.add(wall);
+}
 
 // The world height the camera sees at the cloud's depth. Every size and placement below
 // is expressed against this, so the cloud holds its share of the frame on any window.
@@ -2977,19 +3049,15 @@ function tick() {
 tick();
 
 // ---------------------------------------------------------------- panel
-// Two controls, and they answer different questions about the same transparency.
-//
-// OPACITY is how present the cloud is: the alpha of the whole field, invisible at 0 to fully
-// opaque at 1. SOLIDITY is what that alpha is spent on — pale motes at 0, fewer motes at
-// full colour at 1. Everything else the panel used to carry is settled and lives in CONFIG
-// above, where a value that will not be dragged again belongs. ?ui=0 hides the panel.
+// One control: SOLIDITY — what the cloud's transparency is spent on. Pale motes at 0, fewer
+// motes at full colour at 1. Everything else, opacity included, is settled and lives in
+// CONFIG above, where a value that will not be dragged again belongs. ?ui=0 hides the panel,
+// and ?op= still reaches the field's overall alpha without it.
 const uiEl = document.getElementById('ui');
 if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
   const ROWS = [
-    { key: 'opacity', name: 'opacity', cst: 'CONFIG.opacity',
-      min: 0, max: 1, step: 0.005, value: CONFIG.opacity, uni: 'uOpacity' },
     { key: 'solidity', name: 'solidity', cst: 'CONFIG.solidity',
       min: 0, max: 1, step: 0.005, value: CONFIG.solidity, uni: 'uSolidity' },
   ];
