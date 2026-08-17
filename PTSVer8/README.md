@@ -560,6 +560,22 @@ the one thing meant to be read as a line is the first thing to disappear. Counti
 together the figure comes to 1.20 rather than 0.42, and that difference is entirely those
 four threads.
 
+### The label, and the mass under it
+
+**BOOK NOW**, white, Arial bold caps, placed from JS onto the focus point the motes crowd
+toward — so it cannot drift from the density peak when the layout changes. The group's sway
+is left out of that projection: the cloud breathes, and a label breathing with it would read
+as loose type.
+
+Getting the mass *under* the sign cost one constant, and the measurement is why. At
+`position` 0.150 the drawing's densest patch sat **12 px from the right edge**, so a sign
+centred on it hung half off the page. At 0.550 the mass and the label move in together — the
+label follows the focus — and a 130 px sign centred there spans x 1235–1365 on a 1384 canvas.
+
+Measured on the same frame: the mass centroid lands **16 px** from the label's centre, and
+**20%** of all drawn alpha falls inside a 130x30 box behind the text, which is 0.4% of the
+canvas by area.
+
 ### The density peaks under the label
 
 A **BOOK NOW** label goes over this cloud, so the motes have to be thickest where the label

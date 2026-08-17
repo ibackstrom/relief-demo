@@ -115,7 +115,7 @@ const CONFIG = {
   // 0 leaves the model's even coverage alone. Each step up crowds the population cornerward
   // and, since the count is fixed, thins the far side by exactly as much. It is a power on
   // the radius of the throw, so it has no ceiling to fall off.
-  focusDensity: 1.5,        // ver8 raises this again: the label wants a clear peak under
+  focusDensity: 2.4,        // ver8 raises this again: the label wants a clear peak under
                             //   it and a proportional fall away from it. Too high and the
                             //   drawing vanishes under a single hot spot
 
@@ -294,7 +294,11 @@ const CONFIG = {
   // How far the drawing sits from the corner, in plane widths and heights. The plane is
   // centred on the group's origin and the origin is the screen corner, so 0 puts three
   // quarters of the model off-screen; larger values walk it into the frame.
-  position: 0.150,
+  // Raised from 0.150, and the label is why. At 0.150 the drawing's densest patch sat 12 px
+  // from the right edge, so a sign centred on it hung half off the page. The mass and the
+  // label move in together — the label is placed on the focus — so this is the one number
+  // that buys the sign room to sit over the cloud rather than beside it.
+  position: 0.550,
 
   // ------------------------------------------------------------ the box the model fits
   // The rasterised plane is scaled to fit inside this box, keeping the model's
