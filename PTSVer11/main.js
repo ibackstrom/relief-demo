@@ -31,7 +31,7 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 500000,     // far fewer than ver6's 60000, and the model is why: this one
+  particleCount: 50000,     // far fewer than ver6's 60000, and the model is why: this one
                             //   covers under a third of its own box, so the same count
                             //   lands three times as densely and the ribbons fill in
                             //   solid. The drawing only reads while its motes are still
@@ -42,7 +42,7 @@ const CONFIG = {
   // down past about a pixel does not make finer grains, it makes invisible ones. At 0.62
   // with sizeMax 3.2 the whole population went sub-pixel and the drawn pixels fell a
   // hundredfold — the cloud read as a speck.
-  particleSize: 0.95,        // sphere diameter, world units, before the per-mote multiplier
+  particleSize: 0.92,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
   // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
@@ -143,7 +143,13 @@ const CONFIG = {
   // points spilling out of the screen corner, dense at the corner and thinning outward.
   // Everything that gives the cloud its look happens downstream of this, in the flow.
   cornerSeed: true,         // false falls back to the model-and-mask seeding below
-  cornerRadius: 0.42,       // how far the cloud reaches, in viewport heights. This is the
+  // A third of what it was. Note that particleSize came down by the same third rather than
+  // staying put, and that pairing is what keeps the look identical instead of merely smaller:
+  // shrinking the mass alone cuts its area to a ninth and makes the same population nine
+  // times denser, while shrinking the grain alone cuts each mote's coverage to a ninth. Doing
+  // both at once cancels exactly, so the density that was tuned on the large version is the
+  // density that arrives on the small one, with no change to the count.
+  cornerRadius: 0.14,       // how far the cloud reaches, in viewport heights. This is the
                             //   size dial — it is measured against the FRAME, so it does
                             //   not have to be re-derived when anything else moves
   cornerBias: 0.55,         // spread of the Gaussian, in units of cornerRadius. It is no
@@ -509,7 +515,7 @@ const CONFIG = {
   // small numbers, so the buffer keeps its precision where it is needed — and on a device
   // that will only give us half floats, an absolute position's smallest representable step
   // is larger than one frame's movement and the cloud would simply never start.
-  simSpeed: 0.085,          // the field's strength, as a fraction of the mass radius per
+  simSpeed: 0.064,          // the field's strength, as a fraction of the mass radius per
                             //   second, so a resize does not change the pace. The reference
                             //   carries its motes at 3.0-3.5% of the mass radius per second;
                             //   this sits above that because the curl's own magnitude is
@@ -528,7 +534,7 @@ const CONFIG = {
                             //   thins once, seven seconds after load — radius 42 to 36 and
                             //   a quarter of the drawn pixels gone. At 0.85 the same deaths
                             //   are smeared over twelve seconds and there is nothing to see
-  simFrequency: 7.0,        // eddy size, as 1/frequency in world units. LOW on purpose: this
+  simFrequency: 1.0,        // eddy size, as 1/frequency in world units. LOW on purpose: this
                             //   octave is the macro swirl and the x3.1 one below carries the
                             //   filament detail. From the reference:
                             //   its field decorrelates over 13-20% of the mass radius
@@ -595,8 +601,8 @@ const CONFIG = {
   // Radius and push are fractions of viewport HEIGHT, not world units, so the opening
   // holds its size on screen at any window. Don't put world units here.
   mouseRadius: 0.050,       // radius of the tube that opens
-  mouseStrength: 0.055,     // how far a mote at the centre of it is pushed
-  falloffPower: 2.0,        // 1 = linear, 2 = soft outer edge with a firm core
+  mouseStrength: 0.022,     // how far a mote at the centre of it is pushed
+  falloffPower: 3.0,        // 1 = linear, 2 = soft outer edge with a firm core
   mouseSmoothing: 0.12,     // lag on the cursor the motes actually see, per frame. Low
                             //   values make the cloud trail the pointer.
   mouseFadeSeconds: 0.45,   // fade in/out of the whole response when the pointer arrives
@@ -644,7 +650,11 @@ const CONFIG = {
   grainStretch: 1.00,       // how far a grain is drawn out along the throw axis. 1 is a
                             //   circle. This is motion blur standing in for a shutter, so
                             //   it wants to be small — past ~2 they read as dashes
-  minPx: 0.9,               // smallest footprint a mote is drawn at, in device pixels.
+  minPx: 0.55,              // smallest footprint a mote is drawn at, in device pixels.
+                            //   Lowered with the grain. The guard inflates anything under it
+                            //   and pays for the extra area out of ALPHA, so leaving it high
+                            //   while the grain came down would have quietly undone the
+                            //   scaling and dimmed the cloud instead of shrinking it.
                             //   Lowered with the grain: the guard inflates anything under
                             //   it, so leaving it at 1.3 would have quietly undone the size
                             //   reduction and taken the alpha with it.
@@ -767,7 +777,7 @@ const CONFIG = {
   ],
   rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish
-  alphaGain: 0.55,          // overall presence against the page, applied last. The bloom used
+  alphaGain: 2.60,          // overall presence against the page, applied last. The bloom used
                             //   to provide this as a side effect of lifting the canvas alpha
 
   saturation: 1.35,
@@ -879,7 +889,7 @@ const CONFIG = {
   // Halved from 0.667. The pairing with the box still holds — the box is a fraction of the
   // size the cloud reaches when open, and this is the trip back — but the fraction is now
   // 0.75 rather than 0.6, so the cloud grows half as far off its resting size.
-  expandAmount: 0.71,
+  expandAmount: 0.34,
   // How near the pointer must come, as fractions of viewport height measured from the
   // cloud's centre. FULL strength anywhere inside expandHoverInner, then fading to
   // nothing at expandHoverRadius.
@@ -891,7 +901,11 @@ const CONFIG = {
   // should. The plateau has to cover the resting cloud's own extent.
   expandHoverInner: 0.063,
   expandHoverRadius: 0.120,
-  expandSeconds: 1.60,      // ease in/out. Slower than the ray push on purpose: the
+  // Slow, because the complaint about hover was pace rather than reach. The growth is the
+  // thing the eye reads as speed — it moves every mote at once — so easing it over nearly
+  // three seconds and asking for a third less of it takes the jolt out without taking the
+  // response away.
+  expandSeconds: 2.80,      // ease in/out. Slower than the ray push on purpose: the
                             //   growth is the slow gesture, the hole is the quick one.
   expandCurlBoost: 0.0,     // extra curl while expanded, as a multiple of curlAmplitude.
                             //   Without it the cloud grows but goes strangely still.
