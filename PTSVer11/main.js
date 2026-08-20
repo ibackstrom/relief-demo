@@ -31,7 +31,7 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 150000,     // far fewer than ver6's 60000, and the model is why: this one
+  particleCount: 500000,     // far fewer than ver6's 60000, and the model is why: this one
                             //   covers under a third of its own box, so the same count
                             //   lands three times as densely and the ribbons fill in
                             //   solid. The drawing only reads while its motes are still
@@ -42,7 +42,7 @@ const CONFIG = {
   // down past about a pixel does not make finer grains, it makes invisible ones. At 0.62
   // with sizeMax 3.2 the whole population went sub-pixel and the drawn pixels fell a
   // hundredfold — the cloud read as a speck.
-  particleSize: 2.60,        // sphere diameter, world units, before the per-mote multiplier
+  particleSize: 0.95,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
   // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
@@ -51,12 +51,12 @@ const CONFIG = {
   // heavier as the big motes get bigger and there is a limit to how far it can be pushed.
   // A biased tail decouples the two: most motes stay small while a few reach right out to
   // sizeMax. That is what puts small and large side by side rather than sorting them.
-  sizeMin: 0.30,
+  sizeMin: 0.55,
   // The tail is what was making gravel. At 4.0 the largest grains landed near six pixels
   // before the stretch widened them again, and a scatter of six-pixel discs reads as
   // confetti however fine the mean is. 2.4 puts the mean near 0.9 px and the tail at 3.
-  sizeMax: 3.4,
-  sizeBias: 4.0,            // 1 is uniform; each step up crowds the population toward
+  sizeMax: 1.60,
+  sizeBias: 2.0,            // 1 is uniform; each step up crowds the population toward
                             //   sizeMin while leaving the top of the range where it is
 
   // ------------------------------------------------------------ the scatter
@@ -413,6 +413,10 @@ const CONFIG = {
   // ------------------------------------------------------------ placement
   // Viewport halves from centre: 1 is exactly the right/top edge. Past 1 the centre of
   // mass goes off-screen, the bloom grows out of frame, and the open state falls short.
+  // Which corner the cloud grows out of: 'tr', 'tl', 'br', 'bl'. Everything that has to
+  // agree with it — the anchor, the seed's quadrant and the origin the hover blooms about —
+  // is derived from this one string rather than set three times.
+  corner: 'tr',
   anchorX: 1.00,
   anchorY: 0.97,
   anchorZ: 0.0,
@@ -447,7 +451,7 @@ const CONFIG = {
   // Aerial perspective: motes at the back of the volume are dimmed and thinned. Without
   // it every mote is equally present and the volume collapses back into a decal however
   // correct the geometry is.
-  depthFade: 0.32,          // alpha lost across the full depth of the box, 0 = flat
+  depthFade: 0.20,          // alpha lost across the full depth of the box, 0 = flat
   depthDarken: 0.22,        // brightness lost across the same span
 
   // ------------------------------------------------------------ drift
@@ -504,13 +508,13 @@ const CONFIG = {
   // small numbers, so the buffer keeps its precision where it is needed — and on a device
   // that will only give us half floats, an absolute position's smallest representable step
   // is larger than one frame's movement and the cloud would simply never start.
-  simSpeed: 0.075,          // the field's strength, as a fraction of the mass radius per
+  simSpeed: 0.085,          // the field's strength, as a fraction of the mass radius per
                             //   second, so a resize does not change the pace. The reference
                             //   carries its motes at 3.0-3.5% of the mass radius per second;
                             //   this sits above that because the curl's own magnitude is
                             //   folded in on top, and because at a third of the reference's
                             //   size its exact rate reads as a still picture
-  simLife: 8.0,             // seconds from birth at the seat to death. With simSpeed this
+  simLife: 26.0,             // seconds from birth at the seat to death. With simSpeed this
                             //   sets how far the cloud spreads before it stops, because the
                             //   envelope is as far as a particle gets in one life
   simLifeSpread: 0.85,      // +/- fraction on that lifespan, drawn per particle. Without it
@@ -523,7 +527,7 @@ const CONFIG = {
                             //   thins once, seven seconds after load — radius 42 to 36 and
                             //   a quarter of the drawn pixels gone. At 0.85 the same deaths
                             //   are smeared over twelve seconds and there is nothing to see
-  simFrequency: 6.5,        // eddy size, as 1/frequency in world units. LOW on purpose: this
+  simFrequency: 7.0,        // eddy size, as 1/frequency in world units. LOW on purpose: this
                             //   octave is the macro swirl and the x3.1 one below carries the
                             //   filament detail. From the reference:
                             //   its field decorrelates over 13-20% of the mass radius
@@ -535,7 +539,7 @@ const CONFIG = {
                             //   look is curling ink, not a burst opening out
   simFine: 0.70,            // weight of a second octave at 3.1x the frequency. The large
                             //   octave makes the lobes, this one the hairs inside them
-  simGravity: 0.008,        // world units per second, straight down, always. Near zero by
+  simGravity: 0.0,        // world units per second, straight down, always. Near zero by
                             //   design: enough that the mass drifts and settles rather than
                             //   hanging in a vacuum, not enough to rain. It is a constant
                             //   VELOCITY rather than an acceleration, so nothing can run
@@ -546,7 +550,7 @@ const CONFIG = {
   // Almost off. The origin story is powder THROWN across a surface, not a charge going off
   // in the middle of it, so the initial impulse is directional and this symmetric radial
   // term is only here to stop the very centre packing solid.
-  launchBurst: 0.10,        // outward from the cloud's centre, per second, at birth. This is
+  launchBurst: 0.0,        // outward from the cloud's centre, per second, at birth. This is
                             //   the dial that sets how far the cloud opens: the reference's
                             //   radius doubles, growing 36% of itself per second at half a
                             //   second and asymptotically slower after.
@@ -556,7 +560,7 @@ const CONFIG = {
                             //   the mass becomes a ring with a hole where the ink should be
                             //   thickest. The centre is refilled by newborns, which is why
                             //   this is set together with simLife
-  launchSpeed: 0.22,        // the throw itself, same units, same decay
+  launchSpeed: 0.0,        // the throw itself, same units, same decay
   launchDecay: 2.00,        // seconds. Both terms e-fold away over this, which puts the
                             //   growth rate at a tenth of its opening value by five seconds
                             //   — the reference is at a hundredth of it by seven
@@ -676,7 +680,7 @@ const CONFIG = {
   rimColorR: 1.00,          // the rim is the light behind the bubble, so it is close to
   rimColorG: 0.72,          //   white with a warm lean rather than the body colour
   rimColorB: 0.68,
-  coreAlpha: 0.92,          // opacity through the middle of a sphere. Low is what makes
+  coreAlpha: 0.60,          // opacity through the middle of a sphere. Low is what makes
                             //   them hollow shells; at 1 they are solid beads. High here
                             //   because the reference's mass is very nearly opaque in its
                             //   folds — its darkest pixels are RGB(77, 22, 25), where a
@@ -762,14 +766,14 @@ const CONFIG = {
   ],
   rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish
-  alphaGain: 1.80,          // overall presence against the page, applied last. The bloom used
+  alphaGain: 0.55,          // overall presence against the page, applied last. The bloom used
                             //   to provide this as a side effect of lifting the canvas alpha
 
   saturation: 1.35,
   contrast: 1.10,
   brightness: 0.94,
   minBrightness: 0.0,
-  opacity: 0.72,            // overall alpha of the field. Up from 0.72 with the bloom: the
+  opacity: 0.50,            // overall alpha of the field. Up from 0.72 with the bloom: the
                             //   same motes spread over twice the area stack less deeply, so
                             //   the mass came out a good deal paler than the reference's —
                             //   thick ink at RGB(150, 87, 87) against its (135, 69, 71)
@@ -1754,6 +1758,12 @@ const viewHeightAt = (z) =>
 // A small 3D value noise, used only on the CPU when seats are drawn. It does not need the
 // quality of the simplex noise in the shader — it is sampled a few times per mote at
 // startup and never again, and all it has to do is vary smoothly.
+// +1/-1 per axis for the chosen corner: x is +1 on the right, y is +1 at the top.
+const cornerSigns = () => ({
+  x: CONFIG.corner.indexOf('l') >= 0 ? -1 : 1,
+  y: CONFIG.corner.indexOf('b') >= 0 ? -1 : 1,
+});
+
 const hash3 = (x, y, z) => {
   const t = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453;
   return t - Math.floor(t);
@@ -2798,9 +2808,12 @@ function buildParticles(count) {
       // Into the frame from the corner. The group's origin IS the screen corner, so the
       // quarter running to -x and -y is the visible one; the spill either side of it is
       // what stops the two straight edges reading as a cut.
-      const spill = CONFIG.cornerSpill;
-      const ang = Math.PI + Math.random() * (Math.PI * 0.5)
-                + (Math.random() - 0.5) * spill;
+      // The quarter that runs INTO the frame from whichever corner is in force, which is
+      // the direction opposite the corner's own signs.
+      const cs = cornerSigns();
+      const base = Math.atan2(-cs.y, -cs.x);
+      const ang = base - Math.PI * 0.25 + Math.random() * (Math.PI * 0.5)
+                + (Math.random() - 0.5) * CONFIG.cornerSpill;
       // Dense at the corner, thinning outward. The power is on the radius, so above 1
       // crowds inward; 0.5 would be an evenly covered disc.
       const rad = Math.pow(Math.random(), CONFIG.cornerBias) * cornerRadiusWorld;
@@ -3699,7 +3712,9 @@ let worldPush = 0;          // mouseStrength converted from frame-fraction to wo
 function place() {
   const vh = viewHeightAt(CONFIG.anchorZ);
   const vw = vh * camera.aspect;
-  group.position.set(CONFIG.anchorX * vw * 0.5, CONFIG.anchorY * vh * 0.5, CONFIG.anchorZ);
+  const cs = cornerSigns();
+  group.position.set(cs.x * Math.abs(CONFIG.anchorX) * vw * 0.5,
+                     cs.y * Math.abs(CONFIG.anchorY) * vh * 0.5, CONFIG.anchorZ);
   // the cursor's reach is given as a fraction of the frame; convert it here, where the
   // world height of the frame is known, so it survives a resize
   uniforms.uMouseRadius.value = CONFIG.mouseRadius * vh;
@@ -3708,7 +3723,7 @@ function place() {
   // The bloom grows the cloud away from the SCREEN CORNER, so the origin is that corner
   // expressed in the group's own space — not the group's origin, which is only wherever
   // the anchor happened to put the cloud's centre.
-  uniforms.uExpandOrigin.value.set(vw * 0.5, vh * 0.5, CONFIG.anchorZ);
+  uniforms.uExpandOrigin.value.set(cs.x * vw * 0.5, cs.y * vh * 0.5, CONFIG.anchorZ);
   group.worldToLocal(uniforms.uExpandOrigin.value);
 
   uniforms.uHalfDepth.value = seatHalfDepth || Math.max(1e-3, CONFIG.boxDepth * vh * 0.5);
@@ -3924,6 +3939,14 @@ if (uiEl && PARAMS.get('ui') === '0') {
         }
       },
       text: () => RAMP.map((k) => '[' + fmt(CONFIG[k]) + ']').join('  ') },
+    // Speed and turbulence need no wiring at all: stepSim copies both out of CONFIG every
+    // frame, so setting the value is enough and neither costs a rebuild.
+    { key: 'simSpeed', name: 'speed', cst: 'CONFIG.simSpeed',
+      min: 0, max: 0.35, step: 0.002, value: CONFIG.simSpeed,
+      text: () => CONFIG.simSpeed.toFixed(3) },
+    { key: 'simFrequency', name: 'turbulence', cst: 'CONFIG.simFrequency',
+      min: 1, max: 24, step: 0.2, value: CONFIG.simFrequency,
+      text: () => CONFIG.simFrequency.toFixed(1) },
     { key: 'particleSize', name: 'grain size', cst: 'CONFIG.particleSize',
       min: 0.4, max: 4, step: 0.05, value: CONFIG.particleSize,
       uni: 'uParticleSize', text: () => CONFIG.particleSize.toFixed(2) },
