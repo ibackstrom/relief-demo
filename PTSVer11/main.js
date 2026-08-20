@@ -146,8 +146,9 @@ const CONFIG = {
   cornerRadius: 0.42,       // how far the cloud reaches, in viewport heights. This is the
                             //   size dial — it is measured against the FRAME, so it does
                             //   not have to be re-derived when anything else moves
-  cornerBias: 1.35,         // power on the radius. 0.5 is an evenly covered disc, higher
-                            //   crowds the mass into the corner
+  cornerBias: 0.55,         // spread of the Gaussian, in units of cornerRadius. It is no
+                            //   longer a power on a bounded radius — that gave the cloud a
+                            //   last radius, which is a circle
   cornerSpill: 1.25,        // radians of overspill past the visible quarter, so the two
                             //   straight edges do not read as a cut
   cornerDepth: 0.45,        // thickness front to back, as a fraction of the radius
@@ -1411,12 +1412,16 @@ void main(){
   vUv = position.xy + 0.5;
   vShape = aShape;
   vBrightness = aBrightness;
-  // Crowding, but measured on the CARRIED position rather than on the seat. Once particles
-  // are advected the seat's neighbour count says only where a particle started, and after a
-  // few seconds of travel that is the wrong answer for both the deepening and the blend
-  // into the wall: what those want is how far out in the mass this particle is NOW.
-  float radial = length(pos.xy - uCloudCentre.xy) / max(1e-6, uCloudRadius);
-  vDensity = 1.0 - smoothstep(0.25, 1.35, radial);
+  // Constant, and that is the point. This used to be a radial measure, which drove both the
+  // colour ramp and the fringe alpha — so the cloud carried a circular gradient and a
+  // circular fade no matter what the field was doing underneath, and that reads as a mask
+  // laid over the effect.
+  //
+  // In a flow field there is nothing radial to measure. Every particle is the same colour at
+  // the same low opacity, and ALL of the tone comes from how many of them happen to overlap:
+  // dense where paths converge, pale where they thin. That is the whole shading model, and
+  // it is the one that leaves no contour behind.
+  vDensity = 1.0;
 
   // ---- 4. billboard ----------------------------------------------------------
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
@@ -2814,9 +2819,11 @@ function buildParticles(count) {
       const base = Math.atan2(-cs.y, -cs.x);
       const ang = base - Math.PI * 0.25 + Math.random() * (Math.PI * 0.5)
                 + (Math.random() - 0.5) * CONFIG.cornerSpill;
-      // Dense at the corner, thinning outward. The power is on the radius, so above 1
-      // crowds inward; 0.5 would be an evenly covered disc.
-      const rad = Math.pow(Math.random(), CONFIG.cornerBias) * cornerRadiusWorld;
+      // A GAUSSIAN falloff, not a disc. A bounded radius puts a hard rim on the cloud, and
+      // a hard rim on a radial draw is a circle — which is visible as a mask edge however
+      // the inside is shaded. A Gaussian has no last radius: it just runs out, so there is
+      // no contour anywhere for the eye to find.
+      const rad = Math.abs(gauss1()) * cornerRadiusWorld * CONFIG.cornerBias;
       seat.x = Math.cos(ang) * rad;
       seat.y = Math.sin(ang) * rad;
       seat.z = (Math.random() - 0.5) * cornerRadiusWorld * CONFIG.cornerDepth;
@@ -3912,52 +3919,23 @@ const uiEl = document.getElementById('pui');
 if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
-  // The hue bar turns the whole ramp together, keeping each stop's own saturation and
-  // lightness. Rotating the three independently would pull the ramp apart — the point of it
-  // is that the core is deeper and the middle is warmer, and both of those are relationships
-  // between the stops rather than properties of any one.
-  const RAMP = ['rampCore', 'rampMid', 'rampEdge'];
-  const UNI = { rampCore: 'uRampCore', rampMid: 'uRampMid', rampEdge: 'uRampEdge' };
-  const baseHSL = {};
-  for (const k of RAMP) {
-    const hsl = { h: 0, s: 0, l: 0 };
-    new THREE.Color(...CONFIG[k]).getHSL(hsl);
-    baseHSL[k] = hsl;
-  }
-  const fmt = (a) => a.map((n) => n.toFixed(3)).join(', ');
-
   const ROWS = [
-    { key: 'hue', name: 'ink hue', cst: 'CONFIG.rampCore / rampMid / rampEdge',
-      min: 0, max: 1, step: 0.002, value: baseHSL.rampCore.h,
-      apply(v) {
-        const delta = v - baseHSL.rampCore.h;
-        for (const k of RAMP) {
-          const h = (baseHSL[k].h + delta + 1) % 1;
-          const c = new THREE.Color().setHSL(h, baseHSL[k].s, baseHSL[k].l);
-          CONFIG[k] = [c.r, c.g, c.b];
-          uniforms[UNI[k]].value.set(c.r, c.g, c.b);
-        }
-      },
-      text: () => RAMP.map((k) => '[' + fmt(CONFIG[k]) + ']').join('  ') },
-    // Speed and turbulence need no wiring at all: stepSim copies both out of CONFIG every
-    // frame, so setting the value is enough and neither costs a rebuild.
+    // Size, speed and turbulence. None of the three needs a rebuild: particleSize is a
+    // uniform, and stepSim copies the other two out of CONFIG every frame.
+    { key: 'particleSize', name: 'size', cst: 'CONFIG.particleSize',
+      min: 0.2, max: 4, step: 0.05, value: CONFIG.particleSize,
+      uni: 'uParticleSize', text: () => CONFIG.particleSize.toFixed(2) },
     { key: 'simSpeed', name: 'speed', cst: 'CONFIG.simSpeed',
       min: 0, max: 0.35, step: 0.002, value: CONFIG.simSpeed,
       text: () => CONFIG.simSpeed.toFixed(3) },
     { key: 'simFrequency', name: 'turbulence', cst: 'CONFIG.simFrequency',
       min: 1, max: 24, step: 0.2, value: CONFIG.simFrequency,
       text: () => CONFIG.simFrequency.toFixed(1) },
-    { key: 'particleSize', name: 'grain size', cst: 'CONFIG.particleSize',
-      min: 0.4, max: 4, step: 0.05, value: CONFIG.particleSize,
-      uni: 'uParticleSize', text: () => CONFIG.particleSize.toFixed(2) },
-    { key: 'silhouette', name: 'silhouette', cst: 'CONFIG.silhouette',
-      min: 1, max: 6, step: 0.1, value: CONFIG.silhouette,
-      rebuild: true, text: () => CONFIG.silhouette.toFixed(1) + ' : 1' },
-    { key: 'flowAngle', name: 'flow', cst: 'CONFIG.flowAngle',
-      min: 0, max: 359, step: 1, value: CONFIG.flowAngle,
-      rebuild: true, text: () => Math.round(CONFIG.flowAngle) + '°' },
+    { key: 'alphaGain', name: 'density', cst: 'CONFIG.alphaGain',
+      min: 0.05, max: 3, step: 0.01, value: CONFIG.alphaGain,
+      uni: 'uAlphaGain', text: () => CONFIG.alphaGain.toFixed(2) },
     { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
-      min: 10000, max: 300000, step: 10000, value: CONFIG.particleCount,
+      min: 50000, max: 900000, step: 50000, value: CONFIG.particleCount,
       rebuild: true, round: true, text: () => String(CONFIG.particleCount) },
   ];
 
