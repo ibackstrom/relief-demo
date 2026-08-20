@@ -152,11 +152,13 @@ const CONFIG = {
   cornerRadius: 0.14,       // how far the cloud reaches, in viewport heights. This is the
                             //   size dial — it is measured against the FRAME, so it does
                             //   not have to be re-derived when anything else moves
-  cornerBias: 0.55,         // spread of the Gaussian, in units of cornerRadius. It is no
+  cornerBias: 0.42,         // spread of the Gaussian, in units of cornerRadius. It is no
                             //   longer a power on a bounded radius — that gave the cloud a
                             //   last radius, which is a circle
-  cornerSpill: 1.25,        // radians of overspill past the visible quarter, so the two
-                            //   straight edges do not read as a cut
+  cornerSpill: 0.55,        // radians of overspill past the visible quarter, so the two
+                            //   straight edges do not read as a cut. Small: most of the
+                            //   overspill goes up and right, which is off the screen, so it
+                            //   is paid for out of the population without being seen
   cornerDepth: 0.45,        // thickness front to back, as a fraction of the radius
 
   // ------------------------------------------------------------ the silhouette
@@ -521,7 +523,12 @@ const CONFIG = {
                             //   this sits above that because the curl's own magnitude is
                             //   folded in on top, and because at a third of the reference's
                             //   size its exact rate reads as a still picture
-  simLife: 26.0,             // seconds from birth at the seat to death. With simSpeed this
+  // Also the leash. The seeds sit AT the corner, but a particle wanders further the longer
+  // it lives, and it can only wander one way — inward, because the corner is a boundary and
+  // there is nothing on the other side of it to wander into. So a long life does not just
+  // trace a longer path, it walks the whole centre of mass off the corner and leaves a gap.
+  // At 26 seconds the gap was about a fifth of the frame.
+  simLife: 9.0,             // seconds from birth at the seat to death. With simSpeed this
                             //   sets how far the cloud spreads before it stops, because the
                             //   envelope is as far as a particle gets in one life
   simLifeSpread: 0.85,      // +/- fraction on that lifespan, drawn per particle. Without it
@@ -3933,6 +3940,26 @@ const uiEl = document.getElementById('pui');
 if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
+  // Colour. Every particle carries the same colour now — the tone in the picture is how many
+  // of them overlap, not what any one of them is — so hue, saturation and lightness are one
+  // colour rather than a ramp, and all five ramp stops are written from it. The readout is
+  // the RGB triple to paste into CONFIG.ramp once it is settled.
+  const inkHSL = { h: 0, s: 0, l: 0 };
+  new THREE.Color(...CONFIG.ramp[4]).getHSL(inkHSL);
+  const inkStops = ['uRamp0', 'uRamp1', 'uRamp2', 'uRamp3', 'uRamp4'];
+  const applyInk = () => {
+    const c = new THREE.Color().setHSL(inkHSL.h, inkHSL.s, inkHSL.l);
+    for (let i = 0; i < inkStops.length; i++) {
+      uniforms[inkStops[i]].value.set(c.r, c.g, c.b);
+      CONFIG.ramp[i] = [c.r, c.g, c.b];
+    }
+    return c;
+  };
+  const inkText = () => {
+    const c = CONFIG.ramp[4];
+    return c.map((n) => n.toFixed(3)).join(', ');
+  };
+
   const ROWS = [
     // Size, speed and turbulence. None of the three needs a rebuild: particleSize is a
     // uniform, and stepSim copies the other two out of CONFIG every frame.
@@ -3951,6 +3978,15 @@ if (uiEl && PARAMS.get('ui') === '0') {
     { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
       min: 50000, max: 900000, step: 50000, value: CONFIG.particleCount,
       rebuild: true, round: true, text: () => String(CONFIG.particleCount) },
+    { key: 'hue', name: 'hue', cst: 'CONFIG.ramp',
+      min: 0, max: 1, step: 0.002, value: inkHSL.h,
+      apply(v) { inkHSL.h = v; applyInk(); }, text: inkText },
+    { key: 'sat', name: 'saturation', cst: 'CONFIG.ramp',
+      min: 0, max: 1, step: 0.005, value: inkHSL.s,
+      apply(v) { inkHSL.s = v; applyInk(); }, text: inkText },
+    { key: 'light', name: 'lightness', cst: 'CONFIG.ramp',
+      min: 0, max: 1, step: 0.005, value: inkHSL.l,
+      apply(v) { inkHSL.l = v; applyInk(); }, text: inkText },
   ];
 
   uiEl.innerHTML = '<h2>particle cloud</h2>' + ROWS.map((r, i) =>
