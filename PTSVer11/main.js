@@ -36,7 +36,13 @@ const CONFIG = {
                             //   lands three times as densely and the ribbons fill in
                             //   solid. The drawing only reads while its motes are still
                             //   separable
-  particleSize: 0.85,        // sphere diameter, world units, before the per-mote multiplier
+  // Sized so the MEAN grain lands just above minPx, not below it. "Very small" has a floor
+  // here and it is a hard one: a mote under the sub-pixel guard is inflated back up to
+  // minPx and has its alpha divided by the SQUARE of that inflation, so pushing the size
+  // down past about a pixel does not make finer grains, it makes invisible ones. At 0.62
+  // with sizeMax 3.2 the whole population went sub-pixel and the drawn pixels fell a
+  // hundredfold — the cloud read as a speck.
+  particleSize: 1.50,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
   // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
@@ -46,7 +52,7 @@ const CONFIG = {
   // A biased tail decouples the two: most motes stay small while a few reach right out to
   // sizeMax. That is what puts small and large side by side rather than sorting them.
   sizeMin: 0.30,
-  sizeMax: 7.0,
+  sizeMax: 4.0,
   sizeBias: 4.0,            // 1 is uniform; each step up crowds the population toward
                             //   sizeMin while leaving the top of the range where it is
 
@@ -125,6 +131,34 @@ const CONFIG = {
   // evenly. Held over from the previous versions and lowered — the reference has no
   // equivalent, its unevenness comes from the photograph it samples, and ours has to be
   // put in by hand. Past ~0.8 the voids read as holes rather than as texture.
+  // ------------------------------------------------------------ the spawn mask
+  // Where a grain is allowed to exist. A domain-warped fBm density field, thresholded hard:
+  // six octaves, lacunarity 2, gain 0.5 (fixed, up by FBM_OCTAVES). The threshold is what
+  // fragments the edge into separate specks instead of fading it out.
+  fbmScale: 4.2,            // features per plane width. Higher is a finer break-up
+  fbmWarp: 0.55,            // how far the domain is dragged before the field is read. 0 is
+                            //   plain fBm and gives round blobs with round holes; this is
+                            //   what makes the survivors stringy and hooked
+  fbmThreshold: 0.36,       // kill below this. The single dial for how much of the mass
+                            //   survives — raise it and the cloud goes to lace. Read it
+                            //   against the field's real spread, which is narrow: the warped
+                            //   fBm runs 0.21 to 0.73 with a median of 0.50 and a standard
+                            //   deviation of only 0.10, so a tenth on this is a large move
+  fbmRadial: 0.30,          // how much the radial falloff multiplies into the field before
+                            //   the threshold. At 0 the holes are spread evenly through the
+                            //   mass; at 1 the core is solid and only the edge fragments.
+                            //   Low, and this is the trap in it: the throw is ALREADY
+                            //   crowded toward the focus by focusDensity, so a strong radial
+                            //   term here is a second concentration on top of the first. At
+                            //   0.85 it did not fray the edge, it deleted it — the mass came
+                            //   out a third of its radius with a twentieth of the grains
+  fbmReach: 2.00,           // radius of that falloff, in plane widths. It has to sit well
+                            //   OUTSIDE the mass, not on it: the seats' own median radius is
+                            //   about 0.39 plane widths, and at 0.62 the falloff was already
+                            //   down to a third there, so the threshold was killing the body
+                            //   of the cloud rather than fraying its edge. Only 12% of throws
+                            //   survived and what was left was a speck
+
   shapeNoise: 0.35,
   shapeNoiseScale: 3.4,     // features per plane width. Higher is finer, grainier clumping.
 
@@ -398,7 +432,7 @@ const CONFIG = {
   // small numbers, so the buffer keeps its precision where it is needed — and on a device
   // that will only give us half floats, an absolute position's smallest representable step
   // is larger than one frame's movement and the cloud would simply never start.
-  simSpeed: 0.085,          // the field's strength, as a fraction of the mass radius per
+  simSpeed: 0.055,          // the field's strength, as a fraction of the mass radius per
                             //   second, so a resize does not change the pace. The reference
                             //   carries its motes at 3.0-3.5% of the mass radius per second;
                             //   this sits above that because the curl's own magnitude is
@@ -417,7 +451,9 @@ const CONFIG = {
                             //   thins once, seven seconds after load — radius 42 to 36 and
                             //   a quarter of the drawn pixels gone. At 0.85 the same deaths
                             //   are smeared over twelve seconds and there is nothing to see
-  simFrequency: 9.0,        // eddy size, as 1/frequency in world units, from the reference:
+  simFrequency: 5.0,        // eddy size, as 1/frequency in world units. LOW on purpose: this
+                            //   octave is the macro swirl and the x3.1 one below carries the
+                            //   filament detail. From the reference:
                             //   its field decorrelates over 13-20% of the mass radius
   simFieldSpeed: 0.53,      // how fast the field itself changes, from the reference's
                             //   1.5-second coherence. Too high and the filaments never get
@@ -425,14 +461,19 @@ const CONFIG = {
   simDivergence: 0.75,      // the spreading half of the field — see curlNoise. Held under 1
                             //   so the field turns more than it spreads: the first clip's
                             //   look is curling ink, not a burst opening out
-  simFine: 0.55,            // weight of a second octave at 3.1x the frequency. The large
+  simFine: 0.70,            // weight of a second octave at 3.1x the frequency. The large
                             //   octave makes the lobes, this one the hairs inside them
+  simGravity: 0.014,        // world units per second, straight down, always. Near zero by
+                            //   design: enough that the mass drifts and settles rather than
+                            //   hanging in a vacuum, not enough to rain. It is a constant
+                            //   VELOCITY rather than an acceleration, so nothing can run
+                            //   away over a long life
 
   // The bloom, all three numbers read off the reference and all given per unit of the mass
   // radius so a resize does not have to re-derive them.
   launchDirX: -0.84,        // left and down, normalised in the shader. The reference's mass
   launchDirY: -0.54,        //   slides 125 px left and 72 px down over its eight seconds
-  launchBurst: 0.26,        // outward from the cloud's centre, per second, at birth. This is
+  launchBurst: 0.12,        // outward from the cloud's centre, per second, at birth. This is
                             //   the dial that sets how far the cloud opens: the reference's
                             //   radius doubles, growing 36% of itself per second at half a
                             //   second and asymptotically slower after.
@@ -446,7 +487,7 @@ const CONFIG = {
   launchDecay: 2.00,        // seconds. Both terms e-fold away over this, which puts the
                             //   growth rate at a tenth of its opening value by five seconds
                             //   — the reference is at a hundredth of it by seven
-  bloomRadius: 2.30,        // how much bigger the settled cloud is than the seats it grew
+  bloomRadius: 1.30,        // how much bigger the settled cloud is than the seats it grew
                             //   from, measured on a render. It is not cosmetic: the radial
                             //   crowding ramp is expressed against it, and while it was left
                             //   at the seats' own radius the whole bloomed mass sat outside
@@ -514,7 +555,7 @@ const CONFIG = {
   // the densest pixels bottomed out at RGB(172, 125, 125) however much colour and opacity
   // went in, against the reference's (77, 22, 25). Its grains are matte pigment in water,
   // not beads under a studio light.
-  specular: 0.16,           // highlight strength. Low on purpose: on motes this small
+  specular: 0.04,           // highlight strength. Low on purpose: on motes this small
                             //   a hot glint is the first thing that aliases, and it reads
                             //   as glitter rather than as gloss.
   minPx: 1.3,               // smallest footprint a mote is drawn at, in device pixels.
@@ -539,11 +580,11 @@ const CONFIG = {
   blob: 1.0,
 
   fresnelPower: 4.2,        // rim tightness. Low spreads the rim over the whole sphere.
-  rim: 0.10,                // rim strength
+  rim: 0.03,                // rim strength
   fillDirX: 0.55,           // the bounce light, opposite the key and below it
   fillDirY: -0.55,
   fillDirZ: 0.30,
-  fill: 0.10,               // strength. Past ~0.5 it starts to read as a second key and
+  fill: 0.04,               // strength. Past ~0.5 it starts to read as a second key and
                             //   the form goes ambiguous.
   fillColorR: 0.42,         // cool, to sit against the warm key — the contrast between
   fillColorG: 0.52,         //   the two is doing the work, not either one alone
@@ -557,7 +598,8 @@ const CONFIG = {
                             //   folds — its darkest pixels are RGB(77, 22, 25), where a
                             //   cloud of shells over a light wall bottoms out around (188,
                             //   159, 159) however much colour is put into it
-  edgeSoftness: 0.16,       // silhouette antialias, in radii. Too low and the discs step;
+  edgeSoftness: 0.06,       // silhouette antialias, in radii. Low: a grain has an edge, and
+                            //   a soft one reads as smoke. Too low and the discs step;
                             //   too high and they turn back into soft blobs.
 
   // ------------------------------------------------------------ bloom
@@ -569,7 +611,10 @@ const CONFIG = {
   // The threshold is deliberately almost zero, so it is not really a "bright pass" at
   // all — every lit pixel blooms, and the pass reads as a soft light around the mass
   // rather than as highlights picked out of it.
-  bloom: true,
+  // Off. A bloom is a soft glow around the mass, which is exactly the billowing this must
+  // not have — and it is seven reduced-resolution fullscreen passes, so it was also a good
+  // part of the load and frame cost.
+  bloom: false,
   bloomThreshold: 0.011,
   bloomStrength: 0.04,      // above the reference's 0.62 on purpose: theirs glows against
                             //   black, where added light is all there is. Against a light
@@ -613,6 +658,23 @@ const CONFIG = {
   colorOverlayB: 0.145,
   colorOverlayBlendMode: 0,
   colorOverlayStrength: 1.0,
+  // The three stops of the density ramp. Given as colours rather than as a darkening of one
+  // colour because the middle is a different HUE, not a lighter version of the core: pigment
+  // scatters warmer as it thins. The hue bar rotates all three together, so the ramp keeps
+  // its shape whatever colour the ink is set to.
+  rampCore: [0.38, 0.035, 0.028],   // deep red, the packed middle
+  rampMid:  [0.84, 0.255, 0.190],   // coral, but a red coral: at 0.92/0.33/0.23 the middle
+                                    //   of the mass was carrying most of the drawn pixels
+                                    //   and the whole thing read scarlet rather than as a
+                                    //   red pigment with a warm edge
+  rampEdge: [0.96, 0.430, 0.340],   // where it runs out — carried to nothing by alpha
+  rampMidAt: 0.38,          // where the coral stop sits along the density axis. Lower puts
+                            //   more of the mass on the core side of the ramp
+  rampFringe: 0.26,         // density below which alpha ramps to zero. This is the dial for
+                            //   how far the scattered specks reach before they vanish
+  alphaGain: 2.60,          // overall presence against the page, applied last. The bloom used
+                            //   to provide this as a side effect of lifting the canvas alpha
+
   saturation: 1.35,
   contrast: 1.10,
   brightness: 0.94,
@@ -666,7 +728,11 @@ const CONFIG = {
   groundR: 0.748,
   groundG: 0.748,
   groundB: 0.748,
-  ground: 0.18,             // how far the loneliest motes are taken toward it. 0 is ver8's
+  // Off. The ramp's own fringe does this job now, and does it better: it runs the grains out
+  // by ALPHA at their own colour, where this took them to the wall's colour first and left a
+  // grey scatter behind. Kept as a constant because it is still the right idea on a cloud
+  // without a density ramp.
+  ground: 0.0,              // how far the loneliest motes are taken toward it. 0 is ver8's
                             //   cloud exactly; 1 makes them the wall and they disappear.
                             //   Low now, and the reason is that the bloom changed what this
                             //   number means: on the tight cloud only the outlying scatter
@@ -1010,6 +1076,7 @@ uniform vec3  uLaunchDir;
 uniform float uLaunchSpeed;
 uniform float uLaunchDecay;
 uniform float uBurst;
+uniform float uGravity;
 uniform vec3  uCloudCentre;
 varying vec2 vUv;
 
@@ -1058,7 +1125,11 @@ void main(){
   // a filament would be pushed by the field where it STARTED and the filament would move
   // rigidly instead of stretching
   vec3 here = seed.xyz + offset;
-  offset += (fieldVelocity(here) + birthImpulse(here, age)) * uDt;
+  // Gravity is a constant VELOCITY, not an acceleration. Near zero by design — enough that
+  // the mass drifts down and settles instead of hanging in a vacuum — and as a velocity it
+  // cannot run away over a long life the way an accumulating one would.
+  vec3 g = vec3(0.0, -uGravity, 0.0);
+  offset += (fieldVelocity(here) + birthImpulse(here, age) + g) * uDt;
 
   // Dead: back to the seat, age zero. The seat is the source, so the model's silhouette is
   // what the cloud is continuously fed from rather than what it looks like.
@@ -1284,6 +1355,12 @@ uniform float uScanDirection;
 uniform float uScanStrength;
 uniform vec3  uScanGlow;
 uniform vec3  uColorOverlay;
+uniform vec3  uRampCore;
+uniform vec3  uRampMid;
+uniform vec3  uRampEdge;
+uniform float uRampMidAt;
+uniform float uRampFringe;
+uniform float uAlphaGain;
 uniform float uColorOverlayBlendMode;
 uniform float uColorOverlayStrength;
 uniform float uSaturation;
@@ -1418,10 +1495,17 @@ void main(){
   col = mix(col, uScanGlow, scanMask * 0.6 * uScanStrength);
   col *= vBrightness * (1.0 - uDepthDarken * vDepth);
 
-  // Crowding deepens the body colour: darker and a little richer where motes are packed.
-  vec3 deep = clamp(uColorOverlay * (1.0 - uDeepen), 0.0, 1.0);
-  deep = adjustSaturation(deep, uDeepenSat);
-  vec3 body = mix(uColorOverlay, deep, pow(clamp(vDensity, 0.0, 1.0), uDeepenBias));
+  // Density to colour, in three stops: a deep red where the grains are packed, a coral
+  // through the middle, and a fringe that goes to nothing.
+  //
+  // The fringe is carried by ALPHA, not by a pale colour, and that distinction is the whole
+  // reason this is a ramp rather than a tint. A grain drawn pale on a light wall is a GREY
+  // grain, and a scatter of grey specks reads as dirt on the page; a grain drawn at the
+  // coral and taken down in opacity keeps its hue all the way out and simply runs out.
+  float dens = pow(clamp(vDensity, 0.0, 1.0), uDeepenBias);
+  vec3 body = dens > uRampMidAt
+    ? mix(uRampMid, uRampCore, (dens - uRampMidAt) / max(1e-4, 1.0 - uRampMidAt))
+    : mix(uRampEdge, uRampMid, dens / max(1e-4, uRampMidAt));
 
   vec3 mixed = col;
   mixed = applyColorOverlay(mixed, body, uColorOverlayBlendMode, uColorOverlayStrength);
@@ -1456,6 +1540,14 @@ void main(){
               * (1.0 - uDepthFade * vDepth);
   alpha = min(1.0, alpha + spec * uSpecOpacity);   // the highlight carries its own opacity
   alpha *= 1.0 - lone * uGroundFade;               // the fringe thins as it neutralises
+  alpha *= smoothstep(0.0, uRampFringe, dens);     // and the ramp's own fringe runs out
+
+  // Overall presence against the page. This exists because the bloom used to supply it as a
+  // side effect: its composite lifted the canvas's own ALPHA, not just its colour, and with
+  // the pass turned off the cloud went almost invisible — a hundredfold drop in drawn pixels
+  // from a change that was supposed to be about softness. Better to state the gain than to
+  // keep a seven-pass blur running for something it was never named after.
+  alpha = min(1.0, alpha * uAlphaGain);
 
   // Spend that transparency on the population instead of on the paint. The threshold is the
   // mote's OWN number, decorrelated from the seed its outline uses so the two do not agree,
@@ -1564,6 +1656,14 @@ const hash3 = (x, y, z) => {
   return t - Math.floor(t);
 };
 const smoothT = (t) => t * t * (3 - 2 * t);
+const mix01 = (a, b, t) => a + (b - a) * t;
+
+// The spawn field's shape, fixed rather than exposed: these are the standard fBm numbers and
+// nothing here is improved by moving them. The dials that matter are scale, warp and the
+// threshold, which are in CONFIG.
+const FBM_OCTAVES = 6;
+const FBM_LACUNARITY = 2.0;
+const FBM_GAIN = 0.5;
 // Box-Muller, two at a time, with the spare kept for the next call.
 let gaussSpare = null;
 function gauss1() {
@@ -1572,6 +1672,31 @@ function gauss1() {
   const t = 2 * Math.PI * Math.random();
   gaussSpare = r * Math.sin(t);
   return r * Math.cos(t);
+}
+
+// fBm at the spec's numbers: six octaves, lacunarity 2, gain 0.5. Normalised by the sum of
+// the amplitudes so the result stays 0..1 whatever the octave count.
+function fbm3(x, y, z, octaves) {
+  let amp = 0.5, freq = 1, sum = 0, norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    sum += amp * valueNoise3(x * freq, y * freq, z * freq);
+    norm += amp;
+    freq *= FBM_LACUNARITY;
+    amp *= FBM_GAIN;
+  }
+  return sum / norm;
+}
+
+// The domain warp is what stops the field looking like noise. Displacing the lookup by
+// another fBm before reading it drags the level sets into torn, stringy, hooked shapes —
+// which is what a powder actually breaks into. Without it the same threshold gives round
+// blobs with round holes, and the edge fragments into dots rather than into specks and
+// filaments.
+function warpedFbm(x, y, z, warp) {
+  const wx = fbm3(x + 17.1, y + 3.7, z + 8.9, 4) - 0.5;
+  const wy = fbm3(x + 5.2, y + 41.3, z + 2.4, 4) - 0.5;
+  const wz = fbm3(x + 29.6, y + 13.8, z + 33.1, 4) - 0.5;
+  return fbm3(x + wx * warp, y + wy * warp, z + wz * warp, FBM_OCTAVES);
 }
 
 function valueNoise3(x, y, z) {
@@ -2585,13 +2710,22 @@ function buildParticles(count) {
       const covered = mapDepth > 0 ? 1 : 0;
       if (covered < CONFIG.brightnessThreshold || mapDepth < CONFIG.depthThreshold) continue;
 
-      // Then carve: rejection against a low-frequency noise field so motes clump and thin
-      // instead of covering evenly. The reference gets this from the photograph it
-      // samples; ours has to be put in by hand.
-      const k = CONFIG.shapeNoiseScale;
-      const d = valueNoise3(u * k + 11.3, w * k + 4.7, mapDepth * k + 19.1);
-      const accept = 1 - CONFIG.shapeNoise + CONFIG.shapeNoise * d * 2;
-      if (Math.random() < accept) break;
+      // Then the spawn mask, and it is a HARD threshold rather than a probability. That is
+      // the whole difference between a cloud that thins at its edge and one that fragments:
+      // a probabilistic accept keeps a few motes everywhere and the edge stays a gradient,
+      // where a threshold cuts the field along a contour and what survives outside the core
+      // is whatever isolated pockets of the field happen to clear it — discrete specks.
+      //
+      // The field is a domain-warped fBm multiplied by a radial falloff, so the threshold
+      // bites hardest where the falloff has already taken the density down. That is what
+      // makes it a dense clumped core dissolving into grains rather than holes punched
+      // evenly through the whole mass.
+      const k = CONFIG.fbmScale;
+      const fx = u * k + 11.3, fy = w * k + 4.7, fz = mapDepth * k + 19.1;
+      const field = warpedFbm(fx, fy, fz, CONFIG.fbmWarp);
+      const rx = (u - 0.5 - CONFIG.focusX), ry = (w - 0.5 + CONFIG.focusY);
+      const falloff = 1 - smoothT(Math.min(1, Math.hypot(rx, ry) / CONFIG.fbmReach));
+      if (field * mix01(1, falloff, CONFIG.fbmRadial) >= CONFIG.fbmThreshold) break;
     }
     // The map is an image: u runs left to right, w runs DOWN from the top, so the sign on
     // w is what puts the model the right way up in the world.
@@ -2897,9 +3031,14 @@ function buildParticles(count) {
   inst('aSimUv', simUv, 2);
   inst('aLifeSpan', lifeSpan, 1);
 
-  // Where the seat cloud sits and how big it is, for the radial crowding ramp. The median
-  // rather than the mean radius: the loose scatter reaches far and would set the scale for
-  // everything if the extremes were allowed a vote.
+  // Where the seat cloud sits and how big it is, for the radial crowding ramp.
+  //
+  // The NINETIETH percentile, not the median, and the difference is not cosmetic: this
+  // number is the denominator of a ramp that now drives ALPHA, and the throw is crowded
+  // toward the focus, so the median radius sits well inside the mass. Against the median,
+  // everything past about half the cloud's real extent fell outside the ramp, took zero
+  // alpha and was discarded — the visible cloud collapsed to a scatter of a few hundred
+  // grains while the population was untouched.
   let cx = 0, cy = 0;
   for (let i = 0; i < count; i++) { cx += initPos[i * 3]; cy += initPos[i * 3 + 1]; }
   cx /= count; cy /= count;
@@ -2912,7 +3051,7 @@ function buildParticles(count) {
   geo.userData.sim = {
     w: simW, h: simH, seedData,
     centre: new THREE.Vector3(cx, cy, 0),
-    radius: Math.max(1e-4, radii[Math.floor(count * 0.5)]),
+    radius: Math.max(1e-4, radii[Math.floor(count * 0.9)]),
   };
 
   // the cloud moves in the shader, so nothing can be culled off its rest bounds
@@ -3016,6 +3155,12 @@ const uniforms = {
   uScanGlow: { value: new THREE.Vector3(...CONFIG.scanGlow) },
   uColorOverlay: { value: new THREE.Vector3(
     CONFIG.colorOverlayR, CONFIG.colorOverlayG, CONFIG.colorOverlayB) },
+  uRampCore: { value: new THREE.Vector3(...CONFIG.rampCore) },
+  uRampMid: { value: new THREE.Vector3(...CONFIG.rampMid) },
+  uRampEdge: { value: new THREE.Vector3(...CONFIG.rampEdge) },
+  uRampMidAt: { value: CONFIG.rampMidAt },
+  uRampFringe: { value: CONFIG.rampFringe },
+  uAlphaGain: { value: CONFIG.alphaGain },
   uColorOverlayBlendMode: { value: CONFIG.colorOverlayBlendMode },
   uColorOverlayStrength: { value: CONFIG.colorOverlayStrength },
   uSaturation: { value: CONFIG.saturation },
@@ -3093,6 +3238,7 @@ function makeSim() {
       uLaunchSpeed: { value: CONFIG.launchSpeed * d.radius },
       uLaunchDecay: { value: CONFIG.launchDecay },
       uBurst: { value: CONFIG.launchBurst * d.radius },
+      uGravity: { value: CONFIG.simGravity },
       uCloudCentre: { value: d.centre.clone() },
     },
   });
@@ -3138,6 +3284,7 @@ function stepSim(dt) {
   u.uLaunchSpeed.value = CONFIG.launchSpeed * sim.radius;
   u.uLaunchDecay.value = CONFIG.launchDecay;
   u.uBurst.value = CONFIG.launchBurst * sim.radius;
+  u.uGravity.value = CONFIG.simGravity;
   sim.draw(sim.step, sim.b);
   const t = sim.a; sim.a = sim.b; sim.b = t;
   uniforms.tSimPos.value = sim.a.texture;
@@ -3546,24 +3693,33 @@ const uiEl = document.getElementById('pui');
 if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
-  // The hue bar turns the body colour without touching how saturated or how dark it is —
-  // those two are what the reference was matched on, and they should survive a hue hunt.
-  const baseCol = new THREE.Color(
-    CONFIG.colorOverlayR, CONFIG.colorOverlayG, CONFIG.colorOverlayB);
-  const baseHSL = { h: 0, s: 0, l: 0 };
-  baseCol.getHSL(baseHSL);
+  // The hue bar turns the whole ramp together, keeping each stop's own saturation and
+  // lightness. Rotating the three independently would pull the ramp apart — the point of it
+  // is that the core is deeper and the middle is warmer, and both of those are relationships
+  // between the stops rather than properties of any one.
+  const RAMP = ['rampCore', 'rampMid', 'rampEdge'];
+  const UNI = { rampCore: 'uRampCore', rampMid: 'uRampMid', rampEdge: 'uRampEdge' };
+  const baseHSL = {};
+  for (const k of RAMP) {
+    const hsl = { h: 0, s: 0, l: 0 };
+    new THREE.Color(...CONFIG[k]).getHSL(hsl);
+    baseHSL[k] = hsl;
+  }
+  const fmt = (a) => a.map((n) => n.toFixed(3)).join(', ');
 
   const ROWS = [
-    { key: 'hue', name: 'ink hue', cst: 'CONFIG.colorOverlayR/G/B',
-      min: 0, max: 1, step: 0.002, value: baseHSL.h,
+    { key: 'hue', name: 'ink hue', cst: 'CONFIG.rampCore / rampMid / rampEdge',
+      min: 0, max: 1, step: 0.002, value: baseHSL.rampCore.h,
       apply(v) {
-        const c = new THREE.Color().setHSL(v, baseHSL.s, baseHSL.l);
-        uniforms.uColorOverlay.value.set(c.r, c.g, c.b);
-        CONFIG.colorOverlayR = c.r; CONFIG.colorOverlayG = c.g; CONFIG.colorOverlayB = c.b;
+        const delta = v - baseHSL.rampCore.h;
+        for (const k of RAMP) {
+          const h = (baseHSL[k].h + delta + 1) % 1;
+          const c = new THREE.Color().setHSL(h, baseHSL[k].s, baseHSL[k].l);
+          CONFIG[k] = [c.r, c.g, c.b];
+          uniforms[UNI[k]].value.set(c.r, c.g, c.b);
+        }
       },
-      text: () => CONFIG.colorOverlayR.toFixed(3) + ', '
-                + CONFIG.colorOverlayG.toFixed(3) + ', '
-                + CONFIG.colorOverlayB.toFixed(3) },
+      text: () => RAMP.map((k) => '[' + fmt(CONFIG[k]) + ']').join('  ') },
     { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
       min: 10000, max: 300000, step: 10000, value: CONFIG.particleCount,
       rebuild: true, text: () => String(CONFIG.particleCount) },
