@@ -640,8 +640,10 @@ const CONFIG = {
   // How ragged the hole's rim is, and at what scale. The amount is a fraction of the radius,
   // so 0.3 means the rim wanders by about a third of it. Keep it modest: past ~0.5 the hole
   // stops reading as one opening and starts breaking into separate bites.
-  mouseNoise: 0.30,
-  mouseNoiseScale: 2.4,     // features per world unit along the rim
+  mouseNoise: 0.42,
+  mouseNoiseScale: 9.0,     // features per world unit along the rim. Read it against
+                            //   mouseRadius: this wants to give several lobes ACROSS the
+                            //   opening, not one
 
   mouseCurlBoost: 0.0,      // extra curl inside the push, as a multiple of the falloff.
                             //   Zero: this and expandCurlBoost between them made the cloud
@@ -892,6 +894,8 @@ const CONFIG = {
   // It costs one extra render target and three small fullscreen passes. The particles are
   // still rendered ONCE: the shadow and the cloud are two composites of the same target.
   shadow: true,             // ?shadow=0 turns it off
+  shadowOnly: false,        // ?shadowonly=1 — the shadow with the cloud held back, for
+                            //   telling "not there" apart from "too faint"
   shadowStrength: 0.55,     // how dark the shadow gets where the cloud is solid
   shadowColor: [0.30, 0.20, 0.19],  // warm, not neutral. A grey shadow on a warm plaster
                                     //   wall reads as dirt; a shadow keeps the surface's hue
@@ -1003,6 +1007,9 @@ if (PARAMS.get('bg') === '1') {
 if (numParam('strand', 0, 1) !== null) CONFIG.strandFraction = numParam('strand', 0, 1);
 if (PARAMS.get('bloom') === '0') CONFIG.bloom = false;
 if (PARAMS.get('shadow') === '0') CONFIG.shadow = false;
+// ?shadowonly=1 draws the shadow WITHOUT the cloud over it, which is the quickest way to
+// settle whether a shadow that cannot be seen is absent or merely too faint.
+if (PARAMS.get('shadowonly') === '1') CONFIG.shadowOnly = true;
 if (numParam('sh', 0, 3) !== null) CONFIG.shadowStrength = numParam('sh', 0, 3);
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
 
@@ -1442,7 +1449,14 @@ void main(){
     // the mote's own POSITION makes neighbours agree with each other instead, and that
     // agreement is what turns a fuzzy edge into a ragged one. Drifting in its own z so the
     // ragged edge crawls rather than sitting still.
-    float wob = snoise3dDeriv(pos * uMouseNoiseScale + vec3(0.0, 0.0, uTime * 0.15)).w;
+    // TWO octaves, and the frequency matters more than the amount. At one feature across
+    // the whole opening the noise does not roughen the rim, it just makes the circle
+    // lopsided — still plainly a circle, only off-centre. The rim needs several lobes around
+    // it before the eye stops completing the shape, and a finer octave on top of those to
+    // break the lobes themselves.
+    vec3 np = pos * uMouseNoiseScale + vec3(0.0, 0.0, uTime * 0.15);
+    float wob = snoise3dDeriv(np).w
+              + snoise3dDeriv(np * 2.7 + vec3(31.0, 7.0, 19.0)).w * 0.5;
     float mr = uMouseRadius
              * max(0.05, 1.0 + (aShape - 0.5) * 2.0 * uMouseEdgeBlur + wob * uMouseNoise);
     if (distToRay < mr) {
@@ -3609,6 +3623,14 @@ let shadowChain = null;
 
 function renderShadowed() {
   const c = shadowChain;
+
+  // autoClear OFF for the whole pass, and this is not housekeeping — it is the thing that
+  // makes the shadow exist. render() clears its target first by default, so the second of the
+  // two composites below wiped the canvas and took the shadow with it: the cloud was drawn
+  // over a blank frame every time and the shadow was never on screen for a moment.
+  const prevAutoClear = renderer.autoClear;
+  renderer.autoClear = false;
+
   const pass = (material, target) => {
     c.quad.material = material;
     renderer.setRenderTarget(target);
@@ -3640,9 +3662,13 @@ function renderShadowed() {
   c.draw.uniforms.uStrength.value = CONFIG.shadowStrength;
   c.quad.material = c.draw;
   renderer.render(c.fsScene, c.fsCam);
-  c.blit.uniforms.tSrc.value = c.scene.texture;
-  c.quad.material = c.blit;
-  renderer.render(c.fsScene, c.fsCam);
+  if (!CONFIG.shadowOnly) {
+    c.blit.uniforms.tSrc.value = c.scene.texture;
+    c.quad.material = c.blit;
+    renderer.render(c.fsScene, c.fsCam);
+  }
+
+  renderer.autoClear = prevAutoClear;
 }
 
 // One Euler step, then swap. The dt is the motes' own clock, so CONFIG.speed still scales
