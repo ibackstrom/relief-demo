@@ -426,6 +426,19 @@ const CONFIG = {
   // agree with it — the anchor, the seed's quadrant and the origin the hover blooms about —
   // is derived from this one string rather than set three times.
   corner: 'tr',
+
+  // Where the mass actually sits, and how big it is on screen. All three are applied to the
+  // GROUP, so they are instant — no seats are re-thrown — and they scale the motion with the
+  // mass, which is what keeps the look identical at any size.
+  //
+  // They exist as offsets rather than as a corrected anchor because the anchor is not what
+  // was wrong: the seeds sit exactly on the corner and it is DIFFUSION that carries the
+  // visible mass inward off it. Nudging the group back out is the honest correction for
+  // that, and it is easier to set by eye than to derive.
+  offsetX: 0.16,            // viewport heights, positive toward the corner's own side
+  offsetY: 0.18,
+  massScale: 1.30,          // on-screen size of the whole thing, motion included
+
   anchorX: 1.00,
   anchorY: 0.97,
   anchorZ: 0.0,
@@ -946,7 +959,9 @@ if (numParam('blob', 0, 1) !== null) CONFIG.blob = numParam('blob', 0, 1);
 if (numParam('life', 0, 1) !== null) CONFIG.lifeFraction = numParam('life', 0, 1);
 if (numParam('speed', 0, 3) !== null) CONFIG.speed = numParam('speed', 0, 3);
 if (numParam('gs', 0.02, 0.8) !== null) CONFIG.bloomRadius = numParam('gs', 0.02, 0.8);
-if (numParam('scale', 0.1, 4) !== null) CONFIG.scale = numParam('scale', 0.1, 4);
+if (numParam('scale', 0.1, 4) !== null) CONFIG.massScale = numParam('scale', 0.1, 4);
+if (numParam('x', -0.8, 1.2) !== null) CONFIG.offsetX = numParam('x', -0.8, 1.2);
+if (numParam('y', -0.8, 1.2) !== null) CONFIG.offsetY = numParam('y', -0.8, 1.2);
 if (numParam('pos', 0, 1) !== null) CONFIG.position = numParam('pos', 0, 1);
 if (numParam('react', 0, 2) !== null) CONFIG.expandAmount = numParam('react', 0, 2);
 if (numParam('blur', 0, 1) !== null) CONFIG.mouseEdgeBlur = numParam('blur', 0, 1);
@@ -3741,8 +3756,13 @@ function place() {
   const vh = viewHeightAt(CONFIG.anchorZ);
   const vw = vh * camera.aspect;
   const cs = cornerSigns();
-  group.position.set(cs.x * Math.abs(CONFIG.anchorX) * vw * 0.5,
-                     cs.y * Math.abs(CONFIG.anchorY) * vh * 0.5, CONFIG.anchorZ);
+  // Scale first: uExpandOrigin below is converted with worldToLocal, which reads it.
+  group.scale.setScalar(CONFIG.massScale);
+  group.position.set(
+    cs.x * (Math.abs(CONFIG.anchorX) * vw * 0.5 + CONFIG.offsetX * vh),
+    cs.y * (Math.abs(CONFIG.anchorY) * vh * 0.5 + CONFIG.offsetY * vh),
+    CONFIG.anchorZ);
+  group.updateMatrixWorld();
   // the cursor's reach is given as a fraction of the frame; convert it here, where the
   // world height of the frame is known, so it survives a resize
   uniforms.uMouseRadius.value = CONFIG.mouseRadius * vh;
@@ -3978,6 +3998,15 @@ if (uiEl && PARAMS.get('ui') === '0') {
     { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
       min: 50000, max: 900000, step: 50000, value: CONFIG.particleCount,
       rebuild: true, round: true, text: () => String(CONFIG.particleCount) },
+    { key: 'massScale', name: 'scale', cst: 'CONFIG.massScale',
+      min: 0.2, max: 4, step: 0.02, value: CONFIG.massScale,
+      place: true, text: () => CONFIG.massScale.toFixed(2) },
+    { key: 'offsetX', name: 'x', cst: 'CONFIG.offsetX',
+      min: -0.5, max: 0.8, step: 0.005, value: CONFIG.offsetX,
+      place: true, text: () => CONFIG.offsetX.toFixed(3) },
+    { key: 'offsetY', name: 'y', cst: 'CONFIG.offsetY',
+      min: -0.5, max: 0.8, step: 0.005, value: CONFIG.offsetY,
+      place: true, text: () => CONFIG.offsetY.toFixed(3) },
     { key: 'hue', name: 'hue', cst: 'CONFIG.ramp',
       min: 0, max: 1, step: 0.002, value: inkHSL.h,
       apply(v) { inkHSL.h = v; applyInk(); }, text: inkText },
@@ -4006,6 +4035,9 @@ if (uiEl && PARAMS.get('ui') === '0') {
       const v = parseFloat(slider.value);
       if (r.apply) r.apply(v); else CONFIG[r.key] = r.round ? Math.round(v) : v;
       if (r.uni) uniforms[r.uni].value = CONFIG[r.key];
+      // Placement and size are group transforms, so they only need place() re-run — the
+      // seats and the simulation buffers are untouched.
+      if (r.place) place();
       // Silhouette and flow are cut into the SEATS, so they need the population re-thrown
       // exactly as a change of quantity does.
       if (r.rebuild) rebuildCloud(CONFIG.particleCount);
