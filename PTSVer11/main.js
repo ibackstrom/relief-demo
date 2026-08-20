@@ -31,7 +31,7 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 200000,     // far fewer than ver6's 60000, and the model is why: this one
+  particleCount: 80000,     // far fewer than ver6's 60000, and the model is why: this one
                             //   covers under a third of its own box, so the same count
                             //   lands three times as densely and the ribbons fill in
                             //   solid. The drawing only reads while its motes are still
@@ -398,13 +398,13 @@ const CONFIG = {
   // small numbers, so the buffer keeps its precision where it is needed — and on a device
   // that will only give us half floats, an absolute position's smallest representable step
   // is larger than one frame's movement and the cloud would simply never start.
-  simSpeed: 0.052,          // the field's strength, as a fraction of the mass radius per
+  simSpeed: 0.085,          // the field's strength, as a fraction of the mass radius per
                             //   second, so a resize does not change the pace. The reference
                             //   carries its motes at 3.0-3.5% of the mass radius per second;
                             //   this sits above that because the curl's own magnitude is
                             //   folded in on top, and because at a third of the reference's
                             //   size its exact rate reads as a still picture
-  simLife: 5.0,             // seconds from birth at the seat to death. With simSpeed this
+  simLife: 6.5,             // seconds from birth at the seat to death. With simSpeed this
                             //   sets how far the cloud spreads before it stops, because the
                             //   envelope is as far as a particle gets in one life
   simLifeSpread: 0.85,      // +/- fraction on that lifespan, drawn per particle. Without it
@@ -422,7 +422,9 @@ const CONFIG = {
   simFieldSpeed: 0.53,      // how fast the field itself changes, from the reference's
                             //   1.5-second coherence. Too high and the filaments never get
                             //   long enough to fold before the field that drew them is gone
-  simDivergence: 1.0,       // the spreading half of the field — see curlNoise
+  simDivergence: 0.75,      // the spreading half of the field — see curlNoise. Held under 1
+                            //   so the field turns more than it spreads: the first clip's
+                            //   look is curling ink, not a burst opening out
   simFine: 0.55,            // weight of a second octave at 3.1x the frequency. The large
                             //   octave makes the lobes, this one the hairs inside them
 
@@ -430,7 +432,7 @@ const CONFIG = {
   // radius so a resize does not have to re-derive them.
   launchDirX: -0.84,        // left and down, normalised in the shader. The reference's mass
   launchDirY: -0.54,        //   slides 125 px left and 72 px down over its eight seconds
-  launchBurst: 0.72,        // outward from the cloud's centre, per second, at birth. This is
+  launchBurst: 0.26,        // outward from the cloud's centre, per second, at birth. This is
                             //   the dial that sets how far the cloud opens: the reference's
                             //   radius doubles, growing 36% of itself per second at half a
                             //   second and asymptotically slower after.
@@ -486,7 +488,11 @@ const CONFIG = {
   // spread rather than a line. 0 is the old hard circle.
   mouseEdgeBlur: 0.6,
 
-  mouseCurlBoost: 1.4,      // extra curl inside the push, as a multiple of the falloff.
+  mouseCurlBoost: 0.0,      // extra curl inside the push, as a multiple of the falloff.
+                            //   Zero: this and expandCurlBoost between them made the cloud
+                            //   visibly change PACE under the pointer, which reads as the
+                            //   effect being startled. The cursor may open a hole and grow
+                            //   the mass; it may not run the clock faster.
                             //   Keep it low — it scatters motes back into the hole the
                             //   push just made, and over ~3 it closes it completely.
 
@@ -537,7 +543,7 @@ const CONFIG = {
   fillDirX: 0.55,           // the bounce light, opposite the key and below it
   fillDirY: -0.55,
   fillDirZ: 0.30,
-  fill: 0.16,               // strength. Past ~0.5 it starts to read as a second key and
+  fill: 0.10,               // strength. Past ~0.5 it starts to read as a second key and
                             //   the form goes ambiguous.
   fillColorR: 0.42,         // cool, to sit against the warm key — the contrast between
   fillColorG: 0.52,         //   the two is doing the work, not either one alone
@@ -598,16 +604,16 @@ const CONFIG = {
   // on RGB(78, 19, 13) — a brick, not a signal red, and warm, with green consistently above
   // blue. The build's own red was a pure hue at high saturation, which came out pink where
   // the reference is earthy.
-  // Read off the reference: its thick ink lands on RGB(135, 69, 71) and its deepest folds
-  // on RGB(74, 20, 23) — a wine red, and NOT a warm one. Blue sits a shade above green all
-  // the way through, where the earlier clip had it a shade below; that one difference is
-  // most of what separates this crimson from a terracotta.
+  // The FIRST reference's palette: thick ink on RGB(135, 69, 62), deepest folds on
+  // RGB(78, 19, 13). Warm — green a shade above blue, which is what makes it a terracotta
+  // rather than the second clip's wine red. The colour bar rotates the HUE of this and
+  // leaves its saturation and value alone.
   colorOverlayR: 0.66,
-  colorOverlayG: 0.175,
-  colorOverlayB: 0.160,
+  colorOverlayG: 0.200,
+  colorOverlayB: 0.145,
   colorOverlayBlendMode: 0,
   colorOverlayStrength: 1.0,
-  saturation: 1.45,
+  saturation: 1.35,
   contrast: 1.10,
   brightness: 0.94,
   minBrightness: 0.0,
@@ -660,19 +666,21 @@ const CONFIG = {
   groundR: 0.748,
   groundG: 0.748,
   groundB: 0.748,
-  ground: 0.55,             // how far the loneliest motes are taken toward it. 0 is ver8's
+  ground: 0.18,             // how far the loneliest motes are taken toward it. 0 is ver8's
                             //   cloud exactly; 1 makes them the wall and they disappear.
-                            //   Pulled back with the bloom: a cloud that now covers twice
-                            //   the area has far more of itself out at the fringe, so the
-                            //   same setting takes a much larger share of the mass to the
-                            //   wall than it did on the tight one
+                            //   Low now, and the reason is that the bloom changed what this
+                            //   number means: on the tight cloud only the outlying scatter
+                            //   was ever counted as fringe, where a bloomed mass has most of
+                            //   itself out there. At 0.55 the whole cloud was being taken
+                            //   most of the way to the wall and read as a white veil laid
+                            //   over the ink rather than as an edge that dissolves
   groundBias: 2.5,          // curve on (1 - crowding), and it needs to be well above 1.
                             //   The crowding histogram is bimodal — half the population
                             //   sits under 0.15 and a quarter is at 0.94 or more — so at a
                             //   gentle curve the median mote still blends most of the way
                             //   and the whole mass goes to a smudge with its grain gone.
                             //   Each step up pulls the blend back onto the outliers
-  groundFade: 0.15,         // alpha those same motes also lose. Colour alone leaves the
+  groundFade: 0.06,         // alpha those same motes also lose. Colour alone leaves the
                             //   fringe as pale but still solid discs, which reads as a
                             //   second, grey cloud around the red one — this is what turns
                             //   the edge into a fade rather than a change of paint. Small:
@@ -722,9 +730,9 @@ const CONFIG = {
   // should. The plateau has to cover the resting cloud's own extent.
   expandHoverInner: 0.063,
   expandHoverRadius: 0.120,
-  expandSeconds: 0.55,      // ease in/out. Slower than the ray push on purpose: the
+  expandSeconds: 1.60,      // ease in/out. Slower than the ray push on purpose: the
                             //   growth is the slow gesture, the hole is the quick one.
-  expandCurlBoost: 0.8,     // extra curl while expanded, as a multiple of curlAmplitude.
+  expandCurlBoost: 0.0,     // extra curl while expanded, as a multiple of curlAmplitude.
                             //   Without it the cloud grows but goes strangely still.
 };
 
@@ -1086,7 +1094,6 @@ attribute float aSize;
 attribute float aTimeOffset;
 attribute float aBrightness;
 attribute float aCurlResp;       // 0 or 1
-attribute float aDensity;        // 0..1, how crowded this mote's neighbourhood is
 attribute vec2  aSimUv;          // this particle's own texel in the simulation buffer
 attribute float aLifeSpan;       // its own birth-to-death, seconds — matches tSeed.w
 attribute float aShape;          // 0..1, the seed for this mote's outline
@@ -2844,45 +2851,11 @@ function buildParticles(count) {
   absZ.sort();
   seatHalfDepth = Math.max(1e-3, absZ[Math.floor(count * 0.97)]);
 
-  // ---- crowding ------------------------------------------------------------
-  // Each mote's neighbours within densityRadius, counted through a uniform grid: bucket
-  // every mote by cell, then look only at the 27 cells around it. Naively this is a
-  // pairwise scan — 900 million comparisons at 30k motes — where the grid makes it linear
-  // in the population and finishes in a few milliseconds, once, at build time.
-  const density = new Float32Array(count);
-  {
-    const R = CONFIG.densityRadius * CONFIG.scale * viewHeightAt(CONFIG.anchorZ);
-    const R2 = R * R;
-    const buckets = new Map();
-    const cellOf = (v) => Math.floor(v / R);
-    const keyOf = (a, b, c) => a + ':' + b + ':' + c;
-    for (let i = 0; i < count; i++) {
-      const k = keyOf(cellOf(initPos[i * 3]), cellOf(initPos[i * 3 + 1]), cellOf(initPos[i * 3 + 2]));
-      const b = buckets.get(k);
-      if (b) b.push(i); else buckets.set(k, [i]);
-    }
-    const raw = new Float32Array(count);
-    for (let i = 0; i < count; i++) {
-      const x = initPos[i * 3], y = initPos[i * 3 + 1], z = initPos[i * 3 + 2];
-      const gx = cellOf(x), gy = cellOf(y), gz = cellOf(z);
-      let n = 0;
-      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
-        const list = buckets.get(keyOf(gx + a, gy + b, gz + c));
-        if (!list) continue;
-        for (let j = 0; j < list.length; j++) {
-          const o = list[j] * 3;
-          const dx = initPos[o] - x, dy = initPos[o + 1] - y, dz = initPos[o + 2] - z;
-          if (dx * dx + dy * dy + dz * dz < R2) n++;
-        }
-      }
-      raw[i] = n - 1;                       // a mote is not its own neighbour
-    }
-    // Normalise against the 97th percentile rather than the maximum: one freak cluster
-    // would otherwise set the scale and flatten the effect everywhere else.
-    const sorted = Float32Array.from(raw).sort();
-    const ref = Math.max(1, sorted[Math.floor(count * 0.97)]);
-    for (let i = 0; i < count; i++) density[i] = Math.min(1, raw[i] / ref);
-  }
+  // The per-mote neighbour count that used to live here is gone. It was an O(n) grid scan
+  // over the whole population at load, and it was the slowest thing the build ever did — but
+  // once positions became simulation state nothing read it: crowding is measured radially on
+  // the CARRIED position now, in the vertex shader, because a seat's neighbour count says
+  // only where a particle started.
 
   const inst = (name, arr, size) =>
     geo.setAttribute(name, new THREE.InstancedBufferAttribute(arr, size));
@@ -2893,7 +2866,6 @@ function buildParticles(count) {
   inst('aTimeOffset', timeOffs, 1);
   inst('aBrightness', brights, 1);
   inst('aCurlResp', curlResp, 1);
-  inst('aDensity', density, 1);
   inst('aShape', shapes, 1);
   inst('aLife', lives, 1);
   inst('aOutward', outward, 1);
@@ -2951,14 +2923,14 @@ function buildParticles(count) {
   // EVERY per-mote attribute has to be listed here, not just the ones the sort reads.
   // Whatever is left out keeps its creation order while the rest are permuted, so a mote
   // ends up drawn with another mote's value — and because the sort reruns every fourth
-  // frame, the mismatch changes as the cloud turns. aDensity and aShape are here for that
-  // reason, not because the sort has any interest in them.
+  // frame, the mismatch changes as the cloud turns. aShape is here for that reason, not
+  // because the sort has any interest in it.
   geo.userData.src = {
     aInitPos: initPos.slice(), aDriftDir: driftDir.slice(),
     aDriftSpeed: driftSpeed.slice(), aSize: sizes.slice(),
     aTimeOffset: timeOffs.slice(),
     aBrightness: brights.slice(), aCurlResp: curlResp.slice(),
-    aDensity: density.slice(), aShape: shapes.slice(),
+    aShape: shapes.slice(),
     aLife: lives.slice(), aOutward: outward.slice(),
   };
   geo.userData.order = new Int32Array(count).map((_, i) => i);
@@ -3508,6 +3480,21 @@ resize();
 // The buffers are particle-space, so this is built once and never touched by a resize.
 sim = makeSim();
 
+// Re-throw the population at a new count. Everything downstream of the seats has to go with
+// them: the geometry carries the seats, and the simulation's textures are one texel per
+// particle, so neither survives a change of population.
+function rebuildCloud(count) {
+  CONFIG.particleCount = count;
+  group.remove(mesh);
+  mesh.geometry.dispose();
+  if (sim) { sim.a.dispose(); sim.b.dispose(); }
+  mesh = new THREE.Mesh(buildParticles(count), material);
+  mesh.frustumCulled = false;
+  group.add(mesh);
+  sim = makeSim();
+  place();
+}
+
 // ---------------------------------------------------------------- loop
 const clock = new THREE.Clock();
 let elapsed = 0;
@@ -3547,3 +3534,59 @@ function tick() {
   if (firstFrame) { firstFrame = false; dismissLoading(); }
 }
 tick();
+
+// ---------------------------------------------------------------- panel
+// Two controls, both for look-dev rather than for the shipped build: QUANTITY, and the ink's
+// HUE. Each prints the value to write into CONFIG once it is settled. ?ui=0 hides the panel.
+//
+// Quantity rebuilds — the population is baked into the geometry and into the simulation's
+// textures, so it cannot be a uniform. That makes it the one control with a cost, which is
+// why it is a bar and not a live drag: the seats are re-thrown and the buffers re-made.
+const uiEl = document.getElementById('pui');
+if (uiEl && PARAMS.get('ui') === '0') {
+  uiEl.remove();
+} else if (uiEl) {
+  // The hue bar turns the body colour without touching how saturated or how dark it is —
+  // those two are what the reference was matched on, and they should survive a hue hunt.
+  const baseCol = new THREE.Color(
+    CONFIG.colorOverlayR, CONFIG.colorOverlayG, CONFIG.colorOverlayB);
+  const baseHSL = { h: 0, s: 0, l: 0 };
+  baseCol.getHSL(baseHSL);
+
+  const ROWS = [
+    { key: 'hue', name: 'ink hue', cst: 'CONFIG.colorOverlayR/G/B',
+      min: 0, max: 1, step: 0.002, value: baseHSL.h,
+      apply(v) {
+        const c = new THREE.Color().setHSL(v, baseHSL.s, baseHSL.l);
+        uniforms.uColorOverlay.value.set(c.r, c.g, c.b);
+        CONFIG.colorOverlayR = c.r; CONFIG.colorOverlayG = c.g; CONFIG.colorOverlayB = c.b;
+      },
+      text: () => CONFIG.colorOverlayR.toFixed(3) + ', '
+                + CONFIG.colorOverlayG.toFixed(3) + ', '
+                + CONFIG.colorOverlayB.toFixed(3) },
+    { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
+      min: 10000, max: 300000, step: 10000, value: CONFIG.particleCount,
+      rebuild: true, text: () => String(CONFIG.particleCount) },
+  ];
+
+  uiEl.innerHTML = '<h2>particle cloud</h2>' + ROWS.map((r, i) =>
+    '<div class="row"><div class="lbl">'
+    + '<span class="name">' + r.name + '</span>'
+    + '<span class="val" id="pv' + i + '">' + r.text() + '</span></div>'
+    + '<span class="cst">' + r.cst + '</span>'
+    + '<input type="range" id="pr' + i + '" min="' + r.min + '" max="' + r.max + '"'
+    + ' step="' + r.step + '" value="' + r.value + '"></div>'
+  ).join('') + '<div class="foot">?ui=0 hides this</div>';
+
+  ROWS.forEach((r, i) => {
+    const slider = document.getElementById('pr' + i);
+    // Rebuilds fire on release, not on every pixel of the drag: re-throwing a quarter of a
+    // million seats per input event locks the page up.
+    slider.addEventListener(r.rebuild ? 'change' : 'input', () => {
+      const v = parseFloat(slider.value);
+      if (r.apply) r.apply(v); else CONFIG[r.key] = v;
+      if (r.rebuild) rebuildCloud(Math.round(v));
+      document.getElementById('pv' + i).textContent = r.text();
+    });
+  });
+}
