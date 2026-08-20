@@ -31,7 +31,7 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 140000,     // far fewer than ver6's 60000, and the model is why: this one
+  particleCount: 260000,     // far fewer than ver6's 60000, and the model is why: this one
                             //   covers under a third of its own box, so the same count
                             //   lands three times as densely and the ribbons fill in
                             //   solid. The drawing only reads while its motes are still
@@ -42,7 +42,7 @@ const CONFIG = {
   // down past about a pixel does not make finer grains, it makes invisible ones. At 0.62
   // with sizeMax 3.2 the whole population went sub-pixel and the drawn pixels fell a
   // hundredfold — the cloud read as a speck.
-  particleSize: 1.85,        // sphere diameter, world units, before the per-mote multiplier
+  particleSize: 1.55,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
   // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
@@ -52,7 +52,10 @@ const CONFIG = {
   // A biased tail decouples the two: most motes stay small while a few reach right out to
   // sizeMax. That is what puts small and large side by side rather than sorting them.
   sizeMin: 0.30,
-  sizeMax: 4.0,
+  // The tail is what was making gravel. At 4.0 the largest grains landed near six pixels
+  // before the stretch widened them again, and a scatter of six-pixel discs reads as
+  // confetti however fine the mean is. 2.4 puts the mean near 0.9 px and the tail at 3.
+  sizeMax: 2.4,
   sizeBias: 4.0,            // 1 is uniform; each step up crowds the population toward
                             //   sizeMin while leaving the top of the range where it is
 
@@ -126,7 +129,7 @@ const CONFIG = {
   // as a tight lump: it is a power on the radius of every throw, so at 2.4 almost the whole
   // population was landing within a fraction of the focus and no amount of field travel could
   // separate them afterwards. The filaments need room before they need anything else.
-  focusDensity: 0.9,        // ver8 raises this again: the label wants a clear peak under
+  focusDensity: 0.5,        // ver8 raises this again: the label wants a clear peak under
                             //   it and a proportional fall away from it. Too high and the
                             //   drawing vanishes under a single hot spot
 
@@ -144,10 +147,10 @@ const CONFIG = {
   // a circle, which is what a blob is.
   flowAngle: 196,           // degrees, the throw axis: which way the pigment was dragged.
                             //   196 runs left and slightly down from the corner
-  silhouette: 3.0,          // long-to-across ratio of the streak. 1 is a circle
-  streakTaper: 0.38,        // how fast the trailing end thins out, in plane widths. Small
+  silhouette: 3.4,          // long-to-across ratio of the streak. 1 is a circle
+  streakTaper: 0.95,        // how fast the trailing end thins out, in plane widths. Small
                             //   is an abrupt stub, large is a long dissolving tail
-  streakHead: 0.06,         // how far the dense end reaches PAST the focus toward the
+  streakHead: 0.10,         // how far the dense end reaches PAST the focus toward the
                             //   corner, so the mass stays anchored there rather than
                             //   floating off it
 
@@ -155,7 +158,7 @@ const CONFIG = {
   // Where a grain is allowed to exist. A domain-warped fBm density field, thresholded hard:
   // six octaves, lacunarity 2, gain 0.5 (fixed, up by FBM_OCTAVES). The threshold is what
   // fragments the edge into separate specks instead of fading it out.
-  fbmScale: 4.2,            // features per plane width. Higher is a finer break-up
+  fbmScale: 5.5,            // features per plane width. Higher is a finer break-up
   fbmWarp: 0.55,            // how far the domain is dragged before the field is read. 0 is
                             //   plain fBm and gives round blobs with round holes; this is
                             //   what makes the survivors stringy and hooked
@@ -178,7 +181,7 @@ const CONFIG = {
   // specks. The dot spacing widens smoothly with distance because the threshold does.
   dissolveScale: 9.0,       // frequency of the deciding noise, relative to fbmScale. This is
                             //   the size of the speckle in the halo
-  dissolveGain: 1.55,       // how quickly the threshold relaxes as the macro density rises.
+  dissolveGain: 1.10,       // how quickly the threshold relaxes as the macro density rises.
                             //   High makes the core solid and the transition narrow
 
   fbmRadial: 0.30,          // how much the radial falloff multiplies into the field before
@@ -193,7 +196,12 @@ const CONFIG = {
   // measured against, and the macro density is what the dissolve threshold tracks — leave it
   // large and the macro reads as 1 everywhere, the threshold never rises, and there is no
   // transition band and no speckle halo at all, just a hard-edged lump.
-  fbmReach: 0.75,           // radius of that falloff, in plane widths. It has to sit well
+  // These three are one shape and have to be read together, in map units. The streak's ACROSS
+  // half-width is fbmReach / silhouette, and its ALONG half-length is streakTaper. Set the
+  // taper to anything near the across-width and the mass comes out square however high the
+  // silhouette ratio is — which is exactly what happened at taper 0.38 against an across-width
+  // of 0.22: a 3.4:1 stretch that measured 1.7:1 on screen.
+  fbmReach: 1.10,           // radius of that falloff, in plane widths. It has to sit well
                             //   OUTSIDE the mass, not on it: the seats' own median radius is
                             //   about 0.39 plane widths, and at 0.62 the falloff was already
                             //   down to a third there, so the threshold was killing the body
@@ -368,7 +376,7 @@ const CONFIG = {
   // Bigger, because spreading alone could not show the pattern: the plane is centred on the
   // screen corner, so most of a small cloud's expansion goes off-frame and what is left on
   // screen only gets thinner. Size and placement have to move together with the spread.
-  scale: 3.20,
+  scale: 5.20,
 
   // How far the drawing sits from the corner, in plane widths and heights. The plane is
   // centred on the group's origin and the origin is the screen corner, so 0 puts three
@@ -378,7 +386,7 @@ const CONFIG = {
   // Far enough in that the plane is mostly ON screen. The plane is centred on the group
   // origin and the origin is the screen corner, so at 0.15 roughly three quarters of it sat
   // outside the frame and every grain the field carried outward was carried out of sight.
-  position: 0.400,
+  position: 0.300,
 
   // ------------------------------------------------------------ the box the model fits
   // The rasterised plane is scaled to fit inside this box, keeping the model's
@@ -400,9 +408,12 @@ const CONFIG = {
   // CLOCK the motes are read from rather than any one of their speeds, so their motion stays
   // in proportion however fast it runs. The cloud's own sway is deliberately not included:
   // that is the camera's relationship to the volume, not the particles' own life.
-  speed: 1.00,              // The pace lives in simSpeed now — this scales the clock the
+  speed: 0.55,              // The pace lives in simSpeed now — this scales the clock the
                             //   simulation is stepped with, and 1 means one second of the
-                            //   cloud's life per second of the page's.
+                            //   cloud's life per second of the page's. Under 1 here because
+                            //   the motion was asked for slower: it scales the whole clock,
+                            //   so the drift, the bloom and the birth-to-death all slow
+                            //   together and the character of the motion survives it.
 
   // ------------------------------------------------------------ parallax
   // A slow sway of the whole volume. With a fixed camera this is the only thing that
@@ -479,7 +490,7 @@ const CONFIG = {
   // small numbers, so the buffer keeps its precision where it is needed — and on a device
   // that will only give us half floats, an absolute position's smallest representable step
   // is larger than one frame's movement and the cloud would simply never start.
-  simSpeed: 0.075,          // the field's strength, as a fraction of the mass radius per
+  simSpeed: 0.042,          // the field's strength, as a fraction of the mass radius per
                             //   second, so a resize does not change the pace. The reference
                             //   carries its motes at 3.0-3.5% of the mass radius per second;
                             //   this sits above that because the curl's own magnitude is
@@ -611,10 +622,13 @@ const CONFIG = {
   specular: 0.04,           // highlight strength. Low on purpose: on motes this small
                             //   a hot glint is the first thing that aliases, and it reads
                             //   as glitter rather than as gloss.
-  grainStretch: 1.55,       // how far a grain is drawn out along the throw axis. 1 is a
+  grainStretch: 1.90,       // how far a grain is drawn out along the throw axis. 1 is a
                             //   circle. This is motion blur standing in for a shutter, so
                             //   it wants to be small — past ~2 they read as dashes
-  minPx: 1.3,               // smallest footprint a mote is drawn at, in device pixels.
+  minPx: 0.9,               // smallest footprint a mote is drawn at, in device pixels.
+                            //   Lowered with the grain: the guard inflates anything under
+                            //   it, so leaving it at 1.3 would have quietly undone the size
+                            //   reduction and taken the alpha with it.
                             //   Under 1 they blink; much over 2 the fine spray blurs.
   specMinPx: 3.0,           // below this on-screen diameter the highlight is switched off
   specFullPx: 9.0,          //   and above it runs at full strength. A tight glint on a
@@ -721,23 +735,27 @@ const CONFIG = {
   // Fringe first, core last. These multiply the shading, so they are the pigment's own
   // colour rather than what lands on screen — thin them over a cream page and the peach end
   // is almost nothing.
+  // Lifted and desaturated across the whole ramp. The target is a thin dusting of pigment
+  // on cream paper with the engraving showing through it, so even the packed core is a
+  // muted brick rather than a signal red — at [0.34, 0.03, 0.02] the core came out pure
+  // scarlet the moment the grains overlapped at all.
   ramp: [
-    [1.00, 0.660, 0.570],   // faint peach
-    [0.95, 0.470, 0.385],   // dusty salmon
-    [0.86, 0.300, 0.220],   // coral
-    [0.62, 0.145, 0.095],   // terracotta
-    [0.34, 0.030, 0.024],   // dark brick
+    [0.97, 0.800, 0.760],   // faint peach
+    [0.92, 0.620, 0.575],   // dusty salmon
+    [0.84, 0.455, 0.415],   // coral
+    [0.70, 0.295, 0.255],   // terracotta
+    [0.52, 0.155, 0.135],   // muted brick
   ],
   rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish
-  alphaGain: 3.20,          // overall presence against the page, applied last. The bloom used
+  alphaGain: 1.55,          // overall presence against the page, applied last. The bloom used
                             //   to provide this as a side effect of lifting the canvas alpha
 
   saturation: 1.35,
   contrast: 1.10,
   brightness: 0.94,
   minBrightness: 0.0,
-  opacity: 0.88,            // overall alpha of the field. Up from 0.72 with the bloom: the
+  opacity: 0.72,            // overall alpha of the field. Up from 0.72 with the bloom: the
                             //   same motes spread over twice the area stack less deeply, so
                             //   the mass came out a good deal paler than the reference's —
                             //   thick ink at RGB(150, 87, 87) against its (135, 69, 71)
@@ -2703,8 +2721,17 @@ function buildParticles(count) {
       // then undo the offset every seat gets, landing in the same units as focusX/focusY
       const cornerX = CONFIG.anchorX * vh * camera.aspect * 0.5;
       const cornerY = CONFIG.anchorY * vh * 0.5;
-      CONFIG.focusX = (wx - cornerX) / planeW + CONFIG.position;
-      CONFIG.focusY = (wy - cornerY) / planeH + CONFIG.position;
+      // Clamped into the map, and this is not defensive tidying. These are offsets in MAP
+      // space, where the throw is drawn as u = ox / planeW + 0.5 + focusX and u must land in
+      // 0..1 — so a focus past about 0.45 puts the whole draw off the map, every throw fails
+      // its placement retry, and the population falls back to a uniform scatter that the mask
+      // then rejects. The visible result is a cloud that gets SMALLER as the scale is raised,
+      // which is what sent this round of tuning in the wrong direction twice.
+      const lim = 0.42;
+      CONFIG.focusX = THREE.MathUtils.clamp(
+        (wx - cornerX) / planeW + CONFIG.position, -lim, lim);
+      CONFIG.focusY = THREE.MathUtils.clamp(
+        (wy - cornerY) / planeH + CONFIG.position, -lim, lim);
     }
   }
   seatAspect = maps.aspect;
