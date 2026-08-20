@@ -126,7 +126,7 @@ const CONFIG = {
   // as a tight lump: it is a power on the radius of every throw, so at 2.4 almost the whole
   // population was landing within a fraction of the focus and no amount of field travel could
   // separate them afterwards. The filaments need room before they need anything else.
-  focusDensity: 1.5,        // ver8 raises this again: the label wants a clear peak under
+  focusDensity: 0.9,        // ver8 raises this again: the label wants a clear peak under
                             //   it and a proportional fall away from it. Too high and the
                             //   drawing vanishes under a single hot spot
 
@@ -135,6 +135,22 @@ const CONFIG = {
   // evenly. Held over from the previous versions and lowered — the reference has no
   // equivalent, its unevenness comes from the photograph it samples, and ours has to be
   // put in by hand. Past ~0.8 the voids read as holes rather than as texture.
+  // ------------------------------------------------------------ the silhouette
+  // The mass is one elongated STREAK, not a blob: roughly three to one, dense and wide at
+  // the corner end and tapering into thin trailing wisps away from it. It reads as thrown
+  // and dragged, so everything about it is anisotropic — the throw, the noise the mask is
+  // cut from, and the grains themselves are all long along the throw axis and compressed
+  // across it. A field that is isotropic anywhere in that chain pulls the shape back toward
+  // a circle, which is what a blob is.
+  flowAngle: 196,           // degrees, the throw axis: which way the pigment was dragged.
+                            //   196 runs left and slightly down from the corner
+  silhouette: 3.0,          // long-to-across ratio of the streak. 1 is a circle
+  streakTaper: 0.38,        // how fast the trailing end thins out, in plane widths. Small
+                            //   is an abrupt stub, large is a long dissolving tail
+  streakHead: 0.06,         // how far the dense end reaches PAST the focus toward the
+                            //   corner, so the mass stays anchored there rather than
+                            //   floating off it
+
   // ------------------------------------------------------------ the spawn mask
   // Where a grain is allowed to exist. A domain-warped fBm density field, thresholded hard:
   // six octaves, lacunarity 2, gain 0.5 (fixed, up by FBM_OCTAVES). The threshold is what
@@ -148,6 +164,23 @@ const CONFIG = {
                             //   against the field's real spread, which is narrow: the warped
                             //   fBm runs 0.21 to 0.73 with a median of 0.50 and a standard
                             //   deviation of only 0.10, so a tenth on this is a large move
+  // Marbling. The interior must not be solid: even the densest pigment is veined and gappy.
+  // Subtracting a second, finer, lower-amplitude noise from the warped field puts holes
+  // through the middle of the mass instead of only round its edge.
+  veinScale: 2.7,           // frequency of that subtracted layer, relative to fbmScale
+  veinAmount: 0.30,         // how deep it cuts. Past ~0.5 the mass stops being one thing
+
+  // The dissolve, and this is what makes three bands out of one field rather than a single
+  // fading edge. A high-frequency noise is thresholded, and THE THRESHOLD TRACKS THE MACRO
+  // DENSITY: where the macro density is high the threshold is near zero and almost every
+  // grain passes, so the core is near solid; where it is low the threshold is near one and
+  // only the noise peaks pass, so the mass shatters into clusters and then into isolated
+  // specks. The dot spacing widens smoothly with distance because the threshold does.
+  dissolveScale: 9.0,       // frequency of the deciding noise, relative to fbmScale. This is
+                            //   the size of the speckle in the halo
+  dissolveGain: 1.55,       // how quickly the threshold relaxes as the macro density rises.
+                            //   High makes the core solid and the transition narrow
+
   fbmRadial: 0.30,          // how much the radial falloff multiplies into the field before
                             //   the threshold. At 0 the holes are spread evenly through the
                             //   mass; at 1 the core is solid and only the edge fragments.
@@ -156,7 +189,11 @@ const CONFIG = {
                             //   term here is a second concentration on top of the first. At
                             //   0.85 it did not fray the edge, it deleted it — the mass came
                             //   out a third of its radius with a twentieth of the grains
-  fbmReach: 2.00,           // radius of that falloff, in plane widths. It has to sit well
+  // Sized to the streak, not far outside it. This is the denominator the macro density is
+  // measured against, and the macro density is what the dissolve threshold tracks — leave it
+  // large and the macro reads as 1 everywhere, the threshold never rises, and there is no
+  // transition band and no speckle halo at all, just a hard-edged lump.
+  fbmReach: 0.75,           // radius of that falloff, in plane widths. It has to sit well
                             //   OUTSIDE the mass, not on it: the seats' own median radius is
                             //   about 0.39 plane widths, and at 0.62 the falloff was already
                             //   down to a third there, so the threshold was killing the body
@@ -481,9 +518,10 @@ const CONFIG = {
 
   // The bloom, all three numbers read off the reference and all given per unit of the mass
   // radius so a resize does not have to re-derive them.
-  launchDirX: -0.84,        // left and down, normalised in the shader. The reference's mass
-  launchDirY: -0.54,        //   slides 125 px left and 72 px down over its eight seconds
-  launchBurst: 0.30,        // outward from the cloud's centre, per second, at birth. This is
+  // Almost off. The origin story is powder THROWN across a surface, not a charge going off
+  // in the middle of it, so the initial impulse is directional and this symmetric radial
+  // term is only here to stop the very centre packing solid.
+  launchBurst: 0.06,        // outward from the cloud's centre, per second, at birth. This is
                             //   the dial that sets how far the cloud opens: the reference's
                             //   radius doubles, growing 36% of itself per second at half a
                             //   second and asymptotically slower after.
@@ -493,7 +531,7 @@ const CONFIG = {
                             //   the mass becomes a ring with a hole where the ink should be
                             //   thickest. The centre is refilled by newborns, which is why
                             //   this is set together with simLife
-  launchSpeed: 0.40,        // the lean, same units, same decay
+  launchSpeed: 0.85,        // the throw itself, same units, same decay
   launchDecay: 2.00,        // seconds. Both terms e-fold away over this, which puts the
                             //   growth rate at a tenth of its opening value by five seconds
                             //   — the reference is at a hundredth of it by seven
@@ -573,6 +611,9 @@ const CONFIG = {
   specular: 0.04,           // highlight strength. Low on purpose: on motes this small
                             //   a hot glint is the first thing that aliases, and it reads
                             //   as glitter rather than as gloss.
+  grainStretch: 1.55,       // how far a grain is drawn out along the throw axis. 1 is a
+                            //   circle. This is motion blur standing in for a shutter, so
+                            //   it wants to be small — past ~2 they read as dashes
   minPx: 1.3,               // smallest footprint a mote is drawn at, in device pixels.
                             //   Under 1 they blink; much over 2 the fine spray blurs.
   specMinPx: 3.0,           // below this on-screen diameter the highlight is switched off
@@ -677,14 +718,16 @@ const CONFIG = {
   // colour because the middle is a different HUE, not a lighter version of the core: pigment
   // scatters warmer as it thins. The hue bar rotates all three together, so the ramp keeps
   // its shape whatever colour the ink is set to.
-  rampCore: [0.38, 0.035, 0.028],   // deep red, the packed middle
-  rampMid:  [0.84, 0.255, 0.190],   // coral, but a red coral: at 0.92/0.33/0.23 the middle
-                                    //   of the mass was carrying most of the drawn pixels
-                                    //   and the whole thing read scarlet rather than as a
-                                    //   red pigment with a warm edge
-  rampEdge: [0.96, 0.430, 0.340],   // where it runs out — carried to nothing by alpha
-  rampMidAt: 0.38,          // where the coral stop sits along the density axis. Lower puts
-                            //   more of the mass on the core side of the ramp
+  // Fringe first, core last. These multiply the shading, so they are the pigment's own
+  // colour rather than what lands on screen — thin them over a cream page and the peach end
+  // is almost nothing.
+  ramp: [
+    [1.00, 0.660, 0.570],   // faint peach
+    [0.95, 0.470, 0.385],   // dusty salmon
+    [0.86, 0.300, 0.220],   // coral
+    [0.62, 0.145, 0.095],   // terracotta
+    [0.34, 0.030, 0.024],   // dark brick
+  ],
   rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish
   alphaGain: 3.20,          // overall presence against the page, applied last. The bloom used
@@ -1208,6 +1251,8 @@ uniform float uCloudRadius;
 uniform float uParticleSize;
 uniform float uViewportPx;       // drawing-buffer height, for on-screen size
 uniform float uMinPx;            // smallest footprint a mote may be drawn at
+uniform vec2  uGrainAxis;        // the throw axis in screen space, unit length
+uniform float uGrainStretch;
 uniform float uHalfDepth;        // half the volume's depth
 uniform float uLifeSeconds;      // one birth-to-death
 uniform float uLifeGrow;         // share of it spent swelling in
@@ -1357,7 +1402,14 @@ void main(){
   float grow = max(1.0, uMinPx / max(vPx, 1e-4));
   worldSize *= grow;
   vAlphaScale = 1.0 / (grow * grow);
-  mv.xy += position.xy * worldSize;
+  // Grains are slightly elongated ALONG the throw axis — the smear a moving particle leaves
+  // in a photograph. Area-preserving: one axis is multiplied and the other divided, so
+  // stretching a grain does not also make it heavier.
+  vec2 q = position.xy;
+  float alongQ = dot(q, uGrainAxis);
+  vec2 qs = uGrainAxis * (alongQ * uGrainStretch)
+          + (q - uGrainAxis * alongQ) / max(0.2, uGrainStretch);
+  mv.xy += qs * worldSize;
   gl_Position = projectionMatrix * mv;
 }
 `;
@@ -1370,10 +1422,11 @@ uniform float uScanDirection;
 uniform float uScanStrength;
 uniform vec3  uScanGlow;
 uniform vec3  uColorOverlay;
-uniform vec3  uRampCore;
-uniform vec3  uRampMid;
-uniform vec3  uRampEdge;
-uniform float uRampMidAt;
+uniform vec3  uRamp0;            // faint peach, the last thing before nothing
+uniform vec3  uRamp1;            // dusty salmon
+uniform vec3  uRamp2;            // coral
+uniform vec3  uRamp3;            // terracotta
+uniform vec3  uRamp4;            // dark brick, the packed core
 uniform float uRampFringe;
 uniform float uAlphaGain;
 uniform float uColorOverlayBlendMode;
@@ -1510,17 +1563,20 @@ void main(){
   col = mix(col, uScanGlow, scanMask * 0.6 * uScanStrength);
   col *= vBrightness * (1.0 - uDepthDarken * vDepth);
 
-  // Density to colour, in three stops: a deep red where the grains are packed, a coral
-  // through the middle, and a fringe that goes to nothing.
+  // Density to colour, five stops. Hue and value BOTH shift with concentration, which is
+  // the point: the deepest zones are a dark brick, and stepping outward they go terracotta,
+  // coral, dusty salmon, faint peach, then nothing. The core is redder and darker, the
+  // fringe pinker and lighter. Tie this to lifetime instead of density and the fringe never
+  // pinkens, because a young grain in the core and an old one at the edge share an age.
   //
-  // The fringe is carried by ALPHA, not by a pale colour, and that distinction is the whole
-  // reason this is a ramp rather than a tint. A grain drawn pale on a light wall is a GREY
-  // grain, and a scatter of grey specks reads as dirt on the page; a grain drawn at the
-  // coral and taken down in opacity keeps its hue all the way out and simply runs out.
+  // The last step out is carried by ALPHA rather than by a paler colour: a grain drawn pale
+  // on a light wall is a GREY grain, and a scatter of grey specks reads as dirt on the page.
   float dens = pow(clamp(vDensity, 0.0, 1.0), uDeepenBias);
-  vec3 body = dens > uRampMidAt
-    ? mix(uRampMid, uRampCore, (dens - uRampMidAt) / max(1e-4, 1.0 - uRampMidAt))
-    : mix(uRampEdge, uRampMid, dens / max(1e-4, uRampMidAt));
+  float t = clamp(dens, 0.0, 1.0) * 4.0;
+  vec3 body = mix(uRamp0, uRamp1, clamp(t, 0.0, 1.0));
+  body = mix(body, uRamp2, clamp(t - 1.0, 0.0, 1.0));
+  body = mix(body, uRamp3, clamp(t - 2.0, 0.0, 1.0));
+  body = mix(body, uRamp4, clamp(t - 3.0, 0.0, 1.0));
 
   vec3 mixed = col;
   mixed = applyColorOverlay(mixed, body, uColorOverlayBlendMode, uColorOverlayStrength);
@@ -2652,6 +2708,8 @@ function buildParticles(count) {
     }
   }
   seatAspect = maps.aspect;
+  const flowRad = THREE.MathUtils.degToRad(CONFIG.flowAngle);
+  const flowCos = Math.cos(flowRad), flowSin = Math.sin(flowRad);
   const mapAt = (arr, x, y) => {
     // nearest cell. Bilinear would only smooth a map whose resolution is already finer
     // than the motes it seats, and the depth map has a hard edge at the silhouette that
@@ -2705,11 +2763,23 @@ function buildParticles(count) {
         let ok = false;
         for (let t2 = 0; t2 < 12 && !ok; t2++) {
           const ang = Math.random() * Math.PI * 2;
-          const rad = Math.pow(Math.random(), 1 + CONFIG.focusDensity)
-                    * 0.5 * Math.hypot(planeW, planeH);
+          // The budget is the ACROSS-axis half-extent, and the stretch is spent from it, so
+          // the streak's long axis lands inside the plane instead of overshooting it. That
+          // overshoot was not a near miss: a throw off the plane failed the placement retry,
+          // fell back to a uniform draw, and scattered grains over the whole frame while the
+          // middle stayed a lump.
+          const spanA = (0.5 * planeH) / CONFIG.silhouette;
+          const rad = Math.pow(Math.random(), 1 + CONFIG.focusDensity) * spanA;
           // about the focus, not about the middle of the plane
-          u = (Math.cos(ang) * rad) / planeW + 0.5 + CONFIG.focusX;
-          w = 0.5 - (Math.sin(ang) * rad) / planeH - CONFIG.focusY;
+          // stretched along the throw axis before it is placed, so the throws already
+          // have the streak's proportions and the mask is trimming a shape rather than
+          // carving one out of a disc
+          const ax = Math.cos(ang) * rad * CONFIG.silhouette;
+          const ay = Math.sin(ang) * rad;
+          const ox = ax * flowCos - ay * flowSin;
+          const oy = ax * flowSin + ay * flowCos;
+          u = ox / planeW + 0.5 + CONFIG.focusX;
+          w = 0.5 - oy / planeH - CONFIG.focusY;
           ok = u >= 0 && u <= 1 && w >= 0 && w <= 1;
         }
         if (!ok) { u = Math.random(); w = Math.random(); }
@@ -2736,11 +2806,47 @@ function buildParticles(count) {
       // makes it a dense clumped core dissolving into grains rather than holes punched
       // evenly through the whole mass.
       const k = CONFIG.fbmScale;
-      const fx = u * k + 11.3, fy = w * k + 4.7, fz = mapDepth * k + 19.1;
-      const field = warpedFbm(fx, fy, fz, CONFIG.fbmWarp);
-      const rx = (u - 0.5 - CONFIG.focusX), ry = (w - 0.5 + CONFIG.focusY);
-      const falloff = 1 - smoothT(Math.min(1, Math.hypot(rx, ry) / CONFIG.fbmReach));
-      if (field * mix01(1, falloff, CONFIG.fbmRadial) >= CONFIG.fbmThreshold) break;
+
+      // Where this throw sits in the STREAK'S own frame: along the throw axis and across
+      // it. Dividing the along-axis distance by the stretch is what makes the shape long —
+      // the same falloff then reaches three times as far up the axis as across it.
+      // w runs DOWN the map while the world's y runs up, so the sign has to be undone here
+      // or the mask's frame is mirrored against the one the throw, the launch direction and
+      // the grain stretch all share — and the streak tapers away from the axis it is being
+      // thrown along.
+      const rx = (u - 0.5 - CONFIG.focusX), ry = -(w - 0.5 + CONFIG.focusY);
+      const alongReal = rx * flowCos + ry * flowSin;
+      const along = alongReal / CONFIG.silhouette;
+      const across = (-rx * flowSin + ry * flowCos) * CONFIG.silhouette;
+
+      // The macro density: the streak's envelope. Asymmetric on purpose — full toward the
+      // corner end and tapering away down the axis, which is what "thrown from there and
+      // dragged" looks like and what keeps the mass attached to the corner.
+      const rr = Math.hypot(along, across);
+      // Measured in REAL distance along the axis, not in the compressed frame the ellipse
+      // uses. Taking it from the divided coordinate stretched the taper by the silhouette
+      // ratio as well, so it decayed over three times the intended length — which is to say
+      // it never engaged inside the mass at all, and the streak had no tail.
+      const taper = 1 - smoothT(Math.min(1, Math.max(0, alongReal - CONFIG.streakHead)
+                                           / CONFIG.streakTaper));
+      const macro = (1 - smoothT(Math.min(1, rr / CONFIG.fbmReach))) * taper;
+
+      // The field the mass is cut from, sampled in the same stretched frame so its features
+      // are long the same way the silhouette is, then veined by a finer subtracted layer.
+      const sx = (along * 2 + 0.5) * k + 11.3;
+      const sy = (across * 2 + 0.5) * k + 4.7;
+      const sz = mapDepth * k + 19.1;
+      const vs = CONFIG.veinScale;
+      const field = warpedFbm(sx, sy, sz, CONFIG.fbmWarp)
+                  - CONFIG.veinAmount * fbm3(sx * vs + 61.7, sy * vs + 12.9, sz * vs + 5.3, 4);
+
+      // The dissolve: a high-frequency noise against a threshold that tracks the macro.
+      const ds = CONFIG.dissolveScale;
+      const speck = valueNoise3(sx * ds + 3.1, sy * ds + 27.4, sz * ds + 8.6);
+      const need = 1 - Math.min(1, macro * CONFIG.dissolveGain);
+
+      if (field * mix01(1, macro, CONFIG.fbmRadial) >= CONFIG.fbmThreshold
+          && speck >= need) break;
     }
     // The map is an image: u runs left to right, w runs DOWN from the top, so the sign on
     // w is what puts the model the right way up in the world.
@@ -3134,6 +3240,8 @@ const uniforms = {
   uSpecFullPx: { value: CONFIG.specFullPx },
   uViewportPx: { value: 1 },
   uMinPx: { value: CONFIG.minPx },
+  uGrainAxis: { value: new THREE.Vector2(1, 0) },
+  uGrainStretch: { value: CONFIG.grainStretch },
   uSpecOpacity: { value: CONFIG.specOpacity },
   uFresnelPower: { value: CONFIG.fresnelPower },
   uRim: { value: CONFIG.rim },
@@ -3170,10 +3278,11 @@ const uniforms = {
   uScanGlow: { value: new THREE.Vector3(...CONFIG.scanGlow) },
   uColorOverlay: { value: new THREE.Vector3(
     CONFIG.colorOverlayR, CONFIG.colorOverlayG, CONFIG.colorOverlayB) },
-  uRampCore: { value: new THREE.Vector3(...CONFIG.rampCore) },
-  uRampMid: { value: new THREE.Vector3(...CONFIG.rampMid) },
-  uRampEdge: { value: new THREE.Vector3(...CONFIG.rampEdge) },
-  uRampMidAt: { value: CONFIG.rampMidAt },
+  uRamp0: { value: new THREE.Vector3(...CONFIG.ramp[0]) },
+  uRamp1: { value: new THREE.Vector3(...CONFIG.ramp[1]) },
+  uRamp2: { value: new THREE.Vector3(...CONFIG.ramp[2]) },
+  uRamp3: { value: new THREE.Vector3(...CONFIG.ramp[3]) },
+  uRamp4: { value: new THREE.Vector3(...CONFIG.ramp[4]) },
   uRampFringe: { value: CONFIG.rampFringe },
   uAlphaGain: { value: CONFIG.alphaGain },
   uColorOverlayBlendMode: { value: CONFIG.colorOverlayBlendMode },
@@ -3248,8 +3357,10 @@ function makeSim() {
       uFieldSpeed: { value: CONFIG.simFieldSpeed },
       uDivergence: { value: CONFIG.simDivergence },
       uFine: { value: CONFIG.simFine },
-      uLaunchDir: { value: new THREE.Vector3(
-        CONFIG.launchDirX, CONFIG.launchDirY, 0).normalize() },
+      uLaunchDir: { value: (() => {
+        const fa = THREE.MathUtils.degToRad(CONFIG.flowAngle);
+        return new THREE.Vector3(Math.cos(fa), Math.sin(fa), 0);
+      })() },
       uLaunchSpeed: { value: CONFIG.launchSpeed * d.radius },
       uLaunchDecay: { value: CONFIG.launchDecay },
       uBurst: { value: CONFIG.launchBurst * d.radius },
@@ -3556,6 +3667,15 @@ function place() {
   sortWorthwhile = typicalPx >= SORT_MIN_PX;
   hoverInnerWorld = CONFIG.expandHoverInner * CONFIG.scale * vh;
 
+  // One axis for the whole effect. The mask cuts the streak along it, the throw pushes
+  // along it and the grains are smeared along it; letting any of the three drift off the
+  // others is what turns a streak back into a blob with a lean.
+  const fa = THREE.MathUtils.degToRad(CONFIG.flowAngle);
+  uniforms.uGrainAxis.value.set(Math.cos(fa), Math.sin(fa));
+  uniforms.uGrainStretch.value = CONFIG.grainStretch;
+  uniforms.uParticleSize.value = CONFIG.particleSize;
+  if (sim) sim.step.uniforms.uLaunchDir.value.set(Math.cos(fa), Math.sin(fa), 0);
+
 }
 
 // ---------------------------------------------------------------- cursor
@@ -3735,9 +3855,18 @@ if (uiEl && PARAMS.get('ui') === '0') {
         }
       },
       text: () => RAMP.map((k) => '[' + fmt(CONFIG[k]) + ']').join('  ') },
+    { key: 'particleSize', name: 'grain size', cst: 'CONFIG.particleSize',
+      min: 0.4, max: 4, step: 0.05, value: CONFIG.particleSize,
+      uni: 'uParticleSize', text: () => CONFIG.particleSize.toFixed(2) },
+    { key: 'silhouette', name: 'silhouette', cst: 'CONFIG.silhouette',
+      min: 1, max: 6, step: 0.1, value: CONFIG.silhouette,
+      rebuild: true, text: () => CONFIG.silhouette.toFixed(1) + ' : 1' },
+    { key: 'flowAngle', name: 'flow', cst: 'CONFIG.flowAngle',
+      min: 0, max: 359, step: 1, value: CONFIG.flowAngle,
+      rebuild: true, text: () => Math.round(CONFIG.flowAngle) + '°' },
     { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
       min: 10000, max: 300000, step: 10000, value: CONFIG.particleCount,
-      rebuild: true, text: () => String(CONFIG.particleCount) },
+      rebuild: true, round: true, text: () => String(CONFIG.particleCount) },
   ];
 
   uiEl.innerHTML = '<h2>particle cloud</h2>' + ROWS.map((r, i) =>
@@ -3755,8 +3884,11 @@ if (uiEl && PARAMS.get('ui') === '0') {
     // million seats per input event locks the page up.
     slider.addEventListener(r.rebuild ? 'change' : 'input', () => {
       const v = parseFloat(slider.value);
-      if (r.apply) r.apply(v); else CONFIG[r.key] = v;
-      if (r.rebuild) rebuildCloud(Math.round(v));
+      if (r.apply) r.apply(v); else CONFIG[r.key] = r.round ? Math.round(v) : v;
+      if (r.uni) uniforms[r.uni].value = CONFIG[r.key];
+      // Silhouette and flow are cut into the SEATS, so they need the population re-thrown
+      // exactly as a change of quantity does.
+      if (r.rebuild) rebuildCloud(CONFIG.particleCount);
       document.getElementById('pv' + i).textContent = r.text();
     });
   });
