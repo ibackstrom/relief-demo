@@ -31,7 +31,7 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 80000,     // far fewer than ver6's 60000, and the model is why: this one
+  particleCount: 140000,     // far fewer than ver6's 60000, and the model is why: this one
                             //   covers under a third of its own box, so the same count
                             //   lands three times as densely and the ribbons fill in
                             //   solid. The drawing only reads while its motes are still
@@ -42,7 +42,7 @@ const CONFIG = {
   // down past about a pixel does not make finer grains, it makes invisible ones. At 0.62
   // with sizeMax 3.2 the whole population went sub-pixel and the drawn pixels fell a
   // hundredfold — the cloud read as a speck.
-  particleSize: 1.50,        // sphere diameter, world units, before the per-mote multiplier
+  particleSize: 1.85,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
   // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
@@ -122,7 +122,11 @@ const CONFIG = {
   // 0 leaves the model's even coverage alone. Each step up crowds the population cornerward
   // and, since the count is fixed, thins the far side by exactly as much. It is a power on
   // the radius of the throw, so it has no ceiling to fall off.
-  focusDensity: 2.4,        // ver8 raises this again: the label wants a clear peak under
+  // Pulled right down to open the mass out. This is the single biggest reason the cloud read
+  // as a tight lump: it is a power on the radius of every throw, so at 2.4 almost the whole
+  // population was landing within a fraction of the focus and no amount of field travel could
+  // separate them afterwards. The filaments need room before they need anything else.
+  focusDensity: 1.5,        // ver8 raises this again: the label wants a clear peak under
                             //   it and a proportional fall away from it. Too high and the
                             //   drawing vanishes under a single hot spot
 
@@ -324,14 +328,20 @@ const CONFIG = {
   // The population is deliberately NOT scaled by it. Motes per projected area is what sets
   // how the drawing reads, so shrinking with the count held makes the cloud denser — which
   // is sometimes what you want. The quantity bar is next to it.
-  scale: 1.93,
+  // Bigger, because spreading alone could not show the pattern: the plane is centred on the
+  // screen corner, so most of a small cloud's expansion goes off-frame and what is left on
+  // screen only gets thinner. Size and placement have to move together with the spread.
+  scale: 3.20,
 
   // How far the drawing sits from the corner, in plane widths and heights. The plane is
   // centred on the group's origin and the origin is the screen corner, so 0 puts three
   // quarters of the model off-screen; larger values walk it into the frame.
   // Back to where it was before the label pushed it around: the cloud belongs in the corner,
   // and it is the SIGN that moves to sit over it, not the other way about.
-  position: 0.150,
+  // Far enough in that the plane is mostly ON screen. The plane is centred on the group
+  // origin and the origin is the screen corner, so at 0.15 roughly three quarters of it sat
+  // outside the frame and every grain the field carried outward was carried out of sight.
+  position: 0.400,
 
   // ------------------------------------------------------------ the box the model fits
   // The rasterised plane is scaled to fit inside this box, keeping the model's
@@ -432,13 +442,13 @@ const CONFIG = {
   // small numbers, so the buffer keeps its precision where it is needed — and on a device
   // that will only give us half floats, an absolute position's smallest representable step
   // is larger than one frame's movement and the cloud would simply never start.
-  simSpeed: 0.055,          // the field's strength, as a fraction of the mass radius per
+  simSpeed: 0.075,          // the field's strength, as a fraction of the mass radius per
                             //   second, so a resize does not change the pace. The reference
                             //   carries its motes at 3.0-3.5% of the mass radius per second;
                             //   this sits above that because the curl's own magnitude is
                             //   folded in on top, and because at a third of the reference's
                             //   size its exact rate reads as a still picture
-  simLife: 6.5,             // seconds from birth at the seat to death. With simSpeed this
+  simLife: 8.0,             // seconds from birth at the seat to death. With simSpeed this
                             //   sets how far the cloud spreads before it stops, because the
                             //   envelope is as far as a particle gets in one life
   simLifeSpread: 0.85,      // +/- fraction on that lifespan, drawn per particle. Without it
@@ -473,7 +483,7 @@ const CONFIG = {
   // radius so a resize does not have to re-derive them.
   launchDirX: -0.84,        // left and down, normalised in the shader. The reference's mass
   launchDirY: -0.54,        //   slides 125 px left and 72 px down over its eight seconds
-  launchBurst: 0.12,        // outward from the cloud's centre, per second, at birth. This is
+  launchBurst: 0.30,        // outward from the cloud's centre, per second, at birth. This is
                             //   the dial that sets how far the cloud opens: the reference's
                             //   radius doubles, growing 36% of itself per second at half a
                             //   second and asymptotically slower after.
@@ -487,7 +497,12 @@ const CONFIG = {
   launchDecay: 2.00,        // seconds. Both terms e-fold away over this, which puts the
                             //   growth rate at a tenth of its opening value by five seconds
                             //   — the reference is at a hundredth of it by seven
-  bloomRadius: 1.30,        // how much bigger the settled cloud is than the seats it grew
+  bloomRadius: 1.90,        // how much bigger the settled cloud is than the seats it grew
+                            //   from. It has to be raised whenever the spread is — it is the
+                            //   denominator of the ramp that drives ALPHA, so a cloud that
+                            //   outgrows it has its outer grains discarded rather than drawn
+                            //   faint, and spreading the mass would delete the very filaments
+                            //   the spreading was for.
                             //   from, measured on a render. It is not cosmetic: the radial
                             //   crowding ramp is expressed against it, and while it was left
                             //   at the seats' own radius the whole bloomed mass sat outside
@@ -670,9 +685,9 @@ const CONFIG = {
   rampEdge: [0.96, 0.430, 0.340],   // where it runs out — carried to nothing by alpha
   rampMidAt: 0.38,          // where the coral stop sits along the density axis. Lower puts
                             //   more of the mass on the core side of the ramp
-  rampFringe: 0.26,         // density below which alpha ramps to zero. This is the dial for
+  rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish
-  alphaGain: 2.60,          // overall presence against the page, applied last. The bloom used
+  alphaGain: 3.20,          // overall presence against the page, applied last. The bloom used
                             //   to provide this as a side effect of lifting the canvas alpha
 
   saturation: 1.35,
