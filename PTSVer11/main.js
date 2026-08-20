@@ -42,7 +42,7 @@ const CONFIG = {
   // down past about a pixel does not make finer grains, it makes invisible ones. At 0.62
   // with sizeMax 3.2 the whole population went sub-pixel and the drawn pixels fell a
   // hundredfold — the cloud read as a speck.
-  particleSize: 0.92,        // sphere diameter, world units, before the per-mote multiplier
+  particleSize: 2.05,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
   // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
@@ -435,9 +435,9 @@ const CONFIG = {
   // was wrong: the seeds sit exactly on the corner and it is DIFFUSION that carries the
   // visible mass inward off it. Nudging the group back out is the honest correction for
   // that, and it is easier to set by eye than to derive.
-  offsetX: 0.16,            // viewport heights, positive toward the corner's own side
-  offsetY: 0.18,
-  massScale: 1.30,          // on-screen size of the whole thing, motion included
+  offsetX: 0.315,            // viewport heights, positive toward the corner's own side
+  offsetY: 0.375,
+  massScale: 1.90,          // on-screen size of the whole thing, motion included
 
   anchorX: 1.00,
   anchorY: 0.97,
@@ -554,7 +554,7 @@ const CONFIG = {
                             //   thins once, seven seconds after load — radius 42 to 36 and
                             //   a quarter of the drawn pixels gone. At 0.85 the same deaths
                             //   are smeared over twelve seconds and there is nothing to see
-  simFrequency: 1.0,        // eddy size, as 1/frequency in world units. LOW on purpose: this
+  simFrequency: 1.2,        // eddy size, as 1/frequency in world units. LOW on purpose: this
                             //   octave is the macro swirl and the x3.1 one below carries the
                             //   filament detail. From the reference:
                             //   its field decorrelates over 13-20% of the mass radius
@@ -637,6 +637,11 @@ const CONFIG = {
   // radius runs from 0.4x to 1.6x the nominal one, so the rim becomes a band as wide as that
   // spread rather than a line. 0 is the old hard circle.
   mouseEdgeBlur: 0.6,
+  // How ragged the hole's rim is, and at what scale. The amount is a fraction of the radius,
+  // so 0.3 means the rim wanders by about a third of it. Keep it modest: past ~0.5 the hole
+  // stops reading as one opening and starts breaking into separate bites.
+  mouseNoise: 0.30,
+  mouseNoiseScale: 2.4,     // features per world unit along the rim
 
   mouseCurlBoost: 0.0,      // extra curl inside the push, as a multiple of the falloff.
                             //   Zero: this and expandCurlBoost between them made the cloud
@@ -789,11 +794,11 @@ const CONFIG = {
   // muted brick rather than a signal red — at [0.34, 0.03, 0.02] the core came out pure
   // scarlet the moment the grains overlapped at all.
   ramp: [
-    [0.97, 0.800, 0.760],   // faint peach
-    [0.92, 0.620, 0.575],   // dusty salmon
-    [0.84, 0.455, 0.415],   // coral
-    [0.70, 0.295, 0.255],   // terracotta
-    [0.52, 0.155, 0.135],   // muted brick
+    [0.954, 0.366, 0.366],
+    [0.954, 0.366, 0.366],
+    [0.954, 0.366, 0.366],
+    [0.954, 0.366, 0.366],
+    [0.954, 0.366, 0.366],
   ],
   rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish
@@ -1314,6 +1319,8 @@ uniform vec3  uMouseRayOrigin;   // in this object's local space
 uniform vec3  uMouseRayDir;
 uniform float uMouseRadius;
 uniform float uMouseEdgeBlur;
+uniform float uMouseNoise;
+uniform float uMouseNoiseScale;
 uniform float uMouseStrength;    // already scaled by the fade
 uniform float uFalloffPower;
 uniform float uMouseCurlBoost;
@@ -1402,7 +1409,15 @@ void main(){
     // through the depth sort, so it doubles as the seed; its other use is the outline in the
     // fragment shader, and a mote's outline correlating with its push radius is not
     // something an eye can find.
-    float mr = uMouseRadius * max(0.05, 1.0 + (aShape - 0.5) * 2.0 * uMouseEdgeBlur);
+    // The hole's edge, roughened. The per-mote jitter alone only BLURS it, and a blurred
+    // circle is still a circle: every mote decides independently how far it is willing to be
+    // pushed, so the boundary stays round on average and the eye finds it. A noise read at
+    // the mote's own POSITION makes neighbours agree with each other instead, and that
+    // agreement is what turns a fuzzy edge into a ragged one. Drifting in its own z so the
+    // ragged edge crawls rather than sitting still.
+    float wob = snoise3dDeriv(pos * uMouseNoiseScale + vec3(0.0, 0.0, uTime * 0.15)).w;
+    float mr = uMouseRadius
+             * max(0.05, 1.0 + (aShape - 0.5) * 2.0 * uMouseEdgeBlur + wob * uMouseNoise);
     if (distToRay < mr) {
       pushFalloff = pow(1.0 - distToRay / mr, uFalloffPower);
       pushDir = delta / (distToRay + 1e-4);
@@ -3348,6 +3363,8 @@ const uniforms = {
   uMouseRayDir: { value: new THREE.Vector3(0, 0, 0) },
   uMouseRadius: { value: CONFIG.mouseRadius },
   uMouseEdgeBlur: { value: CONFIG.mouseEdgeBlur },
+  uMouseNoise: { value: CONFIG.mouseNoise },
+  uMouseNoiseScale: { value: CONFIG.mouseNoiseScale },
   uMouseStrength: { value: 0 },
   uFalloffPower: { value: CONFIG.falloffPower },
   uMouseCurlBoost: { value: CONFIG.mouseCurlBoost },
@@ -3957,7 +3974,8 @@ tick();
 // textures, so it cannot be a uniform. That makes it the one control with a cost, which is
 // why it is a bar and not a live drag: the seats are re-thrown and the buffers re-made.
 const uiEl = document.getElementById('pui');
-if (uiEl && PARAMS.get('ui') === '0') {
+// Hidden unless ?ui=1. It is a tuning rail, not part of the piece.
+if (uiEl && PARAMS.get('ui') !== '1') {
   uiEl.remove();
 } else if (uiEl) {
   // Colour. Every particle carries the same colour now — the tone in the picture is how many
