@@ -146,27 +146,35 @@ cloud would simply never start.
 silhouette is what the cloud is continuously *fed from* rather than what it looks like. That is
 what holds the envelope still while everything inside it moves.
 
-### The sequence
+### The bloom
 
-The reference has two phases and the build now has the same two.
+The second reference clip is a far bigger event than the first: its radius **doubles** over six
+seconds, 73.7 px to 147.7, growing 32 px/s at half a second and 0.4 px/s by seven, while the
+whole mass slides 125 px left and 72 px down. What is left afterwards barely moves — the
+field's own speed falls from 2.1% of the mass radius per second to 0.7% and is still falling.
 
-| | reference | ver11 |
-|---|---|---|
-| arrival | mass slides left 26 px/s and down 17 px/s at half a second, is at a third of that by two seconds, gone by four; radius grows 27% | `launchSpeed` / `launchDecay`, an exponentially decaying bulk drift on the page's own clock |
-| after | radius flat to within half a percent for the rest of the clip, everything inside it still moving | steady churn: the envelope is where the field can carry a particle in one lifespan, and deaths hold it there |
+Every particle starts at its seat with age zero, so the seconds after load **are** the bloom.
+There is no separate intro animation; it is the simulation running from its initial condition.
 
-Every particle starts at its seat with age zero, so the seconds after load **are** the unfurl —
-there is no separate intro animation, it is the simulation running from its initial condition.
-Lifespans are drawn per particle (`simLifeSpread`), which is what turns that one coherent
-arrival into an endless churn: without it the whole population dies at the same instant and the
-cloud blinks once per life.
+**The impulse is keyed to a particle's own age, not to the page clock, and that is the decision
+that makes it work rather than merely start well.** On the page clock the burst is a one-off:
+it happens, the cloud reaches its size, and every particle that respawns afterwards crawls out
+on the field alone, so the envelope collapses back to whatever the field can reach in a
+lifespan. On the age clock every particle blooms when it is born, which makes the large
+envelope a **steady state** — and because the whole population starts at age zero, the same
+mechanism still produces one coherent arrival at load.
 
-The launch is keyed off the page clock, not off a particle's age, so it happens once to
-everyone. A particle born later does not get its own private launch.
+Lifespans are drawn per particle (`simLifeSpread`), and the spread has to be wide. At 0.45 the
+first cohort's deaths all fall inside one four-second window and the cloud measurably thins
+once, seven seconds after load. At 0.85 they are smeared over twelve seconds and there is
+nothing to see.
 
-`launchSpeed` is sized so the arrival lands **on** the steady radius rather than past it. At
-0.45 of the mass radius per second the mass overshot to +50% and then sagged back to +21% over
-the following six seconds, and a cloud that shrinks after it arrives reads as a mistake.
+**`launchBurst` cannot simply be raised to match the reference's doubling.** Past about 0.8 the
+cloud **hollows**: every particle is leaving the centre at once and they pile up against the
+decaying impulse at a front, so the mass becomes a ring with a hole where the ink should be
+thickest. Measured as the ratio of ink inside 0.4 of the radius to ink in the 0.6–1.0 annulus,
+the reference sits at 1.34; at burst 1.20 this build fell to 0.62. It is set together with
+`simLife`, because what refills the centre is newborns.
 
 ### What this cost
 
@@ -228,11 +236,20 @@ survives it. `?speed=` overrides live if the ink wants to be livelier than the r
 
 ### Palette
 
-Read off the reference's own pixels rather than picked: its thick ink lands on RGB(135, 69,
-62) and its deepest folds on RGB(78, 19, 13) — a brick, warm, with green consistently above
-blue. The build's red was a pure hue at high saturation, which composites pink where the
-reference is earthy. Measured on the same frame, ver10's thick ink is RGB(147, 84, 80) and its
-mid-tones RGB(193, 161, 159) against the reference's (135, 69, 62) and (171, 138, 134).
+Read off the reference's own pixels rather than picked. The second clip's thick ink lands on
+RGB(135, 69, 71) and its deepest folds on RGB(74, 20, 23) — a **wine red, and not a warm one**:
+blue sits a shade above green all the way through, where the first clip had it a shade below.
+That single difference is most of what separates this crimson from a terracotta.
+
+**The core's density is the one thing still short of it.** The reference is very nearly opaque
+in its folds; a cloud of shaded, part-transparent spheres over a light wall bottoms out around
+RGB(150, 120, 120) however much colour, opacity or count goes in, because fill, rim and
+specular all add light after the colour pipeline and put a floor under it. Three attempts at
+closing it are recorded in the constants: flattening the sphere rig desaturates the mass to
+grey, and `solidity` at 0.65 fills the cloud in as a flat slab and destroys the filaments that
+are the whole point of the simulation. Closing it properly means a different compositing path —
+accumulating density into a buffer and colour-mapping it, the way these dye renders are
+actually made — rather than stacking lit sprites.
 
 ### What is still not the reference
 
@@ -263,16 +280,8 @@ without an edit.
 
 ## Controls
 
-Three bars, top-left: **solidity**, **ground blend**, **ground fade**.
-
-| bar | writes | default |
-|---|---|---|
-| solidity | `CONFIG.solidity` | 0.0, range 0–1 |
-| ground blend | `CONFIG.ground` | 0.70, range 0–1 |
-| ground fade | `CONFIG.groundFade` | 0.15, range 0–1 |
-
-**Ground blend** and **ground fade** are the fringe's blend into the wall — see
-[The cloud meets the wall](#the-cloud-meets-the-wall).
+None. The panel is gone and every value is a `CONFIG` default; the query switches below still
+reach the ones worth sweeping without it.
 
 Everything else is settled and lives in `CONFIG`, the field's overall `opacity` included —
 `?op=` still reaches it without the panel.

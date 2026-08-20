@@ -31,12 +31,12 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 100000,     // far fewer than ver6's 60000, and the model is why: this one
+  particleCount: 200000,     // far fewer than ver6's 60000, and the model is why: this one
                             //   covers under a third of its own box, so the same count
                             //   lands three times as densely and the ribbons fill in
                             //   solid. The drawing only reads while its motes are still
                             //   separable
-  particleSize: 0.7,        // sphere diameter, world units, before the per-mote multiplier
+  particleSize: 0.85,        // sphere diameter, world units, before the per-mote multiplier
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
   // mult = sizeMin + (sizeMax - sizeMin) * rand^sizeBias.
@@ -341,7 +341,7 @@ const CONFIG = {
   // Aerial perspective: motes at the back of the volume are dimmed and thinned. Without
   // it every mote is equally present and the volume collapses back into a decal however
   // correct the geometry is.
-  depthFade: 0.45,          // alpha lost across the full depth of the box, 0 = flat
+  depthFade: 0.32,          // alpha lost across the full depth of the box, 0 = flat
   depthDarken: 0.22,        // brightness lost across the same span
 
   // ------------------------------------------------------------ drift
@@ -398,13 +398,13 @@ const CONFIG = {
   // small numbers, so the buffer keeps its precision where it is needed — and on a device
   // that will only give us half floats, an absolute position's smallest representable step
   // is larger than one frame's movement and the cloud would simply never start.
-  simSpeed: 0.070,          // the field's strength, as a fraction of the mass radius per
+  simSpeed: 0.052,          // the field's strength, as a fraction of the mass radius per
                             //   second, so a resize does not change the pace. The reference
                             //   carries its motes at 3.0-3.5% of the mass radius per second;
                             //   this sits above that because the curl's own magnitude is
                             //   folded in on top, and because at a third of the reference's
                             //   size its exact rate reads as a still picture
-  simLife: 7.0,             // seconds from birth at the seat to death. With simSpeed this
+  simLife: 5.0,             // seconds from birth at the seat to death. With simSpeed this
                             //   sets how far the cloud spreads before it stops, because the
                             //   envelope is as far as a particle gets in one life
   simLifeSpread: 0.85,      // +/- fraction on that lifespan, drawn per particle. Without it
@@ -426,20 +426,31 @@ const CONFIG = {
   simFine: 0.55,            // weight of a second octave at 3.1x the frequency. The large
                             //   octave makes the lobes, this one the hairs inside them
 
-  // The arrival. Measured on the reference: the mass slides left at 26 px/s and down at
-  // 17 px/s half a second in, is down to a third of that by two seconds and to nothing by
-  // four, while its radius grows 27% and then holds. Given here as a fraction of the mass
-  // radius per second so it does not have to be re-derived if the cloud is resized.
-  launchDirX: -0.83,        // left and down, normalised in the shader
-  launchDirY: -0.55,
-  launchSpeed: 0.26,        // of the mass radius per second, at t = 0. Sized so the
-                            //   arrival lands ON the steady radius rather than past it:
-                            //   at 0.45 the mass overshot to +50% and then sagged back to
-                            //   +21% over the next six seconds, and a cloud that shrinks
-                            //   after it arrives reads as a mistake
-  launchDecay: 1.40,        // seconds. The drift is e-folded away by this, so it is under a
-                            //   tenth of its starting value by the four seconds the
-                            //   reference takes to settle
+  // The bloom, all three numbers read off the reference and all given per unit of the mass
+  // radius so a resize does not have to re-derive them.
+  launchDirX: -0.84,        // left and down, normalised in the shader. The reference's mass
+  launchDirY: -0.54,        //   slides 125 px left and 72 px down over its eight seconds
+  launchBurst: 0.72,        // outward from the cloud's centre, per second, at birth. This is
+                            //   the dial that sets how far the cloud opens: the reference's
+                            //   radius doubles, growing 36% of itself per second at half a
+                            //   second and asymptotically slower after.
+                            //   It cannot simply be raised to match that. Past about 0.8 the
+                            //   cloud HOLLOWS: every particle is leaving the centre at once
+                            //   and they pile up against the decaying impulse at a front, so
+                            //   the mass becomes a ring with a hole where the ink should be
+                            //   thickest. The centre is refilled by newborns, which is why
+                            //   this is set together with simLife
+  launchSpeed: 0.40,        // the lean, same units, same decay
+  launchDecay: 2.00,        // seconds. Both terms e-fold away over this, which puts the
+                            //   growth rate at a tenth of its opening value by five seconds
+                            //   — the reference is at a hundredth of it by seven
+  bloomRadius: 2.30,        // how much bigger the settled cloud is than the seats it grew
+                            //   from, measured on a render. It is not cosmetic: the radial
+                            //   crowding ramp is expressed against it, and while it was left
+                            //   at the seats' own radius the whole bloomed mass sat outside
+                            //   the ramp, counted as fringe, and blended into the wall —
+                            //   thick ink came out RGB(153, 90, 91) against the reference's
+                            //   (135, 69, 71) and no amount of opacity fixed it
 
   // ------------------------------------------------------------ influence point
   // A fixed calm spot: within influenceRadius the curl is scaled down, so the cloud has a
@@ -485,12 +496,19 @@ const CONFIG = {
   lightDirX: -0.45,         // in VIEW space — x right, y up, z toward the camera. Keep z
   lightDirY: 0.72,          //   positive or the highlight falls behind the spheres and
   lightDirZ: 0.52,          //   they go flat.
-  wrap: 0.45,               // how far light wraps past the terminator. 0 = hard Lambert,
+  wrap: 0.38,               // how far light wraps past the terminator. 0 = hard Lambert,
                             //   which leaves half of every sphere black and reads as a
                             //   hole punched in a light page. Above ~0.7 it goes flat.
   shininess: 40.0,          // specular exponent. High = a small tight glint, low = a broad
                             //   sheen. Small and tight is what reads as glass.
-  specular: 0.38,           // highlight strength. Low on purpose: on motes this small
+  // The sphere rig is dialled almost out for this reference, and that is a look decision
+  // rather than a tuning one. Fill, rim and specular all ADD light after the colour
+  // pipeline, which is what makes a mote read as a lit glass bead — and it also puts a
+  // floor under how dark the mass can ever get. Measured: with the rig at its old settings
+  // the densest pixels bottomed out at RGB(172, 125, 125) however much colour and opacity
+  // went in, against the reference's (77, 22, 25). Its grains are matte pigment in water,
+  // not beads under a studio light.
+  specular: 0.16,           // highlight strength. Low on purpose: on motes this small
                             //   a hot glint is the first thing that aliases, and it reads
                             //   as glitter rather than as gloss.
   minPx: 1.3,               // smallest footprint a mote is drawn at, in device pixels.
@@ -500,7 +518,7 @@ const CONFIG = {
                             //   mote a couple of pixels across cannot be resolved — it
                             //   falls between samples and flickers as the mote drifts,
                             //   which is what reads as sparkle.
-  specOpacity: 0.9,         // how much of the highlight survives into ALPHA. The glint has
+  specOpacity: 0.2,         // how much of the highlight survives into ALPHA. The glint has
                             //   to be opaque or it vanishes on the thin part of the shell.
   // How far each mote's outline departs from a perfect circle. The silhouette radius is
   // rolled in and out by two low harmonics of the angle, with the phases taken from the
@@ -515,11 +533,11 @@ const CONFIG = {
   blob: 1.0,
 
   fresnelPower: 4.2,        // rim tightness. Low spreads the rim over the whole sphere.
-  rim: 0.18,                // rim strength
+  rim: 0.10,                // rim strength
   fillDirX: 0.55,           // the bounce light, opposite the key and below it
   fillDirY: -0.55,
   fillDirZ: 0.30,
-  fill: 0.30,               // strength. Past ~0.5 it starts to read as a second key and
+  fill: 0.16,               // strength. Past ~0.5 it starts to read as a second key and
                             //   the form goes ambiguous.
   fillColorR: 0.42,         // cool, to sit against the warm key — the contrast between
   fillColorG: 0.52,         //   the two is doing the work, not either one alone
@@ -527,8 +545,12 @@ const CONFIG = {
   rimColorR: 1.00,          // the rim is the light behind the bubble, so it is close to
   rimColorG: 0.72,          //   white with a warm lean rather than the body colour
   rimColorB: 0.68,
-  coreAlpha: 0.78,          // opacity through the middle of a sphere. Low is what makes
-                            //   them hollow shells; at 1 they are solid beads.
+  coreAlpha: 0.92,          // opacity through the middle of a sphere. Low is what makes
+                            //   them hollow shells; at 1 they are solid beads. High here
+                            //   because the reference's mass is very nearly opaque in its
+                            //   folds — its darkest pixels are RGB(77, 22, 25), where a
+                            //   cloud of shells over a light wall bottoms out around (188,
+                            //   159, 159) however much colour is put into it
   edgeSoftness: 0.16,       // silhouette antialias, in radii. Too low and the discs step;
                             //   too high and they turn back into soft blobs.
 
@@ -576,16 +598,23 @@ const CONFIG = {
   // on RGB(78, 19, 13) — a brick, not a signal red, and warm, with green consistently above
   // blue. The build's own red was a pure hue at high saturation, which came out pink where
   // the reference is earthy.
+  // Read off the reference: its thick ink lands on RGB(135, 69, 71) and its deepest folds
+  // on RGB(74, 20, 23) — a wine red, and NOT a warm one. Blue sits a shade above green all
+  // the way through, where the earlier clip had it a shade below; that one difference is
+  // most of what separates this crimson from a terracotta.
   colorOverlayR: 0.66,
-  colorOverlayG: 0.19,
-  colorOverlayB: 0.14,
+  colorOverlayG: 0.175,
+  colorOverlayB: 0.160,
   colorOverlayBlendMode: 0,
   colorOverlayStrength: 1.0,
-  saturation: 1.30,
+  saturation: 1.45,
   contrast: 1.10,
-  brightness: 0.98,
+  brightness: 0.94,
   minBrightness: 0.0,
-  opacity: 0.72,            // overall alpha of the field
+  opacity: 0.88,            // overall alpha of the field. Up from 0.72 with the bloom: the
+                            //   same motes spread over twice the area stack less deeply, so
+                            //   the mass came out a good deal paler than the reference's —
+                            //   thick ink at RGB(150, 87, 87) against its (135, 69, 71)
 
   // How much of the cloud's transparency is spent on FEWER motes rather than on paler ones.
   //
@@ -599,6 +628,10 @@ const CONFIG = {
   // The draw is per mote and fixed, so a mote does not flicker — it fades in over its life
   // until it crosses its own threshold, appears at full colour, and goes again on the way
   // down. 0 is the ordinary blended cloud.
+  // Tried at 0.65 to force the mass toward the reference's near-opaque core, and reverted:
+  // fully opaque grains at this count and size fill in solid, and the folded filaments that
+  // are the whole point of the simulation disappear under a flat slab. The core's density is
+  // still short of the reference and it is not this that will close it.
   solidity: 0.0,
 
   // ------------------------------------------------------------ ground blend
@@ -627,8 +660,12 @@ const CONFIG = {
   groundR: 0.748,
   groundG: 0.748,
   groundB: 0.748,
-  ground: 0.70,             // how far the loneliest motes are taken toward it. 0 is ver8's
-                            //   cloud exactly; 1 makes them the wall and they disappear
+  ground: 0.55,             // how far the loneliest motes are taken toward it. 0 is ver8's
+                            //   cloud exactly; 1 makes them the wall and they disappear.
+                            //   Pulled back with the bloom: a cloud that now covers twice
+                            //   the area has far more of itself out at the fringe, so the
+                            //   same setting takes a much larger share of the mass to the
+                            //   wall than it did on the tight one
   groundBias: 2.5,          // curve on (1 - crowding), and it needs to be well above 1.
                             //   The crowding histogram is bimodal — half the population
                             //   sits under 0.15 and a quarter is at 0.94 or more — so at a
@@ -964,6 +1001,8 @@ uniform float uFine;
 uniform vec3  uLaunchDir;
 uniform float uLaunchSpeed;
 uniform float uLaunchDecay;
+uniform float uBurst;
+uniform vec3  uCloudCentre;
 varying vec2 vUv;
 
 vec3 fieldVelocity(vec3 p){
@@ -979,17 +1018,26 @@ vec3 fieldVelocity(vec3 p){
   return v * (uSpeed * uFrequency);
 }
 
-// The launch. The reference's first two seconds are not turbulence: the whole mass slides
-// down and to the left, 26 px/s and 17 px/s at half a second, and it is gone by four —
-// the plume still carrying the momentum it arrived with. A stationary noise field has
-// nothing like it, and without it the cloud is in its steady churn from the first frame
-// and there is no arrival to watch.
+// The bloom, and it is the whole of this effect. Measured on the reference: the mass's
+// radius DOUBLES over six seconds, fast at first and asymptotically slower — 32 px/s of
+// growth at half a second, 8.9 at three, 0.4 at seven — while the whole thing also slides
+// left and down. What is left afterwards barely moves at all: the field's own speed falls
+// from 2.1% of the mass radius per second to 0.7% and is still falling.
 //
-// Keyed off the page's own clock rather than the particle's age, so it happens ONCE, at
-// load, to the whole population together. A particle born later does not get its own
-// private launch.
-vec3 launchDrift(){
-  return uLaunchDir * uLaunchSpeed * exp(-uTime / max(0.05, uLaunchDecay));
+// It is keyed off the particle's OWN AGE, not the page clock, and that is the decision that
+// makes the effect work rather than merely start well. On the page clock the burst is a
+// one-off: it happens, the cloud reaches its size, and then every particle that respawns
+// afterwards crawls out on the field alone and the envelope collapses back to whatever the
+// field can reach within a lifespan. On the age clock every particle gets its own bloom
+// when it is born, so the large envelope is a STEADY STATE — and because the population all
+// starts at age zero, the very same mechanism produces one coherent arrival at load.
+//
+// Radial from the cloud's own centre, plus a constant lean, both decaying together.
+vec3 birthImpulse(vec3 p, float age){
+  vec3 away = p - uCloudCentre;
+  float l = length(away.xy);
+  vec3 radial = l > 1e-5 ? vec3(away.xy / l, 0.0) : vec3(0.0);
+  return (radial * uBurst + uLaunchDir * uLaunchSpeed) * exp(-age / max(0.05, uLaunchDecay));
 }
 
 void main(){
@@ -1001,7 +1049,8 @@ void main(){
   // read the field at the particle's real position, not at its seat, or every particle in
   // a filament would be pushed by the field where it STARTED and the filament would move
   // rigidly instead of stretching
-  offset += (fieldVelocity(seed.xyz + offset) + launchDrift()) * uDt;
+  vec3 here = seed.xyz + offset;
+  offset += (fieldVelocity(here) + birthImpulse(here, age)) * uDt;
 
   // Dead: back to the seat, age zero. The seat is the source, so the model's silhouette is
   // what the cloud is continuously fed from rather than what it looks like.
@@ -3071,6 +3120,8 @@ function makeSim() {
         CONFIG.launchDirX, CONFIG.launchDirY, 0).normalize() },
       uLaunchSpeed: { value: CONFIG.launchSpeed * d.radius },
       uLaunchDecay: { value: CONFIG.launchDecay },
+      uBurst: { value: CONFIG.launchBurst * d.radius },
+      uCloudCentre: { value: d.centre.clone() },
     },
   });
   const init = new THREE.ShaderMaterial({
@@ -3092,7 +3143,7 @@ function makeSim() {
   sim.draw(init, sim.b);
   uniforms.tSimPos.value = sim.a.texture;
   uniforms.uCloudCentre.value.copy(d.centre);
-  uniforms.uCloudRadius.value = d.radius;
+  uniforms.uCloudRadius.value = d.radius * CONFIG.bloomRadius;
   return sim;
 }
 let sim = null;
@@ -3114,6 +3165,7 @@ function stepSim(dt) {
   u.uFine.value = CONFIG.simFine;
   u.uLaunchSpeed.value = CONFIG.launchSpeed * sim.radius;
   u.uLaunchDecay.value = CONFIG.launchDecay;
+  u.uBurst.value = CONFIG.launchBurst * sim.radius;
   sim.draw(sim.step, sim.b);
   const t = sim.a; sim.a = sim.b; sim.b = t;
   uniforms.tSimPos.value = sim.a.texture;
@@ -3495,45 +3547,3 @@ function tick() {
   if (firstFrame) { firstFrame = false; dismissLoading(); }
 }
 tick();
-
-// ---------------------------------------------------------------- panel
-// Three controls. SOLIDITY is what the cloud's transparency is spent on: pale motes at 0,
-// fewer motes at full colour at 1. GROUND BLEND and GROUND FADE are how far the fringe goes
-// to the colour of the wall behind it, and how much alpha it loses on the way. Everything
-// else, opacity included, is settled and lives in CONFIG above, where a value that will not
-// be dragged again belongs. ?ui=0 hides the panel; ?op=, ?solid=, ?ground= and ?gfade= reach
-// the same four values without it.
-const uiEl = document.getElementById('pui');
-if (uiEl && PARAMS.get('ui') === '0') {
-  uiEl.remove();
-} else if (uiEl) {
-  const ROWS = [
-    { key: 'solidity', name: 'solidity', cst: 'CONFIG.solidity',
-      min: 0, max: 1, step: 0.005, value: CONFIG.solidity, uni: 'uSolidity' },
-    { key: 'ground', name: 'ground blend', cst: 'CONFIG.ground',
-      min: 0, max: 1, step: 0.005, value: CONFIG.ground, uni: 'uGround' },
-    { key: 'groundFade', name: 'ground fade', cst: 'CONFIG.groundFade',
-      min: 0, max: 1, step: 0.005, value: CONFIG.groundFade, uni: 'uGroundFade' },
-  ];
-
-  const text = (r, v) => v.toFixed(3);
-
-  uiEl.innerHTML = '<h2>particle cloud</h2>' + ROWS.map((r, i) =>
-    '<div class="row"><div class="lbl">'
-    + '<span class="name">' + r.name + '</span>'
-    + '<span class="val" id="pv' + i + '">' + text(r, r.value) + '</span></div>'
-    + '<span class="cst">' + r.cst + '</span>'
-    + '<input type="range" id="pr' + i + '" min="' + r.min + '" max="' + r.max + '"'
-    + ' step="' + r.step + '" value="' + r.value + '"></div>'
-  ).join('') + '<div class="foot">?ui=0 hides this</div>';
-
-  ROWS.forEach((r, i) => {
-    const slider = document.getElementById('pr' + i);
-    slider.addEventListener('input', () => {
-      const v = parseFloat(slider.value);
-      document.getElementById('pv' + i).textContent = text(r, v);
-      CONFIG[r.key] = v;
-      if (r.uni) uniforms[r.uni].value = CONFIG[r.key];
-    });
-  });
-}
