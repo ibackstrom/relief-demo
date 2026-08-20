@@ -15,10 +15,13 @@
     color: rgba(0,0,0,.4); text-transform: uppercase; pointer-events: none;
   }
   /* two controls, for look-dev only: quantity and the ink's hue */
+  /* A rail down the left edge rather than a floating card: full height, flush to the side,
+     and scrolling on its own if the list outgrows the window. */
   #pui {
-    position: fixed; top: 14px; left: 14px; width: 244px; z-index: 20;
-    background: rgba(255,255,255,.84); backdrop-filter: blur(6px);
-    border: 1px solid rgba(0,0,0,.12); border-radius: 4px; padding: 11px 13px 13px;
+    position: fixed; top: 0; left: 0; bottom: 0; width: 226px; z-index: 20;
+    box-sizing: border-box; overflow-y: auto;
+    background: rgba(255,255,255,.88); backdrop-filter: blur(6px);
+    border-right: 1px solid rgba(0,0,0,.12); padding: 14px 16px 18px;
     font: 11px/1.35 Helvetica, Arial, sans-serif; color: rgba(0,0,0,.75);
   }
   #pui h2 {
