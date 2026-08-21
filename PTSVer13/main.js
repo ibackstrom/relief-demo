@@ -4359,7 +4359,7 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'offsetY', name: 'y', cst: 'CONFIG.offsetY',
       min: -0.5, max: 0.8, step: 0.005, value: CONFIG.offsetY,
       place: true, text: () => CONFIG.offsetY.toFixed(3) },
-    { key: 'settle', name: 'inertia', cst: 'CONFIG.settle',
+    { key: 'settle', name: 'settle', cst: 'CONFIG.settle',
       min: 0.005, max: 1, step: 0.005, value: CONFIG.settle,
       text: () => CONFIG.settle.toFixed(3) },
     { key: 'drag', name: 'memory', cst: 'CONFIG.drag',
