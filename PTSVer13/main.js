@@ -663,7 +663,11 @@ const CONFIG = {
   mouseRadius: 0.075,       // radius of the tube that opens. Raised because the reach is
                             //   now correctly divided by the group's scale — the old number
                             //   was reaching 1.9x further than it said
-  mouseStrength: 0.022,     // how far a mote at the centre of it is pushed
+  mouseStrength: 0.075,     // how far a mote at the centre of it is pushed. Raised well past
+                            //   ver7-ver10's 0.055: it had been cut to 0.022 when the note
+                            //   was that hover felt too FAST, and that turned out to be the
+                            //   growth rather than the push — so the push had been quietly
+                            //   carrying a fix for something else
   falloffPower: 3.0,        // 1 = linear, 2 = soft outer edge with a firm core
   mouseSmoothing: 0.12,     // lag on the cursor the motes actually see, per frame. Low
                             //   values make the cloud trail the pointer.
@@ -1054,6 +1058,8 @@ if (PARAMS.get('shadow') === '0') CONFIG.shadow = false;
 if (PARAMS.get('shadowonly') === '1') CONFIG.shadowOnly = true;
 if (numParam('sh', 0, 3) !== null) CONFIG.shadowStrength = numParam('sh', 0, 3);
 if (numParam('hover', 0, 1) !== null) CONFIG.hoverFeel = numParam('hover', 0, 1);
+if (numParam('push', 0, 1) !== null) CONFIG.mouseStrength = numParam('push', 0, 1);
+if (numParam('reach', 0.005, 0.6) !== null) CONFIG.mouseRadius = numParam('reach', 0.005, 0.6);
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
 
 // ?original — the reference's own palette instead of the client's red.
@@ -4406,6 +4412,12 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'offsetY', name: 'y', cst: 'CONFIG.offsetY',
       min: -0.5, max: 0.8, step: 0.005, value: CONFIG.offsetY,
       place: true, text: () => CONFIG.offsetY.toFixed(3) },
+    { key: 'mouseStrength', name: 'push', cst: 'CONFIG.mouseStrength',
+      min: 0, max: 0.4, step: 0.005, value: CONFIG.mouseStrength,
+      place: true, text: () => CONFIG.mouseStrength.toFixed(3) },
+    { key: 'mouseRadius', name: 'reach', cst: 'CONFIG.mouseRadius',
+      min: 0.01, max: 0.35, step: 0.005, value: CONFIG.mouseRadius,
+      place: true, text: () => CONFIG.mouseRadius.toFixed(3) },
     { key: 'hoverFeel', name: 'hover', cst: 'CONFIG.hoverFeel  0 = old, 1 = new',
       min: 0, max: 1, step: 0.01, value: CONFIG.hoverFeel,
       text: () => CONFIG.hoverFeel.toFixed(2) },
