@@ -577,12 +577,28 @@ const CONFIG = {
   // the cursor is — which is the plastic feel. Low, it is heavy: a shove takes seconds to
   // bleed away, so a push on the left is still travelling while you push on the right, and
   // the two are in the cloud together.
-  settle: 0.045,
-  drag: 0.988,              // the slow leak that stops shoves piling up without limit. Near
-                            //   1 is a long memory; under about 0.95 there is none worth
-                            //   having however low settle goes
-  pushForce: 0.65,          // the cursor's strength as an ACCELERATION now, not a distance.
-                            //   It is not comparable to the old mouseStrength        // world units per second, straight down, always. Near zero by
+  // ONE dial across the whole feel: 0 is the old hover, 1 is the new one.
+  //
+  // settle and drag are not independent tastes, they are two ends of a single axis, so they
+  // move together here. At 0 a particle keeps none of its own motion and the leak is fast —
+  // which reproduces the memoryless push exactly, because a particle that snaps to the field
+  // every frame cannot carry anything the pointer did. At 1 it is heavy and the cloud holds
+  // several pushes at once.
+  hoverFeel: 1.0,
+
+  // The two ends the dial runs between. settle interpolates GEOMETRICALLY — it is a rate, so
+  // the halfway point that matters is the geometric mean, not the arithmetic one.
+  hoverOldSettle: 1.0,
+  hoverNewSettle: 0.045,
+  hoverOldDrag: 0.900,
+  hoverNewDrag: 0.992,
+
+  // Strength, held constant ACROSS the dial rather than left to drift with it. A force that
+  // accumulates over many frames produces far more velocity than the same force that does
+  // not: the gain is 1/(1 - drag * (1 - settle)), which is about 19 at the heavy end and 1 at
+  // the light one. Dividing it out is what stops the dial being a strength control by
+  // accident, so moving it changes only the feel.
+  hoverPush: 0.65,        // world units per second, straight down, always. Near zero by
                             //   design: enough that the mass drifts and settles rather than
                             //   hanging in a vacuum, not enough to rain. It is a constant
                             //   VELOCITY rather than an acceleration, so nothing can run
@@ -1027,6 +1043,7 @@ if (PARAMS.get('shadow') === '0') CONFIG.shadow = false;
 // settle whether a shadow that cannot be seen is absent or merely too faint.
 if (PARAMS.get('shadowonly') === '1') CONFIG.shadowOnly = true;
 if (numParam('sh', 0, 3) !== null) CONFIG.shadowStrength = numParam('sh', 0, 3);
+if (numParam('hover', 0, 1) !== null) CONFIG.hoverFeel = numParam('hover', 0, 1);
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
 
 // ?original — the reference's own palette instead of the client's red.
@@ -3785,6 +3802,7 @@ function renderShadowed() {
 // the whole thing, and it is clamped for the same reason the render loop clamps it: a tab
 // coming back from the background hands over a delta of several seconds, which would move
 // every particle a full life in one frame and tear the cloud apart.
+let simPushGain = 1;
 function stepSim(dt) {
   if (!sim) return;
   const u = sim.step.uniforms;
@@ -3800,8 +3818,14 @@ function stepSim(dt) {
   u.uLaunchDecay.value = CONFIG.launchDecay;
   u.uBurst.value = CONFIG.launchBurst * sim.radius;
   u.uGravity.value = CONFIG.simGravity;
-  u.uSettle.value = CONFIG.settle;
-  u.uDrag.value = CONFIG.drag;
+  {
+    const t = THREE.MathUtils.clamp(CONFIG.hoverFeel, 0, 1);
+    const settle = Math.pow(CONFIG.hoverOldSettle, 1 - t) * Math.pow(CONFIG.hoverNewSettle, t);
+    const drag = CONFIG.hoverOldDrag + (CONFIG.hoverNewDrag - CONFIG.hoverOldDrag) * t;
+    u.uSettle.value = settle;
+    u.uDrag.value = drag;
+    simPushGain = 1 / Math.max(1e-3, 1 - drag * (1 - settle));
+  }
   u.uFalloffPower.value = CONFIG.falloffPower;
   u.uMouseEdgeBlur.value = CONFIG.mouseEdgeBlur;
   u.uMouseNoise.value = CONFIG.mouseNoise;
@@ -3814,7 +3838,7 @@ function stepSim(dt) {
   // thing at any size. uMouseStrength is only read here to recover the hover FADE from it —
   // its own magnitude belonged to the displacement this replaced.
   const fadeNow = worldPush > 1e-6 ? uniforms.uMouseStrength.value / worldPush : 0;
-  u.uPush.value = CONFIG.pushForce * sim.radius * fadeNow;
+  u.uPush.value = (CONFIG.hoverPush / simPushGain) * sim.radius * fadeNow;
 
   // velocity first, then the position that integrates it
   u.tVel.value = sim.va.texture;
@@ -4359,15 +4383,9 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'offsetY', name: 'y', cst: 'CONFIG.offsetY',
       min: -0.5, max: 0.8, step: 0.005, value: CONFIG.offsetY,
       place: true, text: () => CONFIG.offsetY.toFixed(3) },
-    { key: 'settle', name: 'settle', cst: 'CONFIG.settle',
-      min: 0.005, max: 1, step: 0.005, value: CONFIG.settle,
-      text: () => CONFIG.settle.toFixed(3) },
-    { key: 'drag', name: 'memory', cst: 'CONFIG.drag',
-      min: 0.9, max: 0.999, step: 0.001, value: CONFIG.drag,
-      text: () => CONFIG.drag.toFixed(3) },
-    { key: 'pushForce', name: 'push', cst: 'CONFIG.pushForce',
-      min: 0, max: 3, step: 0.02, value: CONFIG.pushForce,
-      text: () => CONFIG.pushForce.toFixed(2) },
+    { key: 'hoverFeel', name: 'hover', cst: 'CONFIG.hoverFeel  0 = old, 1 = new',
+      min: 0, max: 1, step: 0.01, value: CONFIG.hoverFeel,
+      text: () => CONFIG.hoverFeel.toFixed(2) },
     { key: 'shadowStrength', name: 'shadow', cst: 'CONFIG.shadowStrength',
       min: 0, max: 1.5, step: 0.01, value: CONFIG.shadowStrength,
       text: () => CONFIG.shadowStrength.toFixed(2) },
