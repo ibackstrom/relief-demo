@@ -586,7 +586,10 @@ const CONFIG = {
   // which reproduces the memoryless push exactly, because a particle that snaps to the field
   // every frame cannot carry anything the pointer did. At 1 it is heavy and the cloud holds
   // several pushes at once.
-  hoverFeel: 1.0,
+  // Defaulting to 0, which is the hover from ver7-ver10 exactly. The inertial version is on
+  // the bar rather than shipped, because the two are different behaviours and the old one is
+  // the one that has been confirmed to feel right.
+  hoverFeel: 0.0,
 
   // The two ends the dial runs between. settle interpolates GEOMETRICALLY — it is a rate, so
   // the halfway point that matters is the geometric mean, not the arithmetic one.
@@ -1601,10 +1604,15 @@ void main(){
     pos.z += curlOffset.z * 0.1 * curlInfluence;
   }
 
-  // No displacement here any more. The cursor is a FORCE inside the simulation now, so what
-  // arrives in this shader has the push already carried in the position — applying it again
-  // would put an instant, memoryless copy on top of the one with momentum and hand back
-  // exactly the plastic feel the force was there to remove.
+  // The OLD hover, kept, because it is one end of the dial and cannot be imitated by the
+  // new one. This is a bounded DISPLACEMENT: the hole appears the instant the pointer
+  // arrives, at a fixed size, and holds. The force in the simulation integrates instead, so
+  // its hole keeps opening for as long as you hover and eases shut afterwards — a different
+  // behaviour, not a slower version of the same one.
+  //
+  // uMouseStrength carries (1 - hoverFeel), so at 0 this is the whole effect and the
+  // simulation's force is off; at 1 it is silent and the force has it all.
+  pos += pushDir * pushFalloff * uMouseStrength;
 
   vPos = pos;
   // Depth is taken in VIEW space so it stays correct while the volume yaws — a local z
@@ -3810,6 +3818,7 @@ function renderShadowed() {
 // coming back from the background hands over a delta of several seconds, which would move
 // every particle a full life in one frame and tear the cloud apart.
 let simPushGain = 1;
+let hoverFade = 0;
 function stepSim(dt) {
   if (!sim) return;
   const u = sim.step.uniforms;
@@ -3844,10 +3853,12 @@ function stepSim(dt) {
   // pushForce is a multiple of the mass radius per second squared, so it means the same
   // thing at any size. uMouseStrength is only read here to recover the hover FADE from it —
   // its own magnitude belonged to the displacement this replaced.
-  const fadeNow = worldPush > 1e-6 ? uniforms.uMouseStrength.value / worldPush : 0;
+  // Read the fade directly rather than backing it out of uMouseStrength, which now carries
+  // the crossfade as well and goes to zero at the far end of the dial.
   const dtc = Math.max(1e-4, Math.min(dt, 0.05));
+  const feel = THREE.MathUtils.clamp(CONFIG.hoverFeel, 0, 1);
   u.uPush.value =
-    (CONFIG.hoverPush * sim.radius) / (dtc * simPushGain) * fadeNow;
+    (CONFIG.hoverPush * sim.radius) / (dtc * simPushGain) * hoverFade * feel;
 
   // velocity first, then the position that integrates it
   u.tVel.value = sim.va.texture;
@@ -4234,7 +4245,10 @@ function updateCursor(dt) {
 
   uniforms.uMouseRayOrigin.value.copy(localOrigin);
   uniforms.uMouseRayDir.value.copy(seenPointer ? localDir : new THREE.Vector3());
-  uniforms.uMouseStrength.value = worldPush * fade;
+  hoverFade = fade;
+  // the direct displacement is the hoverFeel=0 end, so it fades OUT as the dial goes up
+  uniforms.uMouseStrength.value =
+    worldPush * fade * (1 - THREE.MathUtils.clamp(CONFIG.hoverFeel, 0, 1));
 
   // ---- bloom: is the pointer NEAR the cloud? -------------------------------
   // Distance from the cloud's centre to the pointer ray, in local space — a proximity in
