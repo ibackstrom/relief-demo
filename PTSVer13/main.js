@@ -589,7 +589,7 @@ const CONFIG = {
   // Defaulting to 0, which is the hover from ver7-ver10 exactly. The inertial version is on
   // the bar rather than shipped, because the two are different behaviours and the old one is
   // the one that has been confirmed to feel right.
-  hoverFeel: 0.0,
+  hoverFeel: 0.10,
 
   // The two ends the dial runs between. settle interpolates GEOMETRICALLY — it is a rate, so
   // the halfway point that matters is the geometric mean, not the arithmetic one.
@@ -1366,8 +1366,13 @@ vec3 cursorForce(vec3 p, float shape){
            * max(0.05, 1.0 + (shape - 0.5) * 2.0 * uMouseEdgeBlur + wob * uMouseNoise);
   if (d >= mr) return vec3(0.0);
 
+  // same three: radius above, then strength and direction
   float fall = pow(1.0 - d / mr, uFalloffPower);
-  return (delta / (d + 1e-4)) * fall * uPush;
+  fall *= max(0.0, 1.0 + snoise3dDeriv(np * 1.7 + vec3(5.0, 61.0, 13.0)).w * uMouseNoise);
+  float bend = snoise3dDeriv(np * 1.3 + vec3(47.0, 3.0, 29.0)).w * uMouseNoise * 1.6;
+  float cb = cos(bend), sb = sin(bend);
+  vec3 turned = vec3(delta.x * cb - delta.y * sb, delta.x * sb + delta.y * cb, delta.z);
+  return (turned / (length(turned) + 1e-4)) * fall * uPush;
 }
 
 void main(){
@@ -1573,6 +1578,14 @@ void main(){
     // lopsided — still plainly a circle, only off-centre. The rim needs several lobes around
     // it before the eye stops completing the shape, and a finer octave on top of those to
     // break the lobes themselves.
+    // Three things are noised, not one, and that is the difference between a ragged circle
+    // and a shape that is not a circle at all:
+    //   the RADIUS, so the rim is uneven;
+    //   the STRENGTH, so some of the rim is barely pushed and some is shoved hard;
+    //   the DIRECTION, bent off radial, so the push is not a star out of one point.
+    // Radius alone can only ever give a wobbly circle — every push still points straight
+    // out from the same place, and the eye reads that arrangement as round however the
+    // boundary is shaped.
     vec3 np = pos * uMouseNoiseScale + vec3(0.0, 0.0, uTime * 0.15);
     float wob = snoise3dDeriv(np).w
               + snoise3dDeriv(np * 2.7 + vec3(31.0, 7.0, 19.0)).w * 0.5;
@@ -1580,7 +1593,12 @@ void main(){
              * max(0.05, 1.0 + (aShape - 0.5) * 2.0 * uMouseEdgeBlur + wob * uMouseNoise);
     if (distToRay < mr) {
       pushFalloff = pow(1.0 - distToRay / mr, uFalloffPower);
-      pushDir = delta / (distToRay + 1e-4);
+      pushFalloff *= max(0.0,
+        1.0 + snoise3dDeriv(np * 1.7 + vec3(5.0, 61.0, 13.0)).w * uMouseNoise);
+      float bend = snoise3dDeriv(np * 1.3 + vec3(47.0, 3.0, 29.0)).w * uMouseNoise * 1.6;
+      float cb = cos(bend), sb = sin(bend);
+      vec3 turned = vec3(delta.x * cb - delta.y * sb, delta.x * sb + delta.y * cb, delta.z);
+      pushDir = turned / (length(turned) + 1e-4);
     }
   }
 
@@ -4418,9 +4436,9 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'mouseRadius', name: 'reach', cst: 'CONFIG.mouseRadius',
       min: 0.01, max: 0.35, step: 0.005, value: CONFIG.mouseRadius,
       place: true, text: () => CONFIG.mouseRadius.toFixed(3) },
-    { key: 'hoverFeel', name: 'hover', cst: 'CONFIG.hoverFeel  0 = old, 1 = new',
-      min: 0, max: 1, step: 0.01, value: CONFIG.hoverFeel,
-      text: () => CONFIG.hoverFeel.toFixed(2) },
+    { key: 'mouseNoise', name: 'push noise', cst: 'CONFIG.mouseNoise',
+      min: 0, max: 1.2, step: 0.01, value: CONFIG.mouseNoise,
+      uni: 'uMouseNoise', text: () => CONFIG.mouseNoise.toFixed(2) },
     { key: 'shadowStrength', name: 'shadow', cst: 'CONFIG.shadowStrength',
       min: 0, max: 1.5, step: 0.01, value: CONFIG.shadowStrength,
       text: () => CONFIG.shadowStrength.toFixed(2) },
