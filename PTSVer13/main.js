@@ -566,7 +566,9 @@ const CONFIG = {
                             //   look is curling ink, not a burst opening out
   simFine: 0.70,            // weight of a second octave at 3.1x the frequency. The large
                             //   octave makes the lobes, this one the hairs inside them
-  simGravity: 0.0,
+  simGravity: 0.0,          // world units per second, straight down, always. Off here: a
+                            //   flow field has no down, and the drift it added only pulled
+                            //   the mass off the corner
 
   // ------------------------------------------------------------ inertia
   // How much of its own motion a particle keeps. These two are the difference between a
@@ -593,16 +595,19 @@ const CONFIG = {
   hoverOldDrag: 0.900,
   hoverNewDrag: 0.992,
 
-  // Strength, held constant ACROSS the dial rather than left to drift with it. A force that
-  // accumulates over many frames produces far more velocity than the same force that does
-  // not: the gain is 1/(1 - drag * (1 - settle)), which is about 19 at the heavy end and 1 at
-  // the light one. Dividing it out is what stops the dial being a strength control by
-  // accident, so moving it changes only the feel.
-  hoverPush: 0.65,        // world units per second, straight down, always. Near zero by
-                            //   design: enough that the mass drifts and settles rather than
-                            //   hanging in a vacuum, not enough to rain. It is a constant
-                            //   VELOCITY rather than an acceleration, so nothing can run
-                            //   away over a long life
+  // Strength, given as the SPEED the cursor drives particles at — a fraction of the mass
+  // radius per second, the same units simSpeed is in — with the force worked back out of it.
+  //
+  // Stating it as a force does not survive the dial. A force that accumulates over many
+  // frames produces far more velocity than the same force that does not, by 1/(1 - drag *
+  // (1 - settle)): about 19 at the heavy end and 1 at the light one. So the same number means
+  // two very different pushes, and dividing a force by that gain is worse still, which is
+  // what emptied the effect out — the value had been tuned WITH the accumulation and then had
+  // it removed as well, leaving the push six times weaker than the ambient flow and invisible.
+  //
+  // Solving for the force instead, F = speed / (dt * gain), makes the number mean one thing
+  // at every setting of the dial.
+  hoverPush: 0.35,          // of the mass radius per second
 
   // The bloom, all three numbers read off the reference and all given per unit of the mass
   // radius so a resize does not have to re-derive them.
@@ -652,7 +657,9 @@ const CONFIG = {
   //
   // Radius and push are fractions of viewport HEIGHT, not world units, so the opening
   // holds its size on screen at any window. Don't put world units here.
-  mouseRadius: 0.050,       // radius of the tube that opens
+  mouseRadius: 0.075,       // radius of the tube that opens. Raised because the reach is
+                            //   now correctly divided by the group's scale — the old number
+                            //   was reaching 1.9x further than it said
   mouseStrength: 0.022,     // how far a mote at the centre of it is pushed
   falloffPower: 3.0,        // 1 = linear, 2 = soft outer edge with a firm core
   mouseSmoothing: 0.12,     // lag on the cursor the motes actually see, per frame. Low
@@ -3838,7 +3845,9 @@ function stepSim(dt) {
   // thing at any size. uMouseStrength is only read here to recover the hover FADE from it —
   // its own magnitude belonged to the displacement this replaced.
   const fadeNow = worldPush > 1e-6 ? uniforms.uMouseStrength.value / worldPush : 0;
-  u.uPush.value = (CONFIG.hoverPush / simPushGain) * sim.radius * fadeNow;
+  const dtc = Math.max(1e-4, Math.min(dt, 0.05));
+  u.uPush.value =
+    (CONFIG.hoverPush * sim.radius) / (dtc * simPushGain) * fadeNow;
 
   // velocity first, then the position that integrates it
   u.tVel.value = sim.va.texture;
