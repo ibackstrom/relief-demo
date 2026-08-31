@@ -1105,21 +1105,44 @@ That is two different memories, and both were short:
 **In time**, a shove's own velocity leaks away by `(1 - settle) * drag` a frame — 0.947 in
 ver15, an e-fold in 19 frames, so a push was three quarters gone a third of a second after it
 was given. It is 0.983 now, an e-fold in 59 frames: the cloud coasts for about a second.
-`hoverNewSettle` 0.045 → 0.014 and `hoverNewDrag` 0.992 → 0.997 are the two ends of that one
-axis and move together. Peak speed does not change with them — strength is stated as a speed
-and the force is solved back out of it through the gain — so this lengthens the answer
-without strengthening it.
+That is what `hoverHold` says, in seconds: 0.32 was ver15, 1.00 ships. `settle` and `drag`
+are solved from it rather than set beside it — what a shove keeps per frame is
+`(1 - settle) * drag`, so they are one leak written twice and a panel carrying both is a
+panel where they can be set to disagree. Peak speed does not change with any of it — strength
+is stated as a speed and the force is solved back out of it through the gain — so this
+lengthens the answer without strengthening it.
 
 **In space**, the trail is a fixed number of stamps and the oldest is dropped once they are
 full. Eight of them at `hoverTrailSpacing` of the reach covered 3.2 reaches of travel, about
 a quarter of the frame's height: cross more of the picture than that and the push given on
 the right had already been thrown away before the pointer reached the left, so the two could
-never be in the cloud together whatever the velocities remembered. `STAMP_SLOTS` is 24, which
-is 9.6 reaches — two thirds of the height, or about 40% of the width — and `hoverTrail` 1.8 →
-3.6 s, so those stamps are still acting when the pointer is somewhere else.
+never be in the cloud together whatever the velocities remembered. `hoverTrailSlots` is 24,
+which is 9.6 reaches — two thirds of the height, or about 40% of the width — and `hoverTrail`
+1.8 → 3.6 s, so those stamps are still acting when the pointer is somewhere else. The array
+itself is allocated at `STAMP_SLOTS`; the dial says how many of it are in use, so it moves
+without a shader rebuild.
 
 The pointer the motes see is lagged further as well, `mouseSmoothing` 0.12 → 0.05 a frame,
 which is what the reference does.
+
+### The panel
+
+`?ui=1` shows it. Seven bars, all of them hover — everything the cloud does on its own is
+settled and baked, and a bar for a settled value is only a way to knock it out of tune.
+
+| bar | constant | what it does | query |
+|---|---|---|---|
+| push | `hoverPush` | how hard the cursor drives motes, as a speed | `?push=` |
+| reach | `mouseRadius` | how wide the answer is, in viewport heights | `?reach=` |
+| memory | `hoverTrail` | how long each stamp of the path keeps acting, in seconds | `?memory=` |
+| irregularity | `mouseWarp` | how far from a circle the opening is | `?irr=` |
+| **inertia** | `hoverHold` | seconds a shove keeps travelling after it is given | `?inertia=` |
+| **path** | `hoverTrailSlots` | how much of the pointer's path is kept, in stamps | `?path=` |
+| **follow** | `mouseSmoothing` | how closely the cloud's pointer tracks the real one — low is the smooth, lagging end | `?follow=` |
+
+The lower three are ver16's. `?inertia=0.32&path=8&follow=0.12` is ver15's hover exactly,
+which is the comparison to make before deciding. Note the zoom already owns `?hold`, so the
+inertia dial is `?inertia`.
 
 Nothing else moved. The resting cloud is unchanged: `settle` is a rate at which a mote gives
 up its own velocity *for the field's*, so the steady state it reaches on the field is the

@@ -596,12 +596,19 @@ const CONFIG = {
   // leaves something behind for the flow to carry off and pull out of shape.
   hoverFeel: 1.0,
 
-  // The two ends the dial runs between. settle interpolates GEOMETRICALLY — it is a rate, so
-  // the halfway point that matters is the geometric mean, not the arithmetic one.
+  // The far end of the dial, stated as the thing that can be judged by looking: how long a
+  // shove the cursor gave keeps travelling. settle and drag are solved from it — see
+  // holdPair() — because they are not two tastes but one leak written twice, and a panel
+  // with both on it is a panel where the two can be set to disagree.
+  hoverHold: 1.00,          // seconds for a shove's own velocity to fall to a third of
+                            //   itself. ver15 was 0.32 — a push three quarters gone before
+                            //   the pointer had moved a hand's width, which is the whole of
+                            //   what read as plastic
+  // The near end: settle 1 keeps nothing, and the leak is fast, which reproduces the
+  // memoryless push exactly. It interpolates GEOMETRICALLY — a rate's halfway point is its
+  // geometric mean, not its arithmetic one.
   hoverOldSettle: 1.0,
-  hoverNewSettle: 0.014,
   hoverOldDrag: 0.900,
-  hoverNewDrag: 0.997,
 
   // Strength, given as the SPEED the cursor drives particles at — a fraction of the mass
   // radius per second, the same units simSpeed is in — with the force worked back out of it.
@@ -626,6 +633,14 @@ const CONFIG = {
   hoverTrail: 3.6,          // seconds a stamp keeps acting: the reach BACKWARDS IN TIME.
                             //   At 0 only the live pointer pushes, which is one stamp and
                             //   the old behaviour
+  hoverTrailSlots: 24,      // how many stamps of the path are kept, up to STAMP_SLOTS. This
+                            //   is the memory's reach in SPACE — this many times the spacing
+                            //   below, in reaches of travel — where hoverTrail is its reach
+                            //   in time. Once they are full the oldest is dropped, so at 8
+                            //   (ver15) a push given on one side of the mass was thrown away
+                            //   before the pointer arrived at the other and the two could
+                            //   never be in the cloud together, whatever the velocities
+                            //   remembered.
   hoverTrailSpacing: 0.40,  // how far the pointer must travel before a new stamp is laid, as
                             //   a fraction of the reach. A still pointer refreshes its last
                             //   stamp rather than stacking new ones on top of it - stacking
@@ -1100,6 +1115,10 @@ if (numParam('push', 0, 2) !== null) CONFIG.hoverPush = numParam('push', 0, 2);
 if (numParam('reach', 0.005, 0.6) !== null) CONFIG.mouseRadius = numParam('reach', 0.005, 0.6);
 if (numParam('memory', 0, 8) !== null) CONFIG.hoverTrail = numParam('memory', 0, 8);
 if (numParam('irr', 0, 2) !== null) CONFIG.mouseWarp = numParam('irr', 0, 2);
+// ?inertia is in seconds and ?path in stamps. Not ?hold — that is the zoom's.
+if (numParam('inertia', 0.05, 4) !== null) CONFIG.hoverHold = numParam('inertia', 0.05, 4);
+if (numParam('path', 1, 24) !== null) CONFIG.hoverTrailSlots = Math.round(numParam('path', 1, 24));
+if (numParam('follow', 0.01, 1) !== null) CONFIG.mouseSmoothing = numParam('follow', 0.01, 1);
 if (numParam('swirl', 0, 1) !== null) CONFIG.hoverSwirl = numParam('swirl', 0, 1);
 if (numParam('bs', 0, 6) !== null) CONFIG.bloomStrength = numParam('bs', 0, 6);
 
@@ -4001,8 +4020,9 @@ function stepSim(dt) {
   u.uGravity.value = CONFIG.simGravity;
   {
     const t = THREE.MathUtils.clamp(CONFIG.hoverFeel, 0, 1);
-    const settle = Math.pow(CONFIG.hoverOldSettle, 1 - t) * Math.pow(CONFIG.hoverNewSettle, t);
-    const drag = CONFIG.hoverOldDrag + (CONFIG.hoverNewDrag - CONFIG.hoverOldDrag) * t;
+    const held = holdPair(CONFIG.hoverHold);
+    const settle = Math.pow(CONFIG.hoverOldSettle, 1 - t) * Math.pow(held.settle, t);
+    const drag = CONFIG.hoverOldDrag + (held.drag - CONFIG.hoverOldDrag) * t;
     u.uSettle.value = settle;
     u.uDrag.value = drag;
     simPushGain = 1 / Math.max(1e-3, 1 - drag * (1 - settle));
@@ -4405,6 +4425,17 @@ let hoverRadiusWorld = 0;
 let hoverInnerWorld = 0;
 let expand = 0;           // 0..1, eased toward "the pointer is near the cloud"
 
+// settle and drag out of one number. What a shove keeps per frame is (1 - settle) * drag, so
+// the two are one leak written twice and the seconds asked for fix their product; the split
+// between them is the ratio the effect was tuned at, 82% of the leak carried by settle. At
+// 1.00 s that is settle 0.0136 and drag 0.9970, and at 0.32 s it is 0.042 and 0.9909 — which
+// is ver15 to within a rounding, so the dial passes through both builds.
+const HOLD_SPLIT = 0.82;
+function holdPair(seconds) {
+  const leak = 1 - Math.exp(-1 / (60 * Math.max(0.05, seconds)));
+  return { settle: Math.min(0.9, HOLD_SPLIT * leak), drag: 1 - (1 - HOLD_SPLIT) * leak };
+}
+
 // The pointer's trail. Stamps are laid as it travels and each decays on its own clock,
 // which is what makes the response a path with a history instead of a spot that follows the
 // cursor about. A still pointer REFRESHES its last stamp rather than stacking new ones in
@@ -4423,9 +4454,13 @@ function updateTrail(o, d, dt) {
       last.o.copy(o); last.d.copy(d); last.t = trailClock;
     } else {
       trail.push({ o: o.clone(), d: d.clone(), t: trailClock });
-      if (trail.length > stampO.length) trail.shift();
     }
   }
+
+  // The array is allocated at STAMP_SLOTS and the dial only says how many of it are in use,
+  // so this can be turned down mid-hover without touching the shader.
+  const cap = Math.max(1, Math.min(stampO.length, Math.round(CONFIG.hoverTrailSlots)));
+  while (trail.length > cap) trail.shift();
 
   // At 0 the life is a single frame, so only the stamp being refreshed under the live
   // pointer carries any weight — which is the old single-point push exactly.
@@ -4641,7 +4676,8 @@ if (uiEl && PARAMS.get('ui') !== '1') {
 
   // ver14: the panel is the HOVER and nothing else. Everything the cloud itself does is
   // settled and baked, and a bar for a settled value is only a way to knock it out of tune.
-  // All four are read out of CONFIG every frame, so none of them needs a rebuild.
+  // ver16 adds the three the client asked for by hand. All seven are read out of CONFIG
+  // every frame, so none of them needs a rebuild.
   const ROWS = [
     { key: 'hoverPush', name: 'push', cst: 'CONFIG.hoverPush',
       min: 0, max: 1.2, step: 0.01, value: CONFIG.hoverPush,
@@ -4657,6 +4693,19 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'mouseWarp', name: 'irregularity', cst: 'CONFIG.mouseWarp',
       min: 0, max: 1.5, step: 0.01, value: CONFIG.mouseWarp,
       text: () => CONFIG.mouseWarp.toFixed(2) },
+    // ver16's three: how long a shove lasts, how much of the path is kept, and how closely
+    // the cloud's pointer follows the real one. Between them they are the whole of whether
+    // the cursor is answered where it is or where it has been.
+    { key: 'hoverHold', name: 'inertia', cst: 'CONFIG.hoverHold',
+      min: 0.1, max: 3, step: 0.05, value: CONFIG.hoverHold,
+      text: () => CONFIG.hoverHold.toFixed(2) + ' s' },
+    { key: 'hoverTrailSlots', name: 'path', cst: 'CONFIG.hoverTrailSlots',
+      min: 1, max: 24, step: 1, value: CONFIG.hoverTrailSlots, round: true,
+      text: () => String(CONFIG.hoverTrailSlots) },
+    // low is a cloud that lags the pointer, which is the smooth end
+    { key: 'mouseSmoothing', name: 'follow', cst: 'CONFIG.mouseSmoothing',
+      min: 0.01, max: 0.4, step: 0.01, value: CONFIG.mouseSmoothing,
+      text: () => CONFIG.mouseSmoothing.toFixed(2) },
   ];
 
   uiEl.innerHTML = '<h2>hover</h2>' + ROWS.map((r, i) =>
