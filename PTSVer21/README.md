@@ -5,7 +5,7 @@ cursor and blooms outward when the pointer reaches it.
 
 ver21 moves the sign's anchor **along the words** rather than sitting on the middle of them:
 the mass thins toward the screen edge it is wedged against, so an anchor on the centre of the
-box left the last word only half backed. `signBiasX` is 0.55 of the label's own half-width, and
+box left the last word only half backed. `signBiasX` is 1.10 of the label's own half-width — a little past the right edge of the type — and
 it moves the pull, the held patch and the seat focus together. See
 [The patch under the sign](#the-patch-under-the-sign).
 
@@ -1371,7 +1371,7 @@ number to update.
 
 **It is not centred on that box, though.** The cloud is wedged into the corner and thins toward
 the screen edge, so a patch on the middle of the label runs out of mass before the words do —
-the last one ends up half backed. `signBiasX` (0.55) shifts the anchor toward the end of the
+the last one ends up half backed. `signBiasX` (1.10, a little past the right edge of the type) shifts the anchor toward the end of the
 words, as a fraction of the label's own half-width so it holds for a longer or shorter piece of
 text. One number moves three things, because they should never disagree: the pull, the held
 patch, and the seat focus that decides where motes are born.

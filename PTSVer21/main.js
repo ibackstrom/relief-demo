@@ -784,7 +784,9 @@ const CONFIG = {
   signLeash: 0.10,          // that short leash, in mass radii. Small enough that the patch
                             //   cannot be swept off the words, large enough that it still
                             //   moves and never reads as a stuck decal
-  signBiasX: 0.55,          // how far to shift the sign's anchor toward the END of the words,
+  signBiasX: 1.10,          // how far to shift the sign's anchor toward the END of the words,
+                            //   1.0 puts it on the right edge of the type and this is a little
+                            //   past that: at 0.55 the last word still came up half backed.
                             //   as a fraction of the label's own half-width. The mass thins
                             //   toward the screen edge it is wedged against, so an anchor on
                             //   the middle of the box leaves the last word only half backed —
