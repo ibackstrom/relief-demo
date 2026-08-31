@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>particle cloud — PTSVer21</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #e6e4e1; }
+  /* The canvas is transparent and sits above whatever is behind it, so this drops over an
+     existing page as an overlay. The page background here only stands in for that. */
+  canvas { display: block; position: fixed; inset: 0; }
+  #hint {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    font: 12px/1.4 Helvetica, Arial, sans-serif; letter-spacing: .08em;
+    color: rgba(0,0,0,.4); text-transform: uppercase; pointer-events: none;
+  }
+  /* two controls, for look-dev only: quantity and the ink's hue */
+  /* A rail down the left edge rather than a floating card: full height, flush to the side,
+     and scrolling on its own if the list outgrows the window. */
+  #pui {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 226px; z-index: 20;
+    box-sizing: border-box; overflow-y: auto;
+    background: rgba(255,255,255,.88); backdrop-filter: blur(6px);
+    border-right: 1px solid rgba(0,0,0,.12); padding: 14px 16px 18px;
+    font: 11px/1.35 Helvetica, Arial, sans-serif; color: rgba(0,0,0,.75);
+  }
+  #pui h2 {
+    margin: 0 0 4px; font-size: 10px; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; color: rgba(0,0,0,.5);
+  }
+  #pui .row { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(0,0,0,.10); }
+  #pui .row:first-of-type { margin-top: 6px; padding-top: 0; border-top: 0; }
+  #pui .lbl { display: flex; justify-content: space-between; align-items: center; gap: 7px; }
+  #pui .name { font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 10px; }
+  #pui .cst { display: block; margin-top: 2px; font-family: Consolas, Menlo, monospace;
+             font-size: 10px; color: rgba(0,0,0,.42); }
+  #pui .val { margin-left: auto; font-family: Consolas, Menlo, monospace; font-size: 11px;
+             color: #a41010; white-space: nowrap; }
+  #pui input[type=range] { width: 100%; margin: 5px 0 0; accent-color: #a41010; }
+  #pui .foot { margin-top: 11px; font-size: 10px; color: rgba(0,0,0,.4); }
+  /* The label sits in the upper-right corner, pinned here in CSS — this is where it has to
+     be, so it is the thing that does not move. The particles are gathered onto it instead:
+     main.js reads this element's box and puts the density focus at its centre. */
+  @font-face {
+    font-family: 'Neue Montreal';
+    src: url('./assets/NeueMontreal-Regular.woff2') format('woff2');
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+  #booknow {
+    position: fixed; z-index: 30; pointer-events: none;
+    right: 20px; top: 30px;
+    font: 400 16px/1 'Neue Montreal', Helvetica, Arial, sans-serif;
+    letter-spacing: .10em; color: #fff; white-space: nowrap;
+  }
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font: 12px/1 Helvetica, Arial, sans-serif; letter-spacing: .12em; color: rgba(0,0,0,.5);
+    text-transform: uppercase; background: #e6e4e1; transition: opacity .6s ease; z-index: 10;
+  }
+
+  /* ?original — the reference site's own ground, set by main.js on <html>. Dark blue on the
+     left falling to black on the right, with a blue light rising from the bottom centre.
+     Only the page dresses up; the canvas stays transparent and paints no background. */
+  html[data-original] { background: #000; }
+  html[data-original] body {
+    background:
+      radial-gradient(ellipse 90% 65% at 50% 100%, rgba(0,42,110,.9), rgba(0,42,110,0) 70%),
+      linear-gradient(to right, rgb(2,34,69), rgb(0,0,0));
+  }
+  html[data-original] #loading { background: #01121f; color: rgba(255,255,255,.55); }
+  html[data-original] #hint { color: rgba(255,255,255,.45); }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="loading">loading…</div>
+<div id="hint">move the cursor into the cloud</div>
+<div id="pui"></div>
+<div id="booknow">BOOK NOW</div>
+<!-- ver20's relief wall underneath, then our motes over it. Two independent apps sharing a
+     page rather than one merged renderer: each keeps its own scene and loop, the later canvas
+     paints on top, and both listen to the pointer on window so both still react to it.
+     ver20's own assets resolve through ../shared/, which is the same from here as from
+     /ver20/ — nothing is duplicated. -->
+<script type="module" src="../ver20/main.js"></script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
