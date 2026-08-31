@@ -247,6 +247,27 @@ why it is not zero.
 of their speeds, so it is the right dial for a uniform slow-down: the character of the motion
 survives it. `?speed=` overrides live if the ink wants to be livelier than the reference.
 
+### The client's settings
+
+ver16 ships the values off the client's own panel (`parametersmain2.jpg`, tuned on ver12,
+whose defaults for all of these ver16 still carried — so they transfer as read):
+
+| constant | was | is | |
+|---|---|---|---|
+| `particleCount` | 50 000 | **450 000** | nine times the motes |
+| `alphaGain` | 2.60 | **0.43** | each one about a sixth as present |
+| `simSpeed` | 0.064 | **0.118** | the field runs near twice as fast |
+| `massScale` | 1.90 | **1.20** | a smaller mass on screen |
+| `offsetX` / `offsetY` | 0.315 / 0.375 | **0.150 / 0.230** | and closer in to the corner |
+
+The first two are one decision: many faint grains rather than few solid ones. `size`, `speed`,
+`turbulence`, `density`, the four shadow bars and the hue were left where they already were.
+
+**`particleCount` is the one number here with a cost.** Everything else is a uniform; this is
+baked into the geometry and the simulation's textures, and the work is linear in it with no
+overhead worth speaking of. 450 000 is fifteen times the count these notes call the top of the
+range. Check it on the real hardware the site has to run on before this ships.
+
 ### Palette
 
 **ver16 ships the client's own setting**: the ink is `[0.956, 0.155, 0.155]` on all five

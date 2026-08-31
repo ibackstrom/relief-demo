@@ -31,7 +31,12 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 50000,     // far fewer than ver6's 60000, and the model is why: this one
+  particleCount: 450000,    // the client's setting off the panel, nine times what this was
+                            //   tuned at and paired with alphaGain below: many faint grains
+                            //   rather than few solid ones. Cost is linear in this and
+                            //   nothing else here is, so it is the number to check on real
+                            //   hardware before shipping.
+                            // far fewer than ver6's 60000, and the model is why: this one
                             //   covers under a third of its own box, so the same count
                             //   lands three times as densely and the ribbons fill in
                             //   solid. The drawing only reads while its motes are still
@@ -435,9 +440,9 @@ const CONFIG = {
   // was wrong: the seeds sit exactly on the corner and it is DIFFUSION that carries the
   // visible mass inward off it. Nudging the group back out is the honest correction for
   // that, and it is easier to set by eye than to derive.
-  offsetX: 0.315,            // viewport heights, positive toward the corner's own side
-  offsetY: 0.375,
-  massScale: 1.90,          // on-screen size of the whole thing, motion included
+  offsetX: 0.150,           // viewport heights, positive toward the corner's own side
+  offsetY: 0.230,           // both off the client's panel, with massScale below
+  massScale: 1.20,          // on-screen size of the whole thing, motion included
 
   anchorX: 1.00,
   anchorY: 0.97,
@@ -530,7 +535,8 @@ const CONFIG = {
   // small numbers, so the buffer keeps its precision where it is needed — and on a device
   // that will only give us half floats, an absolute position's smallest representable step
   // is larger than one frame's movement and the cloud would simply never start.
-  simSpeed: 0.064,          // the field's strength, as a fraction of the mass radius per
+  simSpeed: 0.118,          // the client's setting, near twice what this was tuned at.
+                            //   the field's strength, as a fraction of the mass radius per
                             //   second, so a resize does not change the pace. The reference
                             //   carries its motes at 3.0-3.5% of the mass radius per second;
                             //   this sits above that because the curl's own magnitude is
@@ -905,7 +911,10 @@ const CONFIG = {
   ],
   rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish
-  alphaGain: 2.60,          // overall presence against the page, applied last. The bloom used
+  alphaGain: 0.43,          // the client's setting. Cut to a sixth against particleCount's
+                            //   nine times, so the mass lands near where it was but is made
+                            //   of far more, far fainter grains.
+                            // overall presence against the page, applied last. The bloom used
                             //   to provide this as a side effect of lifting the canvas alpha
 
   saturation: 1.35,
