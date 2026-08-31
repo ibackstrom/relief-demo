@@ -794,6 +794,23 @@ const CONFIG = {
                             //   it holds for a longer or shorter piece of text.
                             //   It moves the pull and the held patch together: they are the
                             //   same point, and the seat focus is drawn from it as well
+  signTrap: 0.35,           // THE TRAP, and it is what actually keeps the words backed.
+                            //   Holding the motes SEATED under the label only works where
+                            //   there are seats to hold: the mass is wedged into the corner
+                            //   and thins toward the screen edge, so the end of the words can
+                            //   sit past where the model puts any, and no amount of pull or
+                            //   bias makes seats appear there.
+                            //   So a share of the motes that DRIFT into the label's box are
+                            //   kept in it — they may stir inside, they may not cross the rim
+                            //   — and the patch fills from the whole cloud instead of from the
+                            //   population that happened to be born there. It is self
+                            //   limiting: only this share of what passes is caught, and a
+                            //   caught mote still dies on its own clock and respawns at its
+                            //   seat, so the trap reaches a steady population rather than
+                            //   draining the cloud into the sign. 0 turns it off.
+                            //   The turnover is the lifespan clock, so this leans on
+                            //   lifeFraction being 1: with immortal motes in the mix they
+                            //   would accumulate in the box and never leave it.
   signPad: 0.045,           // how far past the type the patch reaches, in viewport heights.
                             //   The words need ink around them as well as under them, or the
                             //   backing ends exactly at the glyphs and reads as a smudge cut
@@ -1236,6 +1253,7 @@ if (numParam('follow', 0.01, 1) !== null) CONFIG.mouseSmoothing = numParam('foll
 // ?warm=0 shows the arrival as ver16 did; ?fade=0 drops the materialise.
 if (numParam('sign', 0, 1) !== null) CONFIG.signHold = numParam('sign', 0, 1);
 if (numParam('signx', -1.5, 2) !== null) CONFIG.signBiasX = numParam('signx', -1.5, 2);
+if (numParam('trap', 0, 1) !== null) CONFIG.signTrap = numParam('trap', 0, 1);
 if (numParam('leash', 0.05, 4) !== null) CONFIG.leashRadius = numParam('leash', 0.05, 4);
 if (numParam('attract', 0, 2) !== null) CONFIG.attractPull = numParam('attract', 0, 2);
 if (numParam('attractr', 0.02, 1.5) !== null) CONFIG.attractRadius = numParam('attractr', 0.02, 1.5);
@@ -1510,6 +1528,7 @@ uniform float uLeashSoft;
 uniform vec2  uSignHalf;         // the label's box, half-extents in this object's space
 uniform float uSignHold;
 uniform float uSignLeash;
+uniform float uSignTrap;
 uniform vec3  uAttractPoint;     // the label's centre, in this object's space
 uniform float uAttractRadius;
 uniform float uAttractCore;
@@ -1669,6 +1688,17 @@ void main(){
     offset *= (leash + give * (1.0 - exp(-over / give))) / away;
   }
 
+  // A caught mote is held inside the label's box: if the step took it past the rim it is put
+  // back on the rim, along the line it left by. Nothing about its velocity is touched, so it
+  // keeps sliding around the inside of the boundary rather than stopping dead on it.
+  if (texture2D(tVel, vUv).w > 0.5) {
+    vec2 pos2 = seed.xy + offset.xy;
+    vec2 half2 = max(uSignHalf, vec2(1e-5));
+    vec2 q = (pos2 - uAttractPoint.xy) / half2;
+    float e = length(q);
+    if (e > 1.0) offset.xy += (uAttractPoint.xy + (q / e) * half2) - pos2;
+  }
+
   // Dead: back to the seat, age zero. The seat is the source, so the model's silhouette is
   // what the cloud is continuously fed from rather than what it looks like.
   if (age >= seed.w) { offset = vec3(0.0); age = 0.0; }
@@ -1703,11 +1733,23 @@ void main(){
   v += attractForce(here) * uDt;
   v *= uDrag;
 
+  // The trap's flag rides in the velocity buffer's spare channel — the only per-mote state
+  // this build has room for without a third target. It latches: once a mote is caught it
+  // stays caught until it dies, so the patch does not flicker as motes drift over the rim.
+  float caught = texture2D(tVel, vUv).w;
+  if (uSignTrap > 0.0) {
+    vec2 q = (here.xy - uAttractPoint.xy) / max(uSignHalf, vec2(1e-5));
+    // fract of the seed's lifespan is a per-mote constant, so which motes are catchable is
+    // decided once and never changes: a stable share of the traffic rather than a dice roll
+    // every frame, which would catch everything eventually.
+    caught = max(caught, step(length(q), 1.0) * step(fract(seed.w * 13.77), uSignTrap));
+  }
+
   // a reborn particle starts still, or it would arrive at its seat carrying whatever it was
   // doing when it died and the seed would visibly squirt
-  if (age >= seed.w) v = vec3(0.0);
+  if (age >= seed.w) { v = vec3(0.0); caught = 0.0; }
 
-  gl_FragColor = vec4(v, 0.0);
+  gl_FragColor = vec4(v, caught);
 }`);
 
 // Boot: everything at its seat, age zero, so the first seconds after load are one coherent
@@ -4060,6 +4102,7 @@ function makeSim() {
       uSignHalf: { value: new THREE.Vector2(1e-5, 1e-5) },
       uSignHold: { value: CONFIG.signHold },
       uSignLeash: { value: CONFIG.signLeash * d.radius },
+      uSignTrap: { value: CONFIG.signTrap },
       uAttractPoint: { value: new THREE.Vector3(0, 0, 0) },
       uAttractRadius: { value: 1 },
       uAttractCore: { value: CONFIG.attractCore },
@@ -4256,6 +4299,7 @@ function stepSim(dt) {
   u.uLeashSoft.value = CONFIG.leashSoft;
   u.uSignHold.value = CONFIG.signHold;
   u.uSignLeash.value = CONFIG.signLeash * sim.radius;
+  u.uSignTrap.value = CONFIG.signTrap;
   uniforms.uSignHold.value = CONFIG.signHold;
 
   // velocity first, then the position that integrates it
@@ -4998,6 +5042,10 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'signHold', name: 'sign hold', cst: 'CONFIG.signHold',
       min: 0, max: 1, step: 0.01, value: CONFIG.signHold,
       text: () => CONFIG.signHold.toFixed(2) },
+    // how much of the traffic across the label's box stays in it
+    { key: 'signTrap', name: 'sign trap', cst: 'CONFIG.signTrap',
+      min: 0, max: 1, step: 0.01, value: CONFIG.signTrap,
+      text: () => CONFIG.signTrap.toFixed(2) },
     // ver21: where along the words that patch is centred. It moves the pull with it, and the
     // SEAT focus is drawn from the same number — so this one needs the population re-thrown
     { key: 'signBiasX', name: 'sign bias', cst: 'CONFIG.signBiasX',

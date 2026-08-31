@@ -1186,7 +1186,7 @@ which is what the reference does.
 
 ### The panel
 
-`?ui=1` shows it. Twelve bars in ver21 — the seven hover ones, the two for the sign's pull,
+`?ui=1` shows it. Thirteen bars in ver21 — the seven hover ones, the two for the sign's pull,
 the leash, the sign's hold and its bias along the words. Every bar is free to drag except
 **sign bias**, which re-throws the population on release because the seats are drawn from it. The three that are not hover are the new mechanisms, and they are on the panel
 because they have to be judged by eye rather than derived. Everything the cloud does on its own is settled and baked, and a bar for
@@ -1206,6 +1206,7 @@ the cloud's twelve and the ink's three as well — if a look-dev session needs t
 | attract reach | `attractRadius` | how far out it reaches for them, in viewport heights | `?attractr=` |
 | leash | `leashRadius` | how far a mote may stray from its seat, in mass radii | `?leash=` |
 | sign hold | `signHold` | how firmly the patch under the words is held in place | `?sign=` |
+| sign trap | `signTrap` | how much of the traffic across the label's box stays in it | `?trap=` |
 | sign bias | `signBiasX` | where along the words the patch and the pull are centred | `?signx=` |
 
 **ver18 ships the client's hover settings**: push 1.20, reach 0.350, memory 7.35,
@@ -1369,7 +1370,32 @@ than a tendency:
 them. Change the text, the font or the corner it sits in and the held patch follows it with no
 number to update.
 
-**It is not centred on that box, though.** The cloud is wedged into the corner and thins toward
+### The trap
+
+Holding the motes *seated* under the label only works where there are seats to hold, and that
+is the limit the first two attempts ran into. The mass is wedged into the corner and thins
+toward the screen edge, so the end of the words can sit past where the model puts any seats at
+all — and then no amount of pull, hold or bias makes ink appear there, because there is nothing
+to move.
+
+So a share of the motes that **drift into** the label's box are kept in it. `signTrap` is 0.35:
+that fraction of the traffic is catchable, decided once per mote from its own seed so it is a
+stable share rather than a dice roll every frame that would eventually catch everything. A
+caught mote may stir inside the box; it may not cross the rim. If a step takes it past, it is
+put back on the rim along the line it left by, with its velocity untouched, so it slides around
+the inside of the boundary instead of stopping dead on it.
+
+The flag rides in the **velocity buffer's spare channel** — the only per-mote state this build
+has room for without a third render target — and it latches, so the patch does not flicker as
+motes cross the rim. It clears on death, which is what makes the whole thing self-limiting:
+only a share of what passes is caught, and everything caught eventually dies and respawns at
+its seat, so the trap reaches a steady population instead of draining the cloud into the sign.
+(That turnover is the lifespan clock, so it leans on `lifeFraction` being 1. With immortal
+motes in the mix they would pile into the box and never leave.)
+
+`?trap=0` is the ver20 behaviour, and the bar is **sign trap**.
+
+**The patch is not centred on the label's box, though.** The cloud is wedged into the corner and thins toward
 the screen edge, so a patch on the middle of the label runs out of mass before the words do —
 the last one ends up half backed. `signBiasX` (1.10, a little past the right edge of the type) shifts the anchor toward the end of the
 words, as a fraction of the label's own half-width so it holds for a longer or shorter piece of
