@@ -732,7 +732,7 @@ const CONFIG = {
   // Stated as a speed, the same way the cursor's push is: a fraction of the mass radius per
   // second, with the force solved back out of it through the same gain, so the number means
   // one thing whatever the inertia is set to.
-  attractPull: 0.30,        // 0 turns it off and the build is ver17 exactly. Tripled in
+  attractPull: 0.70,        // 0 turns it off and the build is ver17 exactly. Tripled in
                             //   ver19: motes were still wandering off the sign
   attractRadius: 0.55,      // reach, in viewport heights. Raised with the pull above, and it
                             //   is the half of the fix that recovers a mote that has already
@@ -794,7 +794,7 @@ const CONFIG = {
                             //   it holds for a longer or shorter piece of text.
                             //   It moves the pull and the held patch together: they are the
                             //   same point, and the seat focus is drawn from it as well
-  signTrap: 0.35,           // THE TRAP, and it is what actually keeps the words backed.
+  signTrap: 0.75,           // THE TRAP, and it is what actually keeps the words backed.
                             //   Holding the motes SEATED under the label only works where
                             //   there are seats to hold: the mass is wedged into the corner
                             //   and thins toward the screen edge, so the end of the words can
@@ -811,6 +811,15 @@ const CONFIG = {
                             //   The turnover is the lifespan clock, so this leans on
                             //   lifeFraction being 1: with immortal motes in the mix they
                             //   would accumulate in the box and never leave it.
+  signShield: 0.25,         // how much of the cursor's push a CAUGHT mote feels. The push is
+                            //   the strongest force in the build by a wide margin — a reach of
+                            //   0.35 of the viewport at 1.20 of the mass radius per second —
+                            //   so a pass of the pointer near the corner was simply blowing
+                            //   the sign's own ink off the words faster than anything could
+                            //   put it back. The motes holding the label are the one part of
+                            //   the cloud the cursor does not get to empty. 1 lets them be
+                            //   pushed like everything else, 0 makes the patch ignore the
+                            //   pointer entirely — which reads as a dead spot, hence a quarter
   signPad: 0.045,           // how far past the type the patch reaches, in viewport heights.
                             //   The words need ink around them as well as under them, or the
                             //   backing ends exactly at the glyphs and reads as a smudge cut
@@ -1254,6 +1263,7 @@ if (numParam('follow', 0.01, 1) !== null) CONFIG.mouseSmoothing = numParam('foll
 if (numParam('sign', 0, 1) !== null) CONFIG.signHold = numParam('sign', 0, 1);
 if (numParam('signx', -1.5, 2) !== null) CONFIG.signBiasX = numParam('signx', -1.5, 2);
 if (numParam('trap', 0, 1) !== null) CONFIG.signTrap = numParam('trap', 0, 1);
+if (numParam('shield', 0, 1) !== null) CONFIG.signShield = numParam('shield', 0, 1);
 if (numParam('leash', 0.05, 4) !== null) CONFIG.leashRadius = numParam('leash', 0.05, 4);
 if (numParam('attract', 0, 2) !== null) CONFIG.attractPull = numParam('attract', 0, 2);
 if (numParam('attractr', 0.02, 1.5) !== null) CONFIG.attractRadius = numParam('attractr', 0.02, 1.5);
@@ -1529,6 +1539,7 @@ uniform vec2  uSignHalf;         // the label's box, half-extents in this object
 uniform float uSignHold;
 uniform float uSignLeash;
 uniform float uSignTrap;
+uniform float uSignShield;
 uniform vec3  uAttractPoint;     // the label's centre, in this object's space
 uniform float uAttractRadius;
 uniform float uAttractCore;
@@ -1727,16 +1738,19 @@ void main(){
   vec3 here  = seed.xyz + state.xyz;
   vec3 v     = texture2D(tVel, vUv).xyz;
 
+  // last frame's catch, read before it is updated below: it decides how much of the cursor
+  // this mote feels, and a mote already holding the sign feels only a quarter of it
+  float caught = texture2D(tVel, vUv).w;
+
   vec3 target = fieldVelocity(here) + birthImpulse(here, age) + vec3(0.0, -uGravity, 0.0);
   v += (target - v) * clamp(uSettle, 0.0, 1.0);
-  v += cursorForce(here, fract(seed.w * 7.31)) * uDt;
+  v += cursorForce(here, fract(seed.w * 7.31)) * uDt * mix(1.0, uSignShield, caught);
   v += attractForce(here) * uDt;
   v *= uDrag;
 
   // The trap's flag rides in the velocity buffer's spare channel — the only per-mote state
   // this build has room for without a third target. It latches: once a mote is caught it
   // stays caught until it dies, so the patch does not flicker as motes drift over the rim.
-  float caught = texture2D(tVel, vUv).w;
   if (uSignTrap > 0.0) {
     vec2 q = (here.xy - uAttractPoint.xy) / max(uSignHalf, vec2(1e-5));
     // fract of the seed's lifespan is a per-mote constant, so which motes are catchable is
@@ -4103,6 +4117,7 @@ function makeSim() {
       uSignHold: { value: CONFIG.signHold },
       uSignLeash: { value: CONFIG.signLeash * d.radius },
       uSignTrap: { value: CONFIG.signTrap },
+      uSignShield: { value: CONFIG.signShield },
       uAttractPoint: { value: new THREE.Vector3(0, 0, 0) },
       uAttractRadius: { value: 1 },
       uAttractCore: { value: CONFIG.attractCore },
@@ -4300,6 +4315,7 @@ function stepSim(dt) {
   u.uSignHold.value = CONFIG.signHold;
   u.uSignLeash.value = CONFIG.signLeash * sim.radius;
   u.uSignTrap.value = CONFIG.signTrap;
+  u.uSignShield.value = CONFIG.signShield;
   uniforms.uSignHold.value = CONFIG.signHold;
 
   // velocity first, then the position that integrates it
@@ -5046,6 +5062,10 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'signTrap', name: 'sign trap', cst: 'CONFIG.signTrap',
       min: 0, max: 1, step: 0.01, value: CONFIG.signTrap,
       text: () => CONFIG.signTrap.toFixed(2) },
+    // how much of the cursor's push the caught motes feel
+    { key: 'signShield', name: 'sign shield', cst: 'CONFIG.signShield',
+      min: 0, max: 1, step: 0.01, value: CONFIG.signShield,
+      text: () => CONFIG.signShield.toFixed(2) },
     // ver21: where along the words that patch is centred. It moves the pull with it, and the
     // SEAT focus is drawn from the same number — so this one needs the population re-thrown
     { key: 'signBiasX', name: 'sign bias', cst: 'CONFIG.signBiasX',

@@ -1186,7 +1186,7 @@ which is what the reference does.
 
 ### The panel
 
-`?ui=1` shows it. Thirteen bars in ver21 — the seven hover ones, the two for the sign's pull,
+`?ui=1` shows it. Fourteen bars in ver21 — the seven hover ones, the two for the sign's pull,
 the leash, the sign's hold and its bias along the words. Every bar is free to drag except
 **sign bias**, which re-throws the population on release because the seats are drawn from it. The three that are not hover are the new mechanisms, and they are on the panel
 because they have to be judged by eye rather than derived. Everything the cloud does on its own is settled and baked, and a bar for
@@ -1207,6 +1207,7 @@ the cloud's twelve and the ink's three as well — if a look-dev session needs t
 | leash | `leashRadius` | how far a mote may stray from its seat, in mass radii | `?leash=` |
 | sign hold | `signHold` | how firmly the patch under the words is held in place | `?sign=` |
 | sign trap | `signTrap` | how much of the traffic across the label's box stays in it | `?trap=` |
+| sign shield | `signShield` | how much of the cursor's push the caught motes feel | `?shield=` |
 | sign bias | `signBiasX` | where along the words the patch and the pull are centred | `?signx=` |
 
 **ver18 ships the client's hover settings**: push 1.20, reach 0.350, memory 7.35,
@@ -1298,8 +1299,8 @@ grip = smoothstep(0, core * reach, d) * exp(-(d / reach)^2)
 It eases **in from nothing at the centre** — a mote that has arrived is no longer pulled, so
 the ones behind it are not packed on top of it and the sign gets a cloud rather than a bead —
 and **out to nothing at the reach**, so this is a local gathering and not a well the whole
-corner falls into. `attractCore` is 0.30 of the reach, and **ver19 ships `attractPull` at 0.30 and
-`attractRadius` at 0.55** — three times the pull, and half again the reach.
+corner falls into. `attractCore` is 0.30 of the reach, and **`attractPull` is 0.70 with `attractRadius` at
+0.55** — three times the pull, and half again the reach.
 
 The reach is the half of that fix worth explaining. The grip falls off as a gaussian, so at
 twice the reach it is a fiftieth of nothing: a mote that has *already* left the neighbourhood
@@ -1393,7 +1394,16 @@ its seat, so the trap reaches a steady population instead of draining the cloud 
 (That turnover is the lifespan clock, so it leans on `lifeFraction` being 1. With immortal
 motes in the mix they would pile into the box and never leave.)
 
-`?trap=0` is the ver20 behaviour, and the bar is **sign trap**.
+`signTrap` ships at 0.75 — most of what crosses the box stays in it. `?trap=0` is the ver20
+behaviour, and the bar is **sign trap**.
+
+**And the cursor does not get to empty it.** The push is by a wide margin the strongest force
+in the build — a reach of 0.35 of the viewport at 1.20 of the mass radius per second — so a
+pass of the pointer near the corner was blowing the sign's own ink off the words faster than
+the pull could put it back, which is why a stronger pull alone kept not being enough. A caught
+mote now feels only `signShield` (0.25) of the push. Not none: at 0 the patch ignores the
+pointer entirely and reads as a dead spot in a cloud that is otherwise answering, which is
+worse than the problem. `?shield=` reaches it.
 
 **The patch is not centred on the label's box, though.** The cloud is wedged into the corner and thins toward
 the screen edge, so a patch on the middle of the label runs out of mass before the words do —
