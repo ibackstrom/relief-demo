@@ -4748,55 +4748,11 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     return c.map((n) => n.toFixed(3)).join(', ');
   };
 
-  // The rail the client tunes on. Three groups: what the cloud IS, how it answers the
-  // cursor, and what colour the ink is. Every row prints the value to paste into CONFIG
-  // once it is settled, and all but quantity are read out of CONFIG every frame, so they
-  // cost nothing to drag.
+  // ver17: the panel is the HOVER and nothing else, as ver14's was. Everything the cloud
+  // itself does is settled and baked, and a bar for a settled value is only a way to knock
+  // it out of tune. All seven are read out of CONFIG every frame, so none needs a rebuild
+  // and none costs anything to drag.
   const ROWS = [
-    // Size, speed and turbulence. None needs a rebuild: particleSize is a uniform, and
-    // stepSim copies the other two out of CONFIG every frame.
-    { key: 'particleSize', name: 'size', cst: 'CONFIG.particleSize',
-      min: 0.2, max: 4, step: 0.05, value: CONFIG.particleSize,
-      uni: 'uParticleSize', text: () => CONFIG.particleSize.toFixed(2) },
-    { key: 'simSpeed', name: 'speed', cst: 'CONFIG.simSpeed',
-      min: 0, max: 0.35, step: 0.002, value: CONFIG.simSpeed,
-      text: () => CONFIG.simSpeed.toFixed(3) },
-    { key: 'simFrequency', name: 'turbulence', cst: 'CONFIG.simFrequency',
-      min: 1, max: 24, step: 0.2, value: CONFIG.simFrequency,
-      text: () => CONFIG.simFrequency.toFixed(1) },
-    { key: 'alphaGain', name: 'density', cst: 'CONFIG.alphaGain',
-      min: 0.05, max: 3, step: 0.01, value: CONFIG.alphaGain,
-      uni: 'uAlphaGain', text: () => CONFIG.alphaGain.toFixed(2) },
-    // The one control with a cost: the population is baked into the geometry and into the
-    // simulation's textures, so it cannot be a uniform. It fires on release, not on every
-    // pixel of the drag — re-throwing a quarter of a million seats per input event locks
-    // the page up.
-    { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
-      min: 50000, max: 900000, step: 50000, value: CONFIG.particleCount,
-      rebuild: true, round: true, text: () => String(CONFIG.particleCount) },
-    { key: 'massScale', name: 'scale', cst: 'CONFIG.massScale',
-      min: 0.2, max: 4, step: 0.02, value: CONFIG.massScale,
-      place: true, text: () => CONFIG.massScale.toFixed(2) },
-    { key: 'offsetX', name: 'x', cst: 'CONFIG.offsetX',
-      min: -0.5, max: 0.8, step: 0.005, value: CONFIG.offsetX,
-      place: true, text: () => CONFIG.offsetX.toFixed(3) },
-    { key: 'offsetY', name: 'y', cst: 'CONFIG.offsetY',
-      min: -0.5, max: 0.8, step: 0.005, value: CONFIG.offsetY,
-      place: true, text: () => CONFIG.offsetY.toFixed(3) },
-    { key: 'shadowStrength', name: 'shadow', cst: 'CONFIG.shadowStrength',
-      min: 0, max: 1.5, step: 0.01, value: CONFIG.shadowStrength,
-      text: () => CONFIG.shadowStrength.toFixed(2) },
-    { key: 'shadowBlur', name: 'shadow blur', cst: 'CONFIG.shadowBlur',
-      min: 0, max: 10, step: 0.1, value: CONFIG.shadowBlur,
-      text: () => CONFIG.shadowBlur.toFixed(1) },
-    { key: 'shadowOffsetX', name: 'shadow x', cst: 'CONFIG.shadowOffsetX',
-      min: -0.06, max: 0.06, step: 0.001, value: CONFIG.shadowOffsetX,
-      text: () => CONFIG.shadowOffsetX.toFixed(3) },
-    { key: 'shadowOffsetY', name: 'shadow y', cst: 'CONFIG.shadowOffsetY',
-      min: -0.06, max: 0.06, step: 0.001, value: CONFIG.shadowOffsetY,
-      text: () => CONFIG.shadowOffsetY.toFixed(3) },
-
-    // ---- the cursor -------------------------------------------------------------------
     { key: 'hoverPush', name: 'push', cst: 'CONFIG.hoverPush',
       min: 0, max: 1.2, step: 0.01, value: CONFIG.hoverPush,
       text: () => CONFIG.hoverPush.toFixed(2) },
@@ -4824,23 +4780,9 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'mouseSmoothing', name: 'follow', cst: 'CONFIG.mouseSmoothing',
       min: 0.01, max: 0.4, step: 0.01, value: CONFIG.mouseSmoothing,
       text: () => CONFIG.mouseSmoothing.toFixed(2) },
-
-    // ---- the ink ----------------------------------------------------------------------
-    // One colour written to all five ramp stops. Each readout prints the RGB triple to
-    // paste into CONFIG.ramp — and refreshes only when its OWN slider moves, so in a
-    // screenshot the value that counts is the one under the bar dragged last.
-    { key: 'hue', name: 'hue', cst: 'CONFIG.ramp',
-      min: 0, max: 1, step: 0.002, value: inkHSL.h,
-      apply(v) { inkHSL.h = v; applyInk(); }, text: inkText },
-    { key: 'sat', name: 'saturation', cst: 'CONFIG.ramp',
-      min: 0, max: 1, step: 0.005, value: inkHSL.s,
-      apply(v) { inkHSL.s = v; applyInk(); }, text: inkText },
-    { key: 'light', name: 'lightness', cst: 'CONFIG.ramp',
-      min: 0, max: 1, step: 0.005, value: inkHSL.l,
-      apply(v) { inkHSL.l = v; applyInk(); }, text: inkText },
   ];
 
-  uiEl.innerHTML = '<h2>particle cloud</h2>' + ROWS.map((r, i) =>
+  uiEl.innerHTML = '<h2>hover</h2>' + ROWS.map((r, i) =>
     '<div class="row"><div class="lbl">'
     + '<span class="name">' + r.name + '</span>'
     + '<span class="val" id="pv' + i + '">' + r.text() + '</span></div>'

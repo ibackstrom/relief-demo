@@ -550,7 +550,7 @@ harness uses, one frame goes from **0.58 s at 30 000 to 1.00 s at 60 000** — t
 tracks the population almost directly, so this is not a rounding error hiding behind the
 bloom passes. A real GPU is a different regime and 60 000 instanced quads is routine there,
 but that has not been measured here, only reasoned about. If it stutters on the target
-machine, `?p=<n>` changes it without a rebuild and the quantity bar runs down to 14 000.
+machine, `?p=<n>` changes it without a rebuild (ver16's panel has the bar for it).
 
 Two constants travel with the box and are not free to stay behind:
 
@@ -1164,23 +1164,25 @@ which is what the reference does.
 
 ### The panel
 
-`?ui=1` shows it. Twenty-two bars in three groups — the cloud, the cursor, the ink:
+`?ui=1` shows it, and in ver17 it is the **hover and nothing else** — seven bars, the way
+ver14's rail was cut. Everything the cloud does on its own is settled and baked, and a bar for
+a settled value is only a way to knock it out of tune. (ver16's panel carries the full rail —
+the cloud's twelve and the ink's three as well — if a look-dev session needs them.)
 
-| group | bars |
-|---|---|
-| **the cloud** | size · speed · turbulence · density · **quantity** · scale · x · y · shadow · shadow blur · shadow x · shadow y |
-| **the cursor** | push `?push=` · reach `?reach=` · memory `?memory=` · irregularity `?irr=` · **inertia** `?inertia=` · **path** `?path=` · **follow** `?follow=` |
-| **the ink** | hue · saturation · lightness |
+| bar | constant | what it does | query |
+|---|---|---|---|
+| push | `hoverPush` | how hard the cursor drives motes, as a speed | `?push=` |
+| reach | `mouseRadius` | how wide the answer is, in viewport heights | `?reach=` |
+| memory | `hoverTrail` | how long each stamp of the path keeps acting, in seconds | `?memory=` |
+| irregularity | `mouseWarp` | how far from a circle the opening is | `?irr=` |
+| inertia | `hoverHold` | seconds a shove keeps travelling after it is given | `?inertia=` |
+| path | `hoverTrailSlots` | how much of the pointer's path is kept, in stamps | `?path=` |
+| follow | `mouseSmoothing` | how closely the cloud's pointer tracks the real one — low is the smooth, lagging end | `?follow=` |
 
-`inertia` (`hoverHold`) is the seconds a shove keeps travelling, `path` (`hoverTrailSlots`)
-how much of the pointer's path is kept, and `follow` (`mouseSmoothing`) how closely the
-cloud's pointer tracks the real one — low is the smooth, lagging end.
-`?inertia=0.32&path=8&follow=0.12` is ver15's hover exactly, which is the comparison to make
-before deciding. Note the zoom already owns `?hold`, so the inertia dial is `?inertia`.
-
-Every bar is read out of `CONFIG` each frame and costs nothing to drag — **except quantity**,
-which re-throws the seats and re-makes the simulation buffers, so it fires on release rather
-than on every pixel of the drag.
+All seven are read out of `CONFIG` every frame, so none needs a rebuild and none costs
+anything to drag. `?inertia=0.32&path=8&follow=0.12` is ver15's hover exactly, which is the
+comparison to make before deciding. Note the zoom already owns `?hold`, so the inertia dial is
+`?inertia`.
 
 ### How many motes it will take
 
@@ -1188,8 +1190,8 @@ than on every pixel of the drag.
   tall, so it runs out at the driver's maximum texture height — 16384 on desktop. Nothing else
   in the build has a limit anywhere near it: the instance count, the attribute buffers and the
   seed texture all scale linearly and comfortably.
-- **The bar and `?p=` stop at 900 000**, which is a fifth of that and already well past what
-  the picture needs.
+- **`?p=` stops at 900 000** — and ver16's quantity bar with it — a fifth of that ceiling, and
+  already well past what the picture needs.
 - **What actually decides the number is cost**, and it is linear in the population with no
   fixed overhead worth speaking of — measured 26 / 79 / 151 ms a frame at 2 000 / 7 000 /
   14 000 in the headless SwiftShader harness. That harness rasterises on the CPU, so those
