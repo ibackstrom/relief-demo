@@ -893,12 +893,15 @@ const CONFIG = {
   // on cream paper with the engraving showing through it, so even the packed core is a
   // muted brick rather than a signal red — at [0.34, 0.03, 0.02] the core came out pure
   // scarlet the moment the grains overlapped at all.
+  // ver16 takes the client's own setting off the panel: same hue, saturation 0.87 -> 0.90 and
+  // lightness 0.66 -> 0.56, which is a deeper ink. Paste what the readout prints — it is the
+  // triple in this colour space already, and all five stops carry it.
   ramp: [
-    [0.954, 0.366, 0.366],
-    [0.954, 0.366, 0.366],
-    [0.954, 0.366, 0.366],
-    [0.954, 0.366, 0.366],
-    [0.954, 0.366, 0.366],
+    [0.956, 0.155, 0.155],
+    [0.956, 0.155, 0.155],
+    [0.956, 0.155, 0.155],
+    [0.956, 0.155, 0.155],
+    [0.956, 0.155, 0.155],
   ],
   rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish

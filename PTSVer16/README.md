@@ -249,6 +249,16 @@ survives it. `?speed=` overrides live if the ink wants to be livelier than the r
 
 ### Palette
 
+**ver16 ships the client's own setting**: the ink is `[0.956, 0.155, 0.155]` on all five
+stops, taken off the panel's readout — same hue, saturation 0.87 → 0.90, lightness 0.66 →
+0.56. That is a deeper, more saturated red than the ramp below was tuned to, so the notes
+here describe how the earlier ink was arrived at rather than what is shipped.
+
+The panel writes all five stops from one colour, and the readout prints the triple to paste
+into `CONFIG.ramp` — it is already in that colour space, so it goes in verbatim. Note each
+row's readout only refreshes when its own slider moves, so the value to take is the one under
+the bar that was dragged last.
+
 Read off the reference's own pixels rather than picked. The second clip's thick ink lands on
 RGB(135, 69, 71) and its deepest folds on RGB(74, 20, 23) — a **wine red, and not a warm one**:
 blue sits a shade above green all the way through, where the first clip had it a shade below.
