@@ -440,7 +440,12 @@ const CONFIG = {
   // was wrong: the seeds sit exactly on the corner and it is DIFFUSION that carries the
   // visible mass inward off it. Nudging the group back out is the honest correction for
   // that, and it is easier to set by eye than to derive.
-  offsetX: 0.150,           // viewport heights, positive toward the corner's own side
+  offsetX: 0.210,           // viewport heights, positive toward the corner's own side. The
+                            //   client's 0.150 plus 0.060, which is about 50 px on a window
+                            //   830 px tall — the whole mass moved right so it reaches the
+                            //   corner. It is a fraction of the viewport rather than a pixel
+                            //   count, so it holds its proportion at any window size; on a
+                            //   very tall or very short one the 50 px is 50 px at THAT height
   offsetY: 0.230,           // both off the client's panel, with massScale below
   massScale: 1.20,          // on-screen size of the whole thing, motion included
 
