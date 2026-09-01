@@ -3,10 +3,14 @@
 A volume of drifting, curling lit spheres wedged into the top-right corner. It answers the
 cursor and blooms outward when the pointer reaches it.
 
-ver24 **fills the corner**. The held patch is no longer the label's box but a quarter ellipse
-centred on the screen corner — `fillW` 0.30 of the viewport's width by `fillH` 0.42 of its
-height — with `signSeats` (0.20) of the population seated across it, held on the short leash
-and shielded from the cursor. The whole upper right is populated at all times, and the sign is
+ver24 **fills the corner, constantly**. The held patch is no longer the label's box but a
+quarter ellipse centred on the screen corner — `fillW` 0.25 of the viewport's width by `fillH`
+0.34 of its height — with **`signSeats` 0.35 of the population** seated across it, held on the
+short leash, shielded from the cursor, and carrying `signInk` (0.60) more alpha than the rest
+of the cloud. That last one is the difference between a haze and a backing: the ink is faint by
+design at `alphaGain` 0.43, which is right for a dusting over a wall and not enough for white
+type to be read against. The corner is the one place the two requirements differ, so it is the
+one place the cloud is allowed to be denser. The whole upper right is populated at all times, and the sign is
 backed as a consequence rather than as a special case. `fillCorner: false` returns the patch to
 the label's own box, which is ver23.
 

@@ -818,20 +818,26 @@ const CONFIG = {
   // cloud lives in, so the whole upper right is populated at all times and the sign is backed
   // as a consequence rather than as a special case.
   fillCorner: true,         // false goes back to ver23: the patch is the label's own box
-  fillW: 0.30,              // the region's reach from the corner, in viewport WIDTHS
-  fillH: 0.42,              // and in viewport HEIGHTS. It is a quarter ellipse centred on the
+  fillW: 0.25,              // the region's reach from the corner, in viewport WIDTHS
+  fillH: 0.34,              // and in viewport HEIGHTS. It is a quarter ellipse centred on the
                             //   screen corner, so these are its radii and the visible part is
                             //   the quarter inside the frame
-  signBloomHold: 0.45,      // how much of the bloom the held motes give up. At 1 a patch this
+  signBloomHold: 0.85,      // how much of the bloom the held motes give up. At 1 a patch this
                             //   size would take the hover growth out of the whole corner,
                             //   which is most of what the bloom is for; under the label alone
                             //   that did not matter because the patch was small
 
-  signSeats: 0.20,          // share of the population seated under the label. At 450k that is
+  signSeats: 0.35,          // share of the population seated under the label. At 450k that is
                             //   22,500 motes on a patch a couple of hundred pixels across —
                             //   dense enough to read as ink rather than as a sprinkle
   signSeatDepth: 0.5,       // how much of the cloud's own depth they are spread through, so
                             //   the patch is a slab of the volume and not a decal on a plane
+  signInk: 0.60,            // extra alpha a fully held mote carries, as a fraction. The ink
+                            //   is faint by design — alphaGain is 0.43 — which is right for a
+                            //   dusting over a wall and not enough for white type to be read
+                            //   against. This is the only place the two requirements differ,
+                            //   so it is the only place the corner is allowed to be denser
+                            //   than the cloud. 0 leaves it exactly as pale as the rest
 
   signTrap: 0.60,           // THE TRAP, and it is what actually keeps the words backed.
                             //   Holding the motes SEATED under the label only works where
@@ -1302,7 +1308,8 @@ if (numParam('follow', 0.01, 1) !== null) CONFIG.mouseSmoothing = numParam('foll
 if (numParam('sign', 0, 1) !== null) CONFIG.signHold = numParam('sign', 0, 1);
 if (numParam('signx', -1.5, 2) !== null) CONFIG.signBiasX = numParam('signx', -1.5, 2);
 if (numParam('skew', 0, 1) !== null) CONFIG.signSkewX = numParam('skew', 0, 1);
-if (numParam('seats', 0, 0.5) !== null) CONFIG.signSeats = numParam('seats', 0, 0.5);
+if (numParam('seats', 0, 0.6) !== null) CONFIG.signSeats = numParam('seats', 0, 0.6);
+if (numParam('ink', 0, 3) !== null) CONFIG.signInk = numParam('ink', 0, 3);
 if (numParam('trap', 0, 1) !== null) CONFIG.signTrap = numParam('trap', 0, 1);
 if (numParam('shield', 0, 1) !== null) CONFIG.signShield = numParam('shield', 0, 1);
 if (numParam('leash', 0.05, 4) !== null) CONFIG.leashRadius = numParam('leash', 0.05, 4);
@@ -1874,6 +1881,7 @@ uniform vec3  uCloudCentre;      // the seat cloud's own centre, for the radial 
 uniform vec3  uSignPoint;        // the held patch's centre and box
 uniform vec2  uSignHalf;
 uniform float uSignBloomHold;
+uniform float uSignInk;
 uniform float uCloudRadius;
 uniform float uParticleSize;
 uniform float uViewportPx;       // drawing-buffer height, for on-screen size
@@ -1941,7 +1949,8 @@ void main(){
   // outward — including the ink the words are read against, which slides off them at exactly
   // the moment somebody is looking. Motes seated under the label keep their place instead.
   vec2 signQ = (aInitPos.xy - uSignPoint.xy) / max(uSignHalf, vec2(1e-5));
-  float underSign = (1.0 - smoothstep(1.0, 1.35, length(signQ))) * uSignBloomHold;
+  float inPatch = 1.0 - smoothstep(1.0, 1.35, length(signQ));
+  float underSign = inPatch * uSignBloomHold;
   float expand = uExpand * uExpandAmount * (1.0 - underSign);
   pos = uExpandOrigin + (pos - uExpandOrigin) * (1.0 + expand);
 
@@ -2073,7 +2082,9 @@ void main(){
   // vPx stays the TRUE size, because the specular fade has to judge the real one.
   float grow = max(1.0, uMinPx / max(vPx, 1e-4));
   worldSize *= grow;
-  vAlphaScale = 1.0 / (grow * grow);
+  // and the held patch carries more ink than the rest of the cloud, because it is the only
+  // part of it that has to be read AGAINST rather than merely seen
+  vAlphaScale = (1.0 / (grow * grow)) * (1.0 + inPatch * uSignInk);
   // Grains are slightly elongated ALONG the throw axis — the smear a moving particle leaves
   // in a photograph. Area-preserving: one axis is multiplied and the other divided, so
   // stretching a grain does not also make it heavier.
@@ -4136,6 +4147,7 @@ const uniforms = {
   uSignPoint: { value: new THREE.Vector3() },
   uSignHalf: { value: new THREE.Vector2(1e-5, 1e-5) },
   uSignBloomHold: { value: CONFIG.signBloomHold },
+  uSignInk: { value: CONFIG.signInk },
   uCloudRadius: { value: 1 },
 };
 
@@ -4437,6 +4449,7 @@ function stepSim(dt) {
   u.uSignTrap.value = CONFIG.signTrap;
   u.uSignShield.value = CONFIG.signShield;
   uniforms.uSignBloomHold.value = CONFIG.signBloomHold;
+  uniforms.uSignInk.value = CONFIG.signInk;
 
   // velocity first, then the position that integrates it
   u.tVel.value = sim.va.texture;
@@ -5186,10 +5199,14 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'signHold', name: 'sign hold', cst: 'CONFIG.signHold',
       min: 0, max: 1, step: 0.01, value: CONFIG.signHold,
       text: () => CONFIG.signHold.toFixed(2) },
-    // the share of the population that is BORN under the words
+    // the share of the population that is BORN in the corner patch
     { key: 'signSeats', name: 'sign seats', cst: 'CONFIG.signSeats',
-      min: 0, max: 0.3, step: 0.005, value: CONFIG.signSeats,
+      min: 0, max: 0.6, step: 0.005, value: CONFIG.signSeats,
       rebuild: true, text: () => (CONFIG.signSeats * 100).toFixed(1) + '%' },
+    // how much heavier that patch's ink is than the rest of the cloud's
+    { key: 'signInk', name: 'sign ink', cst: 'CONFIG.signInk',
+      min: 0, max: 2, step: 0.05, value: CONFIG.signInk,
+      uni: 'uSignInk', text: () => CONFIG.signInk.toFixed(2) },
     // how much of the traffic across the label's box stays in it
     { key: 'signTrap', name: 'sign trap', cst: 'CONFIG.signTrap',
       min: 0, max: 1, step: 0.01, value: CONFIG.signTrap,
