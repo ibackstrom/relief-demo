@@ -1408,9 +1408,9 @@ The conversion is worth a note: the seats are placed in `buildParticles`, which 
 offset and is scaled by `massScale` — undoing those two by hand is the whole of what
 `worldToLocal` would have done.
 
-**Weighted toward the far end, in two different ways.** `signBiasX` (0.40) shifts the whole
+**Weighted toward the far end, in two different ways.** `signBiasX` (0.85) shifts the whole
 patch along the words — the reserved seats, the held test and the pull all move with it — and
-`signSkewX` (0.60) then puts more of the motes in its far half without moving the patch at all.
+`signSkewX` (0.95) then puts more of the motes in its far half without moving the patch at all.
 The pair is why the near end does not pay for the far one: the shift alone would starve it, and
 the skew alone cannot reach past the box. Density where it is needed, coverage everywhere.
 
@@ -1419,7 +1419,7 @@ chord that leaves — polar sampling gives an even disc and nothing else, wherea
 its own lets it be weighted while every seat still lands inside the ellipse. It is a mix
 between a uniform draw and its square root, so even at 1 the near half keeps about 30% of them.
 
-`attractPull` is back on at **0.25**, aimed at that same shifted point, so the general
+`attractPull` is back on at **0.55**, aimed at that same shifted point, so the general
 population drifts toward the far end of the sign as well.
 
 `?seats=0` is the cloud with no sign machinery at all, and the bars are **sign seats** and

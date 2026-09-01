@@ -732,7 +732,7 @@ const CONFIG = {
   // Stated as a speed, the same way the cursor's push is: a fraction of the mass radius per
   // second, with the force solved back out of it through the same gain, so the number means
   // one thing whatever the inertia is set to.
-  attractPull: 0.25,        // 0 turns it off and the build is ver17 exactly. Tripled in
+  attractPull: 0.55,        // 0 turns it off and the build is ver17 exactly. Tripled in
                             //   ver19: motes were still wandering off the sign
   attractRadius: 0.55,      // reach, in viewport heights. Raised with the pull above, and it
                             //   is the half of the fix that recovers a mote that has already
@@ -785,10 +785,10 @@ const CONFIG = {
   signLeash: 0.10,          // that short leash, in mass radii. Small enough that the patch
                             //   cannot be swept off the words, large enough that it still
                             //   moves and never reads as a stuck decal
-  signBiasX: 0.40,          // how far to shift the sign's anchor toward the END of the words,
+  signBiasX: 0.85,          // how far to shift the sign's anchor toward the END of the words,
                             //   as a fraction of the label's own half-width. It moves the
                             //   reserved patch, the held test and the pull together.
-  signSkewX: 0.60,          // and how much the reserved seats are WEIGHTED toward that end on
+  signSkewX: 0.95,          // and how much the reserved seats are WEIGHTED toward that end on
                             //   top of the shift, 0 being even across the box. The two do
                             //   different jobs and the pair is why the left end does not pay
                             //   for the right: the shift moves the whole patch, which alone
