@@ -1192,7 +1192,7 @@ which is what the reference does.
 
 ### The panel
 
-`?ui=1` shows it. Fifteen bars in ver22 — the seven hover ones, the two for the sign's pull,
+`?ui=1` shows it. Sixteen bars in ver22 — the seven hover ones, the two for the sign's pull,
 the leash, the sign's hold and its bias along the words. Every bar is free to drag except
 **sign bias**, which re-throws the population on release because the seats are drawn from it. The three that are not hover are the new mechanisms, and they are on the panel
 because they have to be judged by eye rather than derived. Everything the cloud does on its own is settled and baked, and a bar for
@@ -1213,6 +1213,7 @@ the cloud's twelve and the ink's three as well — if a look-dev session needs t
 | leash | `leashRadius` | how far a mote may stray from its seat, in mass radii | `?leash=` |
 | sign hold | `signHold` | how firmly the patch under the words is held in place | `?sign=` |
 | sign seats | `signSeats` | share of the population born on the label's box | `?seats=` |
+| sign skew | `signSkewX` | how much of that share sits in the far half of the words | `?skew=` |
 | sign trap | `signTrap` | how much of the traffic across the label's box stays in it, 0 in ver22 | `?trap=` |
 | sign shield | `signShield` | how much of the cursor's push the caught motes feel | `?shield=` |
 | sign bias | `signBiasX` | where along the words the patch and the pull are centred | `?signx=` |
@@ -1407,11 +1408,22 @@ The conversion is worth a note: the seats are placed in `buildParticles`, which 
 offset and is scaled by `massScale` — undoing those two by hand is the whole of what
 `worldToLocal` would have done.
 
-`signBiasX` is back to **0** and should stay there. The bias existed to drag ink toward an end
-the mass did not reach; the reserved seats cover the whole box evenly, so an off-centre anchor
-would now starve the other end instead. `?seats=0` is ver21 with the pull and trap off — that
-is, the cloud with no sign machinery at all — and the bar is **sign seats** (it re-throws the
-population on release).
+**Weighted toward the far end, in two different ways.** `signBiasX` (0.40) shifts the whole
+patch along the words — the reserved seats, the held test and the pull all move with it — and
+`signSkewX` (0.60) then puts more of the motes in its far half without moving the patch at all.
+The pair is why the near end does not pay for the far one: the shift alone would starve it, and
+the skew alone cannot reach past the box. Density where it is needed, coverage everywhere.
+
+The skew works by drawing the position **along** the words first and the height within the
+chord that leaves — polar sampling gives an even disc and nothing else, whereas drawing x on
+its own lets it be weighted while every seat still lands inside the ellipse. It is a mix
+between a uniform draw and its square root, so even at 1 the near half keeps about 30% of them.
+
+`attractPull` is back on at **0.25**, aimed at that same shifted point, so the general
+population drifts toward the far end of the sign as well.
+
+`?seats=0` is the cloud with no sign machinery at all, and the bars are **sign seats** and
+**sign skew** (both re-throw the population on release).
 
 ### The trap
 

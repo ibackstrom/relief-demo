@@ -732,7 +732,7 @@ const CONFIG = {
   // Stated as a speed, the same way the cursor's push is: a fraction of the mass radius per
   // second, with the force solved back out of it through the same gain, so the number means
   // one thing whatever the inertia is set to.
-  attractPull: 0.0,         // 0 turns it off and the build is ver17 exactly. Tripled in
+  attractPull: 0.25,        // 0 turns it off and the build is ver17 exactly. Tripled in
                             //   ver19: motes were still wandering off the sign
   attractRadius: 0.55,      // reach, in viewport heights. Raised with the pull above, and it
                             //   is the half of the fix that recovers a mote that has already
@@ -785,12 +785,17 @@ const CONFIG = {
   signLeash: 0.10,          // that short leash, in mass radii. Small enough that the patch
                             //   cannot be swept off the words, large enough that it still
                             //   moves and never reads as a stuck decal
-  signBiasX: 0.0,           // how far to shift the sign's anchor toward the END of the words,
-                            //   as a fraction of the label's own half-width. Back to zero in
-                            //   ver22 and it should stay there: the bias existed to drag ink
-                            //   toward an end the mass did not reach, and the reserved seats
-                            //   above cover the whole box evenly. Off-centre now would starve
-                            //   the OTHER end instead.
+  signBiasX: 0.40,          // how far to shift the sign's anchor toward the END of the words,
+                            //   as a fraction of the label's own half-width. It moves the
+                            //   reserved patch, the held test and the pull together.
+  signSkewX: 0.60,          // and how much the reserved seats are WEIGHTED toward that end on
+                            //   top of the shift, 0 being even across the box. The two do
+                            //   different jobs and the pair is why the left end does not pay
+                            //   for the right: the shift moves the whole patch, which alone
+                            //   would starve the near end, while the skew leaves the patch
+                            //   covering the same words and only puts more of the motes in
+                            //   its far half. Density where it is needed, coverage
+                            //   everywhere.
                             //   as a fraction of the label's own half-width. The mass thins
                             //   toward the screen edge it is wedged against, so an anchor on
                             //   the middle of the box leaves the last word only half backed —
@@ -1282,6 +1287,7 @@ if (numParam('follow', 0.01, 1) !== null) CONFIG.mouseSmoothing = numParam('foll
 // ?warm=0 shows the arrival as ver16 did; ?fade=0 drops the materialise.
 if (numParam('sign', 0, 1) !== null) CONFIG.signHold = numParam('sign', 0, 1);
 if (numParam('signx', -1.5, 2) !== null) CONFIG.signBiasX = numParam('signx', -1.5, 2);
+if (numParam('skew', 0, 1) !== null) CONFIG.signSkewX = numParam('skew', 0, 1);
 if (numParam('seats', 0, 0.5) !== null) CONFIG.signSeats = numParam('seats', 0, 0.5);
 if (numParam('trap', 0, 1) !== null) CONFIG.signTrap = numParam('trap', 0, 1);
 if (numParam('shield', 0, 1) !== null) CONFIG.signShield = numParam('shield', 0, 1);
@@ -3853,15 +3859,23 @@ function buildParticles(count) {
       const hx = (r.width / 2 / ppw + CONFIG.signPad * vh) / ms;
       const hy = (r.height / 2 / ppw + CONFIG.signPad * vh) / ms;
       const dz = CONFIG.boxDepth * vh * 0.5 * CONFIG.signSeatDepth;
-      // Even over the ellipse rather than gaussian about its middle: the words need their
-      // ENDS backed as much as their centre, and a bell leaves the last letters thin — which
-      // is the note this version exists to answer.
+      // Sampled x FIRST and then y within the chord that x allows, rather than by angle and
+      // radius. Polar sampling gives an even disc and nothing else; drawing x on its own is
+      // what lets it be weighted along the words while every draw still lands inside the
+      // ellipse. Not a gaussian about the middle either way: the words need their ENDS backed
+      // as much as their centre, and a bell leaves the last letters thin.
+      const skew = Math.max(0, Math.min(1, CONFIG.signSkewX));
       for (let k = 0; k < signCount; k++) {
         const i = k * 3;
-        const a = Math.random() * Math.PI * 2;
-        const rad = Math.sqrt(Math.random());
-        initPos[i] = lx + Math.cos(a) * rad * hx;
-        initPos[i + 1] = ly + Math.sin(a) * rad * hy;
+        // u is the position along the words, 0 at the near end and 1 at the far one. The
+        // square root crowds a uniform draw toward 1, and mixing rather than switching keeps
+        // the near end populated: at skew 1 the far half still only holds about 70% of them.
+        const u0 = Math.random();
+        const u = u0 * (1 - skew) + Math.sqrt(u0) * skew;
+        const nx = u * 2 - 1;
+        const ny = (Math.random() * 2 - 1) * Math.sqrt(Math.max(0, 1 - nx * nx));
+        initPos[i] = lx + nx * hx;
+        initPos[i + 1] = ly + ny * hy;
         initPos[i + 2] = (Math.random() * 2 - 1) * dz;
       }
     }
@@ -5132,6 +5146,10 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'signShield', name: 'sign shield', cst: 'CONFIG.signShield',
       min: 0, max: 1, step: 0.01, value: CONFIG.signShield,
       text: () => CONFIG.signShield.toFixed(2) },
+    // how much of the reserved population sits in the far half of the words
+    { key: 'signSkewX', name: 'sign skew', cst: 'CONFIG.signSkewX',
+      min: 0, max: 1, step: 0.01, value: CONFIG.signSkewX,
+      rebuild: true, text: () => CONFIG.signSkewX.toFixed(2) },
     // ver21: where along the words that patch is centred. It moves the pull with it, and the
     // SEAT focus is drawn from the same number — so this one needs the population re-thrown
     { key: 'signBiasX', name: 'sign bias', cst: 'CONFIG.signBiasX',
