@@ -732,7 +732,7 @@ const CONFIG = {
   // Stated as a speed, the same way the cursor's push is: a fraction of the mass radius per
   // second, with the force solved back out of it through the same gain, so the number means
   // one thing whatever the inertia is set to.
-  attractPull: 0.90,        // 0 turns it off and the build is ver17 exactly. Tripled in
+  attractPull: 0.30,        // 0 turns it off and the build is ver17 exactly. Tripled in
                             //   ver19: motes were still wandering off the sign
   attractRadius: 0.55,      // reach, in viewport heights. Raised with the pull above, and it
                             //   is the half of the fix that recovers a mote that has already
@@ -779,92 +779,34 @@ const CONFIG = {
   // The patch is the label's OWN BOX, read from the element and used as an ellipse, so it
   // matches the shape of the words rather than a circle somebody guessed at. Change the text,
   // the font or the corner it sits in and the held patch follows.
+  // ---- the chunk that belongs to the text --------------------------------------------
+  // A share of the population seated ON THE LABEL rather than on the model, and kept there.
+  // It is a different body of ink from the cloud: the cloud drifts, blooms and answers the
+  // pointer exactly as it did in ver20, and this does none of those things. It sits under
+  // the words so they can be read, and that is its whole job.
+  //
+  // Everything before this tried to keep the words backed by moving motes that were
+  // somewhere else — a pull, a shorter leash, a trap. Those are races against the field and
+  // against the cursor, and a race can be lost. This cannot: the motes are born there.
+  signSeats: 0.06,          // share of the population. At 450k that is 27,000 motes on a
+                            //   patch a couple of hundred pixels across
+  signSeatDepth: 0.5,       // how much of the cloud's own depth they are spread through, so
+                            //   the chunk is a slab of the volume and not a decal on a plane
+  signInk: 0.30,            // extra alpha they carry, as a fraction. The cloud is faint by
+                            //   design — alphaGain 0.43, right for a dusting over a wall —
+                            //   and white type has to be read AGAINST its backing rather
+                            //   than merely laid over it. ?ink=0 makes them exactly as pale
+                            //   as everything else
+  signShield: 0.0,          // how much of the cursor's push they feel. Zero: the hover does
+                            //   not touch them at all, which is the point of the chunk. The
+                            //   push is the strongest force in the build by a wide margin and
+                            //   it was emptying the words every time the pointer went by
+
   signHold: 1.00,           // 0 leaves ver19 exactly; 1 puts every seated mote under the sign
-                            //   on the short leash. Full, in ver22: these motes exist to hold
-                            //   the sign and there is no reason to let them drift off it
+                            //   on the short leash
   signLeash: 0.10,          // that short leash, in mass radii. Small enough that the patch
                             //   cannot be swept off the words, large enough that it still
                             //   moves and never reads as a stuck decal
-  signBiasX: 1.80,          // how far to shift the sign's anchor toward the END of the words,
-                            //   as a fraction of the label's own half-width. It moves the
-                            //   reserved patch, the held test and the pull together.
-  signSkewX: 1.00,          // and how much the reserved seats are WEIGHTED toward that end on
-                            //   top of the shift, 0 being even across the box. The two do
-                            //   different jobs and the pair is why the left end does not pay
-                            //   for the right: the shift moves the whole patch, which alone
-                            //   would starve the near end, while the skew leaves the patch
-                            //   covering the same words and only puts more of the motes in
-                            //   its far half. Density where it is needed, coverage
-                            //   everywhere.
-                            //   as a fraction of the label's own half-width. The mass thins
-                            //   toward the screen edge it is wedged against, so an anchor on
-                            //   the middle of the box leaves the last word only half backed —
-                            //   which is what it did. Given against the label's own width, so
-                            //   it holds for a longer or shorter piece of text.
-                            //   It moves the pull and the held patch together: they are the
-                            //   same point, and the seat focus is drawn from it as well
-  // A RESERVED POPULATION, seated on the label's own box rather than on the model. This is
-  // the whole of ver22's answer to the sign, and it is a different kind of answer from the
-  // three before it: those all moved motes that were somewhere else, which is a race against
-  // the field and the cursor and can be lost. These motes are BORN under the words, they are
-  // held there, and no traffic has to arrive for the sign to be backed. It is coverage by
-  // construction.
-  //
-  // Everything outside this share is untouched — it drifts, blooms and answers the pointer
-  // exactly as it did before the sign machinery existed, which is why the pull and the trap
-  // below now ship at zero.
-  // ver24: the held patch is the CORNER, not the label's box. Same machinery — reserved
-  // seats, short leash, shield, held out of the bloom — over a region sized to the corner the
-  // cloud lives in, so the whole upper right is populated at all times and the sign is backed
-  // as a consequence rather than as a special case.
-  fillCorner: true,         // false goes back to ver23: the patch is the label's own box
-  fillW: 0.25,              // the region's reach from the corner, in viewport WIDTHS
-  fillH: 0.34,              // and in viewport HEIGHTS. It is a quarter ellipse centred on the
-                            //   screen corner, so these are its radii and the visible part is
-                            //   the quarter inside the frame
-  signBloomHold: 0.85,      // how much of the bloom the held motes give up. At 1 a patch this
-                            //   size would take the hover growth out of the whole corner,
-                            //   which is most of what the bloom is for; under the label alone
-                            //   that did not matter because the patch was small
-
-  signSeats: 0.35,          // share of the population seated under the label. At 450k that is
-                            //   22,500 motes on a patch a couple of hundred pixels across —
-                            //   dense enough to read as ink rather than as a sprinkle
-  signSeatDepth: 0.5,       // how much of the cloud's own depth they are spread through, so
-                            //   the patch is a slab of the volume and not a decal on a plane
-  signInk: 0.60,            // extra alpha a fully held mote carries, as a fraction. The ink
-                            //   is faint by design — alphaGain is 0.43 — which is right for a
-                            //   dusting over a wall and not enough for white type to be read
-                            //   against. This is the only place the two requirements differ,
-                            //   so it is the only place the corner is allowed to be denser
-                            //   than the cloud. 0 leaves it exactly as pale as the rest
-
-  signTrap: 0.60,           // THE TRAP, and it is what actually keeps the words backed.
-                            //   Holding the motes SEATED under the label only works where
-                            //   there are seats to hold: the mass is wedged into the corner
-                            //   and thins toward the screen edge, so the end of the words can
-                            //   sit past where the model puts any, and no amount of pull or
-                            //   bias makes seats appear there.
-                            //   So a share of the motes that DRIFT into the label's box are
-                            //   kept in it — they may stir inside, they may not cross the rim
-                            //   — and the patch fills from the whole cloud instead of from the
-                            //   population that happened to be born there. It is self
-                            //   limiting: only this share of what passes is caught, and a
-                            //   caught mote still dies on its own clock and respawns at its
-                            //   seat, so the trap reaches a steady population rather than
-                            //   draining the cloud into the sign. 0 turns it off.
-                            //   The turnover is the lifespan clock, so this leans on
-                            //   lifeFraction being 1: with immortal motes in the mix they
-                            //   would accumulate in the box and never leave it.
-  signShield: 0.10,         // how much of the cursor's push a CAUGHT mote feels. The push is
-                            //   the strongest force in the build by a wide margin — a reach of
-                            //   0.35 of the viewport at 1.20 of the mass radius per second —
-                            //   so a pass of the pointer near the corner was simply blowing
-                            //   the sign's own ink off the words faster than anything could
-                            //   put it back. The motes holding the label are the one part of
-                            //   the cloud the cursor does not get to empty. 1 lets them be
-                            //   pushed like everything else, 0 makes the patch ignore the
-                            //   pointer entirely — which reads as a dead spot, hence a quarter
   signPad: 0.045,           // how far past the type the patch reaches, in viewport heights.
                             //   The words need ink around them as well as under them, or the
                             //   backing ends exactly at the glyphs and reads as a smudge cut
@@ -1306,11 +1248,8 @@ if (numParam('path', 1, 24) !== null) CONFIG.hoverTrailSlots = Math.round(numPar
 if (numParam('follow', 0.01, 1) !== null) CONFIG.mouseSmoothing = numParam('follow', 0.01, 1);
 // ?warm=0 shows the arrival as ver16 did; ?fade=0 drops the materialise.
 if (numParam('sign', 0, 1) !== null) CONFIG.signHold = numParam('sign', 0, 1);
-if (numParam('signx', -1.5, 2) !== null) CONFIG.signBiasX = numParam('signx', -1.5, 2);
-if (numParam('skew', 0, 1) !== null) CONFIG.signSkewX = numParam('skew', 0, 1);
-if (numParam('seats', 0, 0.6) !== null) CONFIG.signSeats = numParam('seats', 0, 0.6);
+if (numParam('seats', 0, 0.4) !== null) CONFIG.signSeats = numParam('seats', 0, 0.4);
 if (numParam('ink', 0, 3) !== null) CONFIG.signInk = numParam('ink', 0, 3);
-if (numParam('trap', 0, 1) !== null) CONFIG.signTrap = numParam('trap', 0, 1);
 if (numParam('shield', 0, 1) !== null) CONFIG.signShield = numParam('shield', 0, 1);
 if (numParam('leash', 0.05, 4) !== null) CONFIG.leashRadius = numParam('leash', 0.05, 4);
 if (numParam('attract', 0, 2) !== null) CONFIG.attractPull = numParam('attract', 0, 2);
@@ -1586,7 +1525,6 @@ uniform float uLeashSoft;
 uniform vec2  uSignHalf;         // the label's box, half-extents in this object's space
 uniform float uSignHold;
 uniform float uSignLeash;
-uniform float uSignTrap;
 uniform float uSignShield;
 uniform vec3  uAttractPoint;     // the label's centre, in this object's space
 uniform float uAttractRadius;
@@ -1736,13 +1674,10 @@ void main(){
   // clipped: the excess is folded into an asymptote, so the ceiling has no edge to see.
   // Shorter for a mote SEATED under the sign, on the label's own ellipse. Graded rather than
   // switched, so there is no ring in the picture where one leash becomes the other.
-  //
-  // The band is 1.0 -> 1.35 of the ellipse, NOT 0.65 -> 1.0, and the difference is the whole
-  // of why the sign kept going bald under the pointer. The reserved seats are thrown across
-  // the FULL ellipse and weighted toward its far end, so most of them sit at 0.7 or more of
-  // its radius — precisely the band the old test was fading the hold out over. The motes
-  // planted to hold the words were the ones least held, and a pass of the cursor took them.
-  // Full hold to the rim, easing off only outside it.
+  // The band is 1.0 -> 1.35 of the ellipse, not 0.65 -> 1.0. The chunk's seats are thrown
+  // across the WHOLE ellipse, so a band that faded out from two thirds of the way left the
+  // outer half of them barely held — the motes planted to hold the words would have been the
+  // ones least held.
   vec2 q = (seed.xy - uAttractPoint.xy) / max(uSignHalf, vec2(1e-5));
   float under = 1.0 - smoothstep(1.0, 1.35, length(q));
   float leash = mix(uLeash, uSignLeash, under * uSignHold);
@@ -1752,17 +1687,6 @@ void main(){
   if (leash > 0.0 && over > 0.0 && away > 1e-6) {
     float give = max(1e-5, uLeashSoft * leash);
     offset *= (leash + give * (1.0 - exp(-over / give))) / away;
-  }
-
-  // A caught mote is held inside the label's box: if the step took it past the rim it is put
-  // back on the rim, along the line it left by. Nothing about its velocity is touched, so it
-  // keeps sliding around the inside of the boundary rather than stopping dead on it.
-  if (texture2D(tVel, vUv).w > 0.5) {
-    vec2 pos2 = seed.xy + offset.xy;
-    vec2 half2 = max(uSignHalf, vec2(1e-5));
-    vec2 q = (pos2 - uAttractPoint.xy) / half2;
-    float e = length(q);
-    if (e > 1.0) offset.xy += (uAttractPoint.xy + (q / e) * half2) - pos2;
   }
 
   // Dead: back to the seat, age zero. The seat is the source, so the model's silhouette is
@@ -1793,36 +1717,24 @@ void main(){
   vec3 here  = seed.xyz + state.xyz;
   vec3 v     = texture2D(tVel, vUv).xyz;
 
-  // How much of the cursor this mote feels. A mote that is HOLDING THE SIGN — seated under
-  // the words, or caught by the trap if that is on — feels only uSignShield of it: the push
-  // is the strongest force in the build and it would otherwise blow the backing off the
-  // label faster than anything could put it back.
-  float caught = texture2D(tVel, vUv).w;
+  // How much of the cursor this mote feels. A mote of the text's own chunk — seated inside
+  // the label's box — feels uSignShield of it, which ships at zero: the push is the strongest
+  // force in the build by a wide margin, and it was emptying the words every time the pointer
+  // went past. The rest of the cloud is untouched by this.
   vec2 seatQ = (seed.xy - uAttractPoint.xy) / max(uSignHalf, vec2(1e-5));
-  float held = max(caught, (1.0 - smoothstep(1.0, 1.35, length(seatQ))) * uSignHold);
+  float mine = (1.0 - smoothstep(1.0, 1.35, length(seatQ))) * uSignHold;
 
   vec3 target = fieldVelocity(here) + birthImpulse(here, age) + vec3(0.0, -uGravity, 0.0);
   v += (target - v) * clamp(uSettle, 0.0, 1.0);
-  v += cursorForce(here, fract(seed.w * 7.31)) * uDt * mix(1.0, uSignShield, held);
+  v += cursorForce(here, fract(seed.w * 7.31)) * uDt * mix(1.0, uSignShield, mine);
   v += attractForce(here) * uDt;
   v *= uDrag;
 
-  // The trap's flag rides in the velocity buffer's spare channel — the only per-mote state
-  // this build has room for without a third target. It latches: once a mote is caught it
-  // stays caught until it dies, so the patch does not flicker as motes drift over the rim.
-  if (uSignTrap > 0.0) {
-    vec2 q = (here.xy - uAttractPoint.xy) / max(uSignHalf, vec2(1e-5));
-    // fract of the seed's lifespan is a per-mote constant, so which motes are catchable is
-    // decided once and never changes: a stable share of the traffic rather than a dice roll
-    // every frame, which would catch everything eventually.
-    caught = max(caught, step(length(q), 1.0) * step(fract(seed.w * 13.77), uSignTrap));
-  }
-
   // a reborn particle starts still, or it would arrive at its seat carrying whatever it was
   // doing when it died and the seed would visibly squirt
-  if (age >= seed.w) { v = vec3(0.0); caught = 0.0; }
+  if (age >= seed.w) v = vec3(0.0);
 
-  gl_FragColor = vec4(v, caught);
+  gl_FragColor = vec4(v, 0.0);
 }`);
 
 // Boot: everything at its seat, age zero, so the first seconds after load are one coherent
@@ -1878,9 +1790,9 @@ uniform float uMouseCurlBoost;
 uniform float uCurlDivergence;
 uniform sampler2D tSimPos;       // xyz offset from the seat, w age in seconds
 uniform vec3  uCloudCentre;      // the seat cloud's own centre, for the radial ramp below
-uniform vec3  uSignPoint;        // the held patch's centre and box
+uniform vec3  uSignPoint;        // the label's centre and box, for the chunk held under it
 uniform vec2  uSignHalf;
-uniform float uSignBloomHold;
+uniform float uSignHold;
 uniform float uSignInk;
 uniform float uCloudRadius;
 uniform float uParticleSize;
@@ -1950,7 +1862,7 @@ void main(){
   // the moment somebody is looking. Motes seated under the label keep their place instead.
   vec2 signQ = (aInitPos.xy - uSignPoint.xy) / max(uSignHalf, vec2(1e-5));
   float inPatch = 1.0 - smoothstep(1.0, 1.35, length(signQ));
-  float underSign = inPatch * uSignBloomHold;
+  float underSign = inPatch * uSignHold;
   float expand = uExpand * uExpandAmount * (1.0 - underSign);
   pos = uExpandOrigin + (pos - uExpandOrigin) * (1.0 + expand);
 
@@ -2082,8 +1994,8 @@ void main(){
   // vPx stays the TRUE size, because the specular fade has to judge the real one.
   float grow = max(1.0, uMinPx / max(vPx, 1e-4));
   worldSize *= grow;
-  // and the held patch carries more ink than the rest of the cloud, because it is the only
-  // part of it that has to be read AGAINST rather than merely seen
+  // and the text's own chunk carries more ink than the cloud, because it is the only part of
+  // the picture that has to be read AGAINST rather than merely seen
   vAlphaScale = (1.0 / (grow * grow)) * (1.0 + inPatch * uSignInk);
   // Grains are slightly elongated ALONG the throw axis — the smear a moving particle leaves
   // in a photograph. Area-preserving: one axis is multiplied and the other divided, so
@@ -3427,9 +3339,7 @@ function buildParticles(count) {
     if (el) {
       const r = el.getBoundingClientRect();
       const ppw = innerHeight / vh;                 // pixels per world unit at the cloud's depth
-      // biased toward the end of the words rather than their middle — see signBiasX
-      const wx = (r.left + r.width / 2 - innerWidth / 2) / ppw
-               + CONFIG.signBiasX * (r.width / 2) / ppw;
+      const wx = (r.left + r.width / 2 - innerWidth / 2) / ppw;
       const wy = (innerHeight / 2 - (r.top + r.height / 2)) / ppw;
       // the group sits on the screen corner, so take that off to get the cloud's own space,
       // then undo the offset every seat gets, landing in the same units as focusX/focusY
@@ -3868,12 +3778,12 @@ function buildParticles(count) {
     shapes[i]   = Math.random();
   }
 
-  // ---- the seats that belong to the sign ----------------------------------
-  // Thrown last, over the ones the model gave, so they are the label's own patch whatever the
-  // silhouette did or did not put there. The box is the element's, converted into the same
-  // local space the seats are in: the group sits at the corner plus its offset and is scaled
-  // by massScale, so undoing those two is the whole conversion — the same arithmetic
-  // place() does with worldToLocal, done here because place() has not run yet.
+  // ---- the chunk that belongs to the text ---------------------------------
+  // Thrown last, over the ones the model gave, so the words have their ink whatever the
+  // silhouette did or did not put there. The box is the element's own, converted into the
+  // space the seats are in: the group sits at the corner plus its offset and is scaled by
+  // massScale, so undoing those two is the whole conversion — the same arithmetic place()
+  // does with worldToLocal, done by hand here because place() has not run yet.
   const signCount = Math.min(count, Math.round(count * CONFIG.signSeats));
   if (signCount > 0) {
     const el = document.getElementById('booknow');
@@ -3885,50 +3795,18 @@ function buildParticles(count) {
       const gx = cs.x * (Math.abs(CONFIG.anchorX) * vh * camera.aspect * 0.5
                          + CONFIG.offsetX * vh);
       const gy = cs.y * (Math.abs(CONFIG.anchorY) * vh * 0.5 + CONFIG.offsetY * vh);
-      // Either the corner region or the label's own box, and the shader is told the same
-      // thing in place() — the two have to agree or motes are seated where nothing holds them,
-      // which is the failure this version's predecessor was built on.
-      const vw = vh * camera.aspect;
-      const lx = CONFIG.fillCorner
-        ? (cs.x * vw * 0.5 - gx) / ms
-        : ((r.left + r.width / 2 - innerWidth / 2) / ppw
-           + CONFIG.signBiasX * (r.width / 2) / ppw - gx) / ms;
-      const ly = CONFIG.fillCorner
-        ? (cs.y * vh * 0.5 - gy) / ms
-        : ((innerHeight / 2 - (r.top + r.height / 2)) / ppw - gy) / ms;
-      const hx = CONFIG.fillCorner
-        ? (CONFIG.fillW * vw) / ms
-        : (r.width / 2 / ppw + CONFIG.signPad * vh) / ms;
-      const hy = CONFIG.fillCorner
-        ? (CONFIG.fillH * vh) / ms
-        : (r.height / 2 / ppw + CONFIG.signPad * vh) / ms;
+      const lx = ((r.left + r.width / 2 - innerWidth / 2) / ppw - gx) / ms;
+      const ly = ((innerHeight / 2 - (r.top + r.height / 2)) / ppw - gy) / ms;
+      const hx = (r.width / 2 / ppw + CONFIG.signPad * vh) / ms;
+      const hy = (r.height / 2 / ppw + CONFIG.signPad * vh) / ms;
       const dz = CONFIG.boxDepth * vh * 0.5 * CONFIG.signSeatDepth;
-      // Sampled x FIRST and then y within the chord that x allows, rather than by angle and
-      // radius. Polar sampling gives an even disc and nothing else; drawing x on its own is
-      // what lets it be weighted along the words while every draw still lands inside the
-      // ellipse. Not a gaussian about the middle either way: the words need their ENDS backed
-      // as much as their centre, and a bell leaves the last letters thin.
-      const skew = Math.max(0, Math.min(1, CONFIG.signSkewX));
+      // Even across the box, not gathered about its middle: the words need their ENDS backed
+      // as much as their centre, and a bell leaves the last letters thin. x is drawn first
+      // and y within the chord it leaves, so every seat lands inside the ellipse.
       for (let k = 0; k < signCount; k++) {
         const i = k * 3;
-        // u is the position along the region, 0 at the near end and 1 at the far one. The
-        // square root crowds a uniform draw toward 1, and mixing rather than switching keeps
-        // the near end populated: at skew 1 the far half still only holds about 70% of them.
-        const u0 = Math.random();
-        let u = u0 * (1 - skew) + Math.sqrt(u0) * skew;
-        // The square root crowds toward 1. For the label that is its far end, which is what
-        // the skew was built for; for the corner region 1 is the OUTER rim and the corner is
-        // at 0, so it is flipped — the weight belongs where the sign is.
-        if (CONFIG.fillCorner) u = 1 - u;
-        let nx = u * 2 - 1;
-        let ny = (Math.random() * 2 - 1) * Math.sqrt(Math.max(0, 1 - nx * nx));
-        if (CONFIG.fillCorner) {
-          // Only the quarter inside the frame. The region is centred ON the screen corner, so
-          // the other three quarters are off it, and seating motes there would spend most of
-          // the reserved population outside the picture.
-          nx = cs.x * Math.abs(nx);
-          ny = cs.y * Math.abs(ny);
-        }
+        const nx = Math.random() * 2 - 1;
+        const ny = (Math.random() * 2 - 1) * Math.sqrt(Math.max(0, 1 - nx * nx));
         initPos[i] = lx + nx * hx;
         initPos[i + 1] = ly + ny * hy;
         initPos[i + 2] = (Math.random() * 2 - 1) * dz;
@@ -4146,7 +4024,7 @@ const uniforms = {
   uCloudCentre: { value: new THREE.Vector3() },
   uSignPoint: { value: new THREE.Vector3() },
   uSignHalf: { value: new THREE.Vector2(1e-5, 1e-5) },
-  uSignBloomHold: { value: CONFIG.signBloomHold },
+  uSignHold: { value: CONFIG.signHold },
   uSignInk: { value: CONFIG.signInk },
   uCloudRadius: { value: 1 },
 };
@@ -4248,7 +4126,6 @@ function makeSim() {
       uSignHalf: { value: new THREE.Vector2(1e-5, 1e-5) },
       uSignHold: { value: CONFIG.signHold },
       uSignLeash: { value: CONFIG.signLeash * d.radius },
-      uSignTrap: { value: CONFIG.signTrap },
       uSignShield: { value: CONFIG.signShield },
       uAttractPoint: { value: new THREE.Vector3(0, 0, 0) },
       uAttractRadius: { value: 1 },
@@ -4446,9 +4323,8 @@ function stepSim(dt) {
   u.uLeashSoft.value = CONFIG.leashSoft;
   u.uSignHold.value = CONFIG.signHold;
   u.uSignLeash.value = CONFIG.signLeash * sim.radius;
-  u.uSignTrap.value = CONFIG.signTrap;
   u.uSignShield.value = CONFIG.signShield;
-  uniforms.uSignBloomHold.value = CONFIG.signBloomHold;
+  uniforms.uSignHold.value = CONFIG.signHold;
   uniforms.uSignInk.value = CONFIG.signInk;
 
   // velocity first, then the position that integrates it
@@ -4773,8 +4649,7 @@ function place() {
     if (el) {
       const r = el.getBoundingClientRect();
       const ppw = innerHeight / vh;
-      attractWorld.set((r.left + r.width / 2 - innerWidth / 2) / ppw
-                         + CONFIG.signBiasX * (r.width / 2) / ppw,
+      attractWorld.set((r.left + r.width / 2 - innerWidth / 2) / ppw,
                        (innerHeight / 2 - (r.top + r.height / 2)) / ppw,
                        CONFIG.anchorZ);
       group.worldToLocal(attractWorld);
@@ -4783,17 +4658,9 @@ function place() {
       // worldToLocal took the group's scale off the point above; an extent has to have it
       // taken off explicitly, the same way the cursor's reach does.
       const ms = Math.max(1e-6, CONFIG.massScale);
-      if (CONFIG.fillCorner) {
-        // the corner itself, in the cloud's own space, and the region's radii about it
-        attractWorld.set(cs.x * vw * 0.5, cs.y * vh * 0.5, CONFIG.anchorZ);
-        group.worldToLocal(attractWorld);
-        sim.step.uniforms.uAttractPoint.value.copy(attractWorld);
-      }
       sim.step.uniforms.uSignHalf.value.set(
-        CONFIG.fillCorner ? (CONFIG.fillW * vw) / ms
-                          : (r.width / 2 / ppw + CONFIG.signPad * vh) / ms,
-        CONFIG.fillCorner ? (CONFIG.fillH * vh) / ms
-                          : (r.height / 2 / ppw + CONFIG.signPad * vh) / ms);
+        (r.width / 2 / ppw + CONFIG.signPad * vh) / ms,
+        (r.height / 2 / ppw + CONFIG.signPad * vh) / ms);
       // the render material reads the same patch, to hold it out of the bloom
       uniforms.uSignPoint.value.copy(attractWorld);
       uniforms.uSignHalf.value.copy(sim.step.uniforms.uSignHalf.value);
@@ -5195,35 +5062,17 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'leashRadius', name: 'leash', cst: 'CONFIG.leashRadius',
       min: 0.1, max: 3, step: 0.05, value: CONFIG.leashRadius,
       text: () => CONFIG.leashRadius.toFixed(2) },
+    // the chunk: how many motes it has, and how much heavier its ink is
+    { key: 'signSeats', name: 'sign seats', cst: 'CONFIG.signSeats',
+      min: 0, max: 0.4, step: 0.005, value: CONFIG.signSeats,
+      rebuild: true, text: () => (CONFIG.signSeats * 100).toFixed(1) + '%' },
+    { key: 'signInk', name: 'sign ink', cst: 'CONFIG.signInk',
+      min: 0, max: 2, step: 0.05, value: CONFIG.signInk,
+      uni: 'uSignInk', text: () => CONFIG.signInk.toFixed(2) },
     // ver20: how firmly the patch under the words is held in place
     { key: 'signHold', name: 'sign hold', cst: 'CONFIG.signHold',
       min: 0, max: 1, step: 0.01, value: CONFIG.signHold,
       text: () => CONFIG.signHold.toFixed(2) },
-    // the share of the population that is BORN in the corner patch
-    { key: 'signSeats', name: 'sign seats', cst: 'CONFIG.signSeats',
-      min: 0, max: 0.6, step: 0.005, value: CONFIG.signSeats,
-      rebuild: true, text: () => (CONFIG.signSeats * 100).toFixed(1) + '%' },
-    // how much heavier that patch's ink is than the rest of the cloud's
-    { key: 'signInk', name: 'sign ink', cst: 'CONFIG.signInk',
-      min: 0, max: 2, step: 0.05, value: CONFIG.signInk,
-      uni: 'uSignInk', text: () => CONFIG.signInk.toFixed(2) },
-    // how much of the traffic across the label's box stays in it
-    { key: 'signTrap', name: 'sign trap', cst: 'CONFIG.signTrap',
-      min: 0, max: 1, step: 0.01, value: CONFIG.signTrap,
-      text: () => CONFIG.signTrap.toFixed(2) },
-    // how much of the cursor's push the caught motes feel
-    { key: 'signShield', name: 'sign shield', cst: 'CONFIG.signShield',
-      min: 0, max: 1, step: 0.01, value: CONFIG.signShield,
-      text: () => CONFIG.signShield.toFixed(2) },
-    // how much of the reserved population sits in the far half of the words
-    { key: 'signSkewX', name: 'sign skew', cst: 'CONFIG.signSkewX',
-      min: 0, max: 1, step: 0.01, value: CONFIG.signSkewX,
-      rebuild: true, text: () => CONFIG.signSkewX.toFixed(2) },
-    // ver21: where along the words that patch is centred. It moves the pull with it, and the
-    // SEAT focus is drawn from the same number — so this one needs the population re-thrown
-    { key: 'signBiasX', name: 'sign bias', cst: 'CONFIG.signBiasX',
-      min: -1, max: 2, step: 0.05, value: CONFIG.signBiasX,
-      rebuild: true, text: () => CONFIG.signBiasX.toFixed(2) },
   ];
 
   uiEl.innerHTML = '<h2>hover</h2>' + ROWS.map((r, i) =>

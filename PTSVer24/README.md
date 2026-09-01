@@ -3,44 +3,10 @@
 A volume of drifting, curling lit spheres wedged into the top-right corner. It answers the
 cursor and blooms outward when the pointer reaches it.
 
-ver24 **fills the corner, constantly**. The held patch is no longer the label's box but a
-quarter ellipse centred on the screen corner — `fillW` 0.25 of the viewport's width by `fillH`
-0.34 of its height — with **`signSeats` 0.35 of the population** seated across it, held on the
-short leash, shielded from the cursor, and carrying `signInk` (0.60) more alpha than the rest
-of the cloud. That last one is the difference between a haze and a backing: the ink is faint by
-design at `alphaGain` 0.43, which is right for a dusting over a wall and not enough for white
-type to be read against. The corner is the one place the two requirements differ, so it is the
-one place the cloud is allowed to be denser. The whole upper right is populated at all times, and the sign is
-backed as a consequence rather than as a special case. `fillCorner: false` returns the patch to
-the label's own box, which is ver23.
-
-Two details the change needed. **Only the quarter inside the frame is seeded** — the region is
-centred ON the corner, so the other three quarters are off-screen and seating motes there would
-spend most of the reserved population outside the picture. And **the bloom keeps most of its
-reach**: `signBloomHold` (0.45) is what the held motes give up, where under the label alone
-they gave up all of it. At 1 a patch this size would take the hover growth out of the whole
-corner, which is most of what the bloom is for.
-
-ver23 fixes the bug that made the previous three attempts look like they were not working:
-**the hold was fading out over exactly the band the reserved motes sit in.** The test ran
-`smoothstep(0.65, 1.0)` of the label's ellipse, so a mote at 0.8 of its radius was only
-a third held and one at the rim was not held at all — while the reserved seats are thrown
-across the *whole* ellipse and weighted toward its far end. The motes planted to hold the
-words were the ones least held, and a pass of the cursor took them. The band is
-`smoothstep(1.0, 1.35)` now: full hold to the rim, easing off only outside it. With that,
-`signShield` is 0.10, `signTrap` 0.60 and `signBiasX` 1.80.
-
-ver22 gives the sign **its own motes**. A share of the population is seated on the label's box
-rather than on the model, held there, and shielded from the cursor — so the words are backed by
-construction rather than by traffic arriving in time. Everything outside that share drifts,
-blooms and answers the pointer exactly as it did before any of the sign machinery existed: the
-pull and the trap now ship at zero. See [The sign's own motes](#the-signs-own-motes).
-
-ver21 moved the sign's anchor **along the words** rather than sitting on the middle of them:
-the mass thins toward the screen edge it is wedged against, so an anchor on the centre of the
-box left the last word only half backed. `signBiasX` is 1.10 of the label's own half-width — a little past the right edge of the type — and
-it moves the pull, the held patch and the seat focus together. See
-[The patch under the sign](#the-patch-under-the-sign).
+ver24 is **ver20 with a second body of ink**: a chunk of motes seated on the label itself,
+which the hover does not touch. The cloud around it drifts, blooms and answers the pointer
+exactly as ver20's does — nothing about it changed. See
+[The text's own chunk](#the-texts-own-chunk).
 
 ver20 **guarantees the sign is legible**. The label is white type on a light wall, so it can
 only be read where there is ink behind it — and a pull toward the words is a tendency, not a
@@ -1219,9 +1185,8 @@ which is what the reference does.
 
 ### The panel
 
-`?ui=1` shows it. Sixteen bars in ver22 — the seven hover ones, the two for the sign's pull,
-the leash, the sign's hold and its bias along the words. Every bar is free to drag except
-**sign bias**, which re-throws the population on release because the seats are drawn from it. The three that are not hover are the new mechanisms, and they are on the panel
+`?ui=1` shows it. Eleven bars in ver20 — the seven hover ones, the two for the sign's pull,
+the leash and the sign's hold. The three that are not hover are the new mechanisms, and they are on the panel
 because they have to be judged by eye rather than derived. Everything the cloud does on its own is settled and baked, and a bar for
 a settled value is only a way to knock it out of tune. (ver16's panel carries the full rail —
 the cloud's twelve and the ink's three as well — if a look-dev session needs them.)
@@ -1239,11 +1204,6 @@ the cloud's twelve and the ink's three as well — if a look-dev session needs t
 | attract reach | `attractRadius` | how far out it reaches for them, in viewport heights | `?attractr=` |
 | leash | `leashRadius` | how far a mote may stray from its seat, in mass radii | `?leash=` |
 | sign hold | `signHold` | how firmly the patch under the words is held in place | `?sign=` |
-| sign seats | `signSeats` | share of the population born on the label's box | `?seats=` |
-| sign skew | `signSkewX` | how much of that share sits in the far half of the words | `?skew=` |
-| sign trap | `signTrap` | how much of the traffic across the label's box stays in it, 0 in ver22 | `?trap=` |
-| sign shield | `signShield` | how much of the cursor's push the caught motes feel | `?shield=` |
-| sign bias | `signBiasX` | where along the words the patch and the pull are centred | `?signx=` |
 
 **ver18 ships the client's hover settings**: push 1.20, reach 0.350, memory 7.35,
 irregularity 1.50, inertia 0.50 s, path 16, follow 0.10. Three of those — push, reach and
@@ -1334,8 +1294,8 @@ grip = smoothstep(0, core * reach, d) * exp(-(d / reach)^2)
 It eases **in from nothing at the centre** — a mote that has arrived is no longer pulled, so
 the ones behind it are not packed on top of it and the sign gets a cloud rather than a bead —
 and **out to nothing at the reach**, so this is a local gathering and not a well the whole
-corner falls into. `attractCore` is 0.30 of the reach, and **`attractPull` is 0.70 with `attractRadius` at
-0.55** — three times the pull, and half again the reach.
+corner falls into. `attractCore` is 0.30 of the reach, and **ver19 ships `attractPull` at 0.30 and
+`attractRadius` at 0.55** — three times the pull, and half again the reach.
 
 The reach is the half of that fix worth explaining. The grip falls off as a gaussian, so at
 twice the reach it is a fiftieth of nothing: a mote that has *already* left the neighbourhood
@@ -1406,101 +1366,41 @@ than a tendency:
 them. Change the text, the font or the corner it sits in and the held patch follows it with no
 number to update.
 
-### The sign's own motes
-
-Three versions tried to keep the words backed by moving motes that were somewhere else — a
-pull toward the label, a shorter leash for the ones seated under it, a trap for the ones
-drifting across it. All three are races: against the field, against the mote's own momentum,
-and above all against the cursor, which is by a wide margin the strongest force in the build.
-A race can be lost, and when it was, the sign lost its ink.
-
-ver22 stops racing. **`signSeats` (0.05) of the population is seated on the label's box** —
-22,500 motes at the shipped count — thrown **evenly over the ellipse** rather than gathered
-about its middle, because the words need their ends backed as much as their centre. They are
-spread through `signSeatDepth` (0.5) of the cloud's depth, so the patch is a slab of the volume
-and not a decal on a plane.
-
-Those motes are then held, by machinery that already existed for them:
-
-- **The short leash.** `signLeash` 0.10 mass radii against the general 0.60, at `signHold` 1.0.
-  They stir; they do not leave. A dead one respawns on the label, because that is where its
-  seat is.
-- **Out of the bloom**, so hover cannot carry the backing off the words.
-- **`signShield` 0.25 of the cursor's push**, keyed off the SEAT now rather than off the trap
-  flag — the reserved population is defined by where it was born, so that is what the shield
-  reads.
-
-The conversion is worth a note: the seats are placed in `buildParticles`, which runs before
-`place()`, so there is no group matrix to convert with. The group sits at the corner plus its
-offset and is scaled by `massScale` — undoing those two by hand is the whole of what
-`worldToLocal` would have done.
-
-**Weighted toward the far end, in two different ways.** `signBiasX` (1.30) shifts the whole
-patch along the words — the reserved seats, the held test and the pull all move with it — and
-`signSkewX` (1.00) then puts more of the motes in its far half without moving the patch at all.
-The pair is why the near end does not pay for the far one: the shift alone would starve it, and
-the skew alone cannot reach past the box. Density where it is needed, coverage everywhere.
-
-The skew works by drawing the position **along** the words first and the height within the
-chord that leaves — polar sampling gives an even disc and nothing else, whereas drawing x on
-its own lets it be weighted while every seat still lands inside the ellipse. It is a mix
-between a uniform draw and its square root, so even at 1 the near half keeps about 30% of them.
-
-`attractPull` is back on at **0.90**, aimed at that same shifted point, so the general
-population drifts toward the far end of the sign as well.
-
-`?seats=0` is the cloud with no sign machinery at all, and the bars are **sign seats** and
-**sign skew** (both re-throw the population on release).
-
-### The trap
-
-Holding the motes *seated* under the label only works where there are seats to hold, and that
-is the limit the first two attempts ran into. The mass is wedged into the corner and thins
-toward the screen edge, so the end of the words can sit past where the model puts any seats at
-all — and then no amount of pull, hold or bias makes ink appear there, because there is nothing
-to move.
-
-So a share of the motes that **drift into** the label's box are kept in it. `signTrap` is 0.35:
-that fraction of the traffic is catchable, decided once per mote from its own seed so it is a
-stable share rather than a dice roll every frame that would eventually catch everything. A
-caught mote may stir inside the box; it may not cross the rim. If a step takes it past, it is
-put back on the rim along the line it left by, with its velocity untouched, so it slides around
-the inside of the boundary instead of stopping dead on it.
-
-The flag rides in the **velocity buffer's spare channel** — the only per-mote state this build
-has room for without a third render target — and it latches, so the patch does not flicker as
-motes cross the rim. It clears on death, which is what makes the whole thing self-limiting:
-only a share of what passes is caught, and everything caught eventually dies and respawns at
-its seat, so the trap reaches a steady population instead of draining the cloud into the sign.
-(That turnover is the lifespan clock, so it leans on `lifeFraction` being 1. With immortal
-motes in the mix they would pile into the box and never leave.)
-
-`signTrap` ships at 0.75 — most of what crosses the box stays in it. `?trap=0` is the ver20
-behaviour, and the bar is **sign trap**.
-
-**And the cursor does not get to empty it.** The push is by a wide margin the strongest force
-in the build — a reach of 0.35 of the viewport at 1.20 of the mass radius per second — so a
-pass of the pointer near the corner was blowing the sign's own ink off the words faster than
-the pull could put it back, which is why a stronger pull alone kept not being enough. A caught
-mote now feels only `signShield` (0.25) of the push. Not none: at 0 the patch ignores the
-pointer entirely and reads as a dead spot in a cloud that is otherwise answering, which is
-worse than the problem. `?shield=` reaches it.
-
-**The patch is not centred on the label's box, though.** The cloud is wedged into the corner and thins toward
-the screen edge, so a patch on the middle of the label runs out of mass before the words do —
-the last one ends up half backed. `signBiasX` (1.10, a little past the right edge of the type) shifts the anchor toward the end of the
-words, as a fraction of the label's own half-width so it holds for a longer or shorter piece of
-text. One number moves three things, because they should never disagree: the pull, the held
-patch, and the seat focus that decides where motes are born.
-
-Note the seat focus is clamped into the seat map (`lim` 0.42) — if the label is already near
-that edge the bias moves the pull and the patch but not where motes are *born*, and the extra
-ink on the right then comes from live motes migrating rather than from new ones appearing.
-`?signx=` reaches it, and the panel bar re-throws the population on release because the seats
-are drawn from it.
-
 The test is the **seat's** distance to the label, which never changes while a mote lives — so
 this costs nothing at run time beyond one ellipse distance per particle.
+
+## The text's own chunk
+
+Everything between ver21 and ver23 tried to keep the words backed by moving motes that were
+somewhere else — a stronger pull, a shorter leash, a trap, an anchor shifted along the words.
+All of those are races: against the field, against the mote's own momentum, and above all
+against the cursor, whose push is the strongest force in the build by a wide margin. A race
+can be lost, and every time it was lost the sign lost its ink.
+
+ver24 does not race. **`signSeats` (0.06) of the population is seated on the label's box** —
+27,000 motes at the shipped count, thrown evenly across it so the ends of the words are backed
+as well as the middle, and spread through half the cloud's depth so the chunk is a slab of the
+volume rather than a decal on a plane. Then:
+
+- **The hover does not touch them.** `signShield` is 0, so the cursor's push is multiplied by
+  nothing for a mote of the chunk. They are also held out of the bloom, so hover cannot carry
+  them off the words either.
+- **They stay where they are.** `signLeash` 0.10 mass radii against the general 0.60, at
+  `signHold` 1.0. They stir on the field; they do not leave. A dead one respawns on the label,
+  because that is where its seat is.
+- **They carry more ink.** `signInk` 0.30. The cloud is faint by design at `alphaGain` 0.43 —
+  right for a dusting of pigment over a wall — and white type has to be read *against* its
+  backing rather than merely laid over it. This is the one place in the picture where those two
+  requirements differ, so it is the one place the ink is allowed to be heavier. `?ink=0` makes
+  them exactly as pale as everything else.
+
+The hold band is `smoothstep(1.0, 1.35)` of the ellipse rather than `0.65 -> 1.0`: the chunk's
+seats are thrown across the whole box, so a band that faded from two thirds of the way out
+would leave its outer half barely held — the motes planted to hold the words would have been
+the ones least held.
+
+`?seats=0` is ver20 exactly. The bars are **sign seats** (which re-throws the population) and
+**sign ink** (free).
 
 ## Arriving warm
 
