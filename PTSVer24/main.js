@@ -807,6 +807,9 @@ const CONFIG = {
   signLeash: 0.10,          // that short leash, in mass radii. Small enough that the patch
                             //   cannot be swept off the words, large enough that it still
                             //   moves and never reads as a stuck decal
+  signPadY: 0.030,          // extra height on top of signPad, so the patch is a band around
+                            //   the words rather than a strip level with them: white type
+                            //   needs ink behind its ascenders and under its baseline too
   signPad: 0.045,           // how far past the type the patch reaches, in viewport heights.
                             //   The words need ink around them as well as under them, or the
                             //   backing ends exactly at the glyphs and reads as a smudge cut
@@ -1678,8 +1681,11 @@ void main(){
   // across the WHOLE ellipse, so a band that faded out from two thirds of the way left the
   // outer half of them barely held — the motes planted to hold the words would have been the
   // ones least held.
-  vec2 q = (seed.xy - uAttractPoint.xy) / max(uSignHalf, vec2(1e-5));
-  float under = 1.0 - smoothstep(1.0, 1.35, length(q));
+  // A BOX distance, not a radius: the patch is the label's rectangle, and a radial test
+  // would hold its middle while letting the ends go — which is the shape of the whole
+  // problem this chunk exists to solve.
+  vec2 q = abs(seed.xy - uAttractPoint.xy) / max(uSignHalf, vec2(1e-5));
+  float under = 1.0 - smoothstep(1.0, 1.35, max(q.x, q.y));
   float leash = mix(uLeash, uSignLeash, under * uSignHold);
 
   float away = length(offset);
@@ -1721,8 +1727,8 @@ void main(){
   // the label's box — feels uSignShield of it, which ships at zero: the push is the strongest
   // force in the build by a wide margin, and it was emptying the words every time the pointer
   // went past. The rest of the cloud is untouched by this.
-  vec2 seatQ = (seed.xy - uAttractPoint.xy) / max(uSignHalf, vec2(1e-5));
-  float mine = (1.0 - smoothstep(1.0, 1.35, length(seatQ))) * uSignHold;
+  vec2 seatQ = abs(seed.xy - uAttractPoint.xy) / max(uSignHalf, vec2(1e-5));
+  float mine = (1.0 - smoothstep(1.0, 1.35, max(seatQ.x, seatQ.y))) * uSignHold;
 
   vec3 target = fieldVelocity(here) + birthImpulse(here, age) + vec3(0.0, -uGravity, 0.0);
   v += (target - v) * clamp(uSettle, 0.0, 1.0);
@@ -1860,8 +1866,8 @@ void main(){
   // holding it. The bloom scales about the screen corner, so on hover it carries everything
   // outward — including the ink the words are read against, which slides off them at exactly
   // the moment somebody is looking. Motes seated under the label keep their place instead.
-  vec2 signQ = (aInitPos.xy - uSignPoint.xy) / max(uSignHalf, vec2(1e-5));
-  float inPatch = 1.0 - smoothstep(1.0, 1.35, length(signQ));
+  vec2 signQ = abs(aInitPos.xy - uSignPoint.xy) / max(uSignHalf, vec2(1e-5));
+  float inPatch = 1.0 - smoothstep(1.0, 1.35, max(signQ.x, signQ.y));
   float underSign = inPatch * uSignHold;
   float expand = uExpand * uExpandAmount * (1.0 - underSign);
   pos = uExpandOrigin + (pos - uExpandOrigin) * (1.0 + expand);
@@ -3798,17 +3804,18 @@ function buildParticles(count) {
       const lx = ((r.left + r.width / 2 - innerWidth / 2) / ppw - gx) / ms;
       const ly = ((innerHeight / 2 - (r.top + r.height / 2)) / ppw - gy) / ms;
       const hx = (r.width / 2 / ppw + CONFIG.signPad * vh) / ms;
-      const hy = (r.height / 2 / ppw + CONFIG.signPad * vh) / ms;
+      const hy = (r.height / 2 / ppw + (CONFIG.signPad + CONFIG.signPadY) * vh) / ms;
       const dz = CONFIG.boxDepth * vh * 0.5 * CONFIG.signSeatDepth;
-      // Even across the box, not gathered about its middle: the words need their ENDS backed
-      // as much as their centre, and a bell leaves the last letters thin. x is drawn first
-      // and y within the chord it leaves, so every seat lands inside the ellipse.
+      // Even across the BOX. Not gathered about its middle — the words need their ends backed
+      // as much as their centre — and not an ellipse either, which is what the first cut of
+      // this was and why the ends kept coming up naked: an ellipse inscribed in a wide, short
+      // box narrows to a POINT at the very place the last letters are, so the backing there
+      // was a sliver a few pixels tall while the middle had the full height of the patch.
+      // Text is a rectangle. The patch is a rectangle.
       for (let k = 0; k < signCount; k++) {
         const i = k * 3;
-        const nx = Math.random() * 2 - 1;
-        const ny = (Math.random() * 2 - 1) * Math.sqrt(Math.max(0, 1 - nx * nx));
-        initPos[i] = lx + nx * hx;
-        initPos[i + 1] = ly + ny * hy;
+        initPos[i] = lx + (Math.random() * 2 - 1) * hx;
+        initPos[i + 1] = ly + (Math.random() * 2 - 1) * hy;
         initPos[i + 2] = (Math.random() * 2 - 1) * dz;
       }
     }
@@ -4660,7 +4667,7 @@ function place() {
       const ms = Math.max(1e-6, CONFIG.massScale);
       sim.step.uniforms.uSignHalf.value.set(
         (r.width / 2 / ppw + CONFIG.signPad * vh) / ms,
-        (r.height / 2 / ppw + CONFIG.signPad * vh) / ms);
+        (r.height / 2 / ppw + (CONFIG.signPad + CONFIG.signPadY) * vh) / ms);
       // the render material reads the same patch, to hold it out of the bloom
       uniforms.uSignPoint.value.copy(attractWorld);
       uniforms.uSignHalf.value.copy(sim.step.uniforms.uSignHalf.value);

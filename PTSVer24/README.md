@@ -1378,9 +1378,16 @@ against the cursor, whose push is the strongest force in the build by a wide mar
 can be lost, and every time it was lost the sign lost its ink.
 
 ver24 does not race. **`signSeats` (0.06) of the population is seated on the label's box** —
-27,000 motes at the shipped count, thrown evenly across it so the ends of the words are backed
-as well as the middle, and spread through half the cloud's depth so the chunk is a slab of the
-volume rather than a decal on a plane. Then:
+27,000 motes at the shipped count, thrown evenly across it and through half the cloud's depth,
+so the chunk is a slab of the volume rather than a decal on a plane.
+
+**The patch is a rectangle, not an ellipse**, and that is not a detail. An ellipse inscribed in
+a wide, short box narrows to a *point* at exactly the place the last letters are, so the ends
+of the words were backed by a sliver a few pixels tall while the middle had the patch's full
+height — which is what "the right half is naked" was. Text is a rectangle, so the patch is a
+box distance: `max(|qx|, |qy|)` in place of a radius, in all three tests that read it and in
+the seeding. `signPadY` (0.030) adds height on top of `signPad` as well, so there is ink behind
+the ascenders and under the baseline rather than a strip level with the type. Then:
 
 - **The hover does not touch them.** `signShield` is 0, so the cursor's push is multiplied by
   nothing for a mote of the chunk. They are also held out of the bloom, so hover cannot carry
