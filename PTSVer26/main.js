@@ -186,7 +186,11 @@ const CONFIG = {
                             //   it drooping. It rotates the whole streak, but the dense end
                             //   sits on the label and barely moves; the travel is at the far
                             //   end, which is the part that needed it
-  silhouette: 3.4,          // long-to-across ratio of the streak. 1 is a circle
+  silhouette: 4.7,          // long-to-across ratio of the streak. 1 is a circle. Raised from
+                            //   3.4: with the throw now near level, ACROSS the streak is
+                            //   vertical, so this is the mass's own height — narrowing it is
+                            //   what lifts the bottom edge without touching the length, the
+                            //   density or the end that sits under the label
   streakTaper: 0.62,        // how fast the trailing end thins out, in plane widths. Small
                             //   is an abrupt stub, large is a long dissolving tail.
                             //   Down from 0.95 in ver25: the throw runs at 196 degrees, left
@@ -462,7 +466,9 @@ const CONFIG = {
                             //   corner. It is a fraction of the viewport rather than a pixel
                             //   count, so it holds its proportion at any window size; on a
                             //   very tall or very short one the 50 px is 50 px at THAT height
-  offsetY: 0.230,           // both off the client's panel, with massScale below
+  offsetY: 0.275,           // both off the client's panel, with massScale below. Up from
+                            //   0.230: the narrower band above takes the low motes out, this
+                            //   carries what is left up with it
   massScale: 1.20,          // on-screen size of the whole thing, motion included
 
   anchorX: 1.00,
