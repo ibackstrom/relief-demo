@@ -186,6 +186,15 @@ const CONFIG = {
                             //   it drooping. It rotates the whole streak, but the dense end
                             //   sits on the label and barely moves; the travel is at the far
                             //   end, which is the part that needed it
+  // How far the mass reaches in Y, as a multiple of what the model gave it, about its own
+  // middle. Every other control here shapes where motes are DRAWN — the streak's ratio, the
+  // taper, the focus — and all of them only reweight a silhouette the model decided; none of
+  // them can pull a seat that the model put low back up. This moves the seats themselves, so
+  // it is the one that answers "the bottom hangs too far down" directly: at 0.78 a mote a
+  // hundred pixels below the middle ends up seventy-eight below it, and one at the middle
+  // does not move at all.
+  massSquashY: 0.78,        // 1 leaves the model's own extent alone
+
   silhouette: 4.7,          // long-to-across ratio of the streak. 1 is a circle. Raised from
                             //   3.4: with the throw now near level, ACROSS the streak is
                             //   vertical, so this is the mass's own height — narrowing it is
@@ -1240,6 +1249,7 @@ if (numParam('noise', 0, 1) !== null) CONFIG.shapeNoise = numParam('noise', 0, 1
 if (numParam('blob', 0, 1) !== null) CONFIG.blob = numParam('blob', 0, 1);
 if (numParam('life', 0, 1) !== null) CONFIG.lifeFraction = numParam('life', 0, 1);
 // both re-throw the seats, so they are load-time rather than live
+if (numParam('squash', 0.2, 2) !== null) CONFIG.massSquashY = numParam('squash', 0.2, 2);
 if (numParam('angle', 90, 270) !== null) CONFIG.flowAngle = numParam('angle', 90, 270);
 if (numParam('taper', 0.05, 3) !== null) CONFIG.streakTaper = numParam('taper', 0.05, 3);
 if (numParam('focus', 0, 3) !== null) CONFIG.focusDensity = numParam('focus', 0, 3);
@@ -3815,6 +3825,18 @@ function buildParticles(count) {
     shapes[i]   = Math.random();
   }
 
+  // ---- pull the mass in toward its own middle in y -------------------------
+  // Before the chunk below, not after: the chunk is placed on the label in screen terms and
+  // must not be squashed off it.
+  if (CONFIG.massSquashY !== 1) {
+    let my = 0;
+    for (let i = 0; i < count; i++) my += initPos[i * 3 + 1];
+    my /= Math.max(1, count);
+    for (let i = 0; i < count; i++) {
+      initPos[i * 3 + 1] = my + (initPos[i * 3 + 1] - my) * CONFIG.massSquashY;
+    }
+  }
+
   // ---- the chunk that belongs to the text ---------------------------------
   // Thrown last, over the ones the model gave, so the words have their ink whatever the
   // silhouette did or did not put there. The box is the element's own, converted into the
@@ -5100,6 +5122,10 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     { key: 'leashRadius', name: 'leash', cst: 'CONFIG.leashRadius',
       min: 0.1, max: 3, step: 0.05, value: CONFIG.leashRadius,
       text: () => CONFIG.leashRadius.toFixed(2) },
+    // how far the mass reaches in y, about its own middle
+    { key: 'massSquashY', name: 'squash', cst: 'CONFIG.massSquashY',
+      min: 0.3, max: 1.5, step: 0.01, value: CONFIG.massSquashY,
+      rebuild: true, text: () => CONFIG.massSquashY.toFixed(2) },
     // the chunk: how many motes it has, and how much heavier its ink is
     { key: 'signSeats', name: 'sign seats', cst: 'CONFIG.signSeats',
       min: 0, max: 0.4, step: 0.005, value: CONFIG.signSeats,
