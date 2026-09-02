@@ -3,9 +3,11 @@
 A volume of drifting, curling lit spheres wedged into the top-right corner. It answers the
 cursor and blooms outward when the pointer reaches it.
 
-ver25 draws the mass in. The throw runs at 196 degrees — left and slightly down from the
-corner — so the streak's trailing end *is* the lower left, and that end was hanging below the
-body. `streakTaper` 0.95 → **0.62** thins it sooner, which takes the straggle in without moving
+ver25 draws the mass in and lifts it. The throw ran at 196 degrees — left and slightly *down*
+from the corner — so the streak's trailing end was pointed below the body, which is the whole
+of why it hung there. `flowAngle` is **182** now, all but level, so the same mass reaches across
+rather than down; it rotates the streak, but the dense end sits on the label and barely moves,
+so the travel is all at the far end where it was wanted. `streakTaper` 0.95 → **0.62** thins it sooner, which takes the straggle in without moving
 the mass or touching the dense end under the label; `focusDensity` 0.5 → **0.75** then weights
 what is left toward the middle. `?taper=` and `?focus=` reach both, and both re-throw the seats,
 so they are load-time rather than live.

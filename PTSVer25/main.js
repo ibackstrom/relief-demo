@@ -178,8 +178,13 @@ const CONFIG = {
   // cut from, and the grains themselves are all long along the throw axis and compressed
   // across it. A field that is isotropic anywhere in that chain pulls the shape back toward
   // a circle, which is what a blob is.
-  flowAngle: 196,           // degrees, the throw axis: which way the pigment was dragged.
-                            //   196 runs left and slightly down from the corner
+  flowAngle: 182,           // degrees, the throw axis: which way the pigment was dragged.
+                            //   196 ran left and slightly DOWN from the corner, which is why
+                            //   the far end of the streak hung below the body — the tail was
+                            //   simply pointed there. 182 is all but level, so the same mass
+                            //   reaches across rather than down. It rotates the whole streak,
+                            //   but the dense end sits on the label and barely moves; the
+                            //   travel is at the far end, which is the part that needed it
   silhouette: 3.4,          // long-to-across ratio of the streak. 1 is a circle
   streakTaper: 0.62,        // how fast the trailing end thins out, in plane widths. Small
                             //   is an abrupt stub, large is a long dissolving tail.
@@ -1228,6 +1233,7 @@ if (numParam('noise', 0, 1) !== null) CONFIG.shapeNoise = numParam('noise', 0, 1
 if (numParam('blob', 0, 1) !== null) CONFIG.blob = numParam('blob', 0, 1);
 if (numParam('life', 0, 1) !== null) CONFIG.lifeFraction = numParam('life', 0, 1);
 // both re-throw the seats, so they are load-time rather than live
+if (numParam('angle', 90, 270) !== null) CONFIG.flowAngle = numParam('angle', 90, 270);
 if (numParam('taper', 0.05, 3) !== null) CONFIG.streakTaper = numParam('taper', 0.05, 3);
 if (numParam('focus', 0, 3) !== null) CONFIG.focusDensity = numParam('focus', 0, 3);
 if (numParam('speed', 0, 3) !== null) CONFIG.speed = numParam('speed', 0, 3);
