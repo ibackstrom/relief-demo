@@ -4840,6 +4840,17 @@ if (uiEl && PARAMS.get('ui') !== '1') {
   // it out of tune. All seven are read out of CONFIG every frame, so none needs a rebuild
   // and none costs anything to drag.
   const ROWS = [
+    // ---- where the mass sits ------------------------------------------------------------
+    // Viewport heights, positive toward the corner's own side, so x runs right and y runs up.
+    // Both are group transforms: place() re-runs and nothing is re-thrown, so they drag live
+    // at any population.
+    { key: 'offsetX', name: 'offset x', cst: 'CONFIG.offsetX',
+      min: -0.5, max: 1.0, step: 0.005, value: CONFIG.offsetX,
+      place: true, text: () => CONFIG.offsetX.toFixed(3) },
+    { key: 'offsetY', name: 'offset y', cst: 'CONFIG.offsetY',
+      min: -0.5, max: 1.0, step: 0.005, value: CONFIG.offsetY,
+      place: true, text: () => CONFIG.offsetY.toFixed(3) },
+
     // Range raised from 1.2: the setting that came back was pinned to the old top of the
     // bar, which usually means the bar ran out rather than that the value was chosen.
     { key: 'hoverPush', name: 'push', cst: 'CONFIG.hoverPush',
