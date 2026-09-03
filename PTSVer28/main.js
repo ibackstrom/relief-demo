@@ -4839,60 +4839,20 @@ if (uiEl && PARAMS.get('ui') !== '1') {
   // itself does is settled and baked, and a bar for a settled value is only a way to knock
   // it out of tune. All seven are read out of CONFIG every frame, so none needs a rebuild
   // and none costs anything to drag.
+  // The panel is the PLACEMENT and nothing else. Viewport heights, positive toward the
+  // corner's own side, so x runs right and y runs up. Both are group transforms: place()
+  // re-runs and nothing is re-thrown, so they drag live at any population, and each prints
+  // the value to paste into CONFIG once it is settled.
   const ROWS = [
-    // ---- where the mass sits ------------------------------------------------------------
-    // Viewport heights, positive toward the corner's own side, so x runs right and y runs up.
-    // Both are group transforms: place() re-runs and nothing is re-thrown, so they drag live
-    // at any population.
     { key: 'offsetX', name: 'offset x', cst: 'CONFIG.offsetX',
       min: -0.5, max: 1.0, step: 0.005, value: CONFIG.offsetX,
       place: true, text: () => CONFIG.offsetX.toFixed(3) },
     { key: 'offsetY', name: 'offset y', cst: 'CONFIG.offsetY',
       min: -0.5, max: 1.0, step: 0.005, value: CONFIG.offsetY,
       place: true, text: () => CONFIG.offsetY.toFixed(3) },
-
-    // Range raised from 1.2: the setting that came back was pinned to the old top of the
-    // bar, which usually means the bar ran out rather than that the value was chosen.
-    { key: 'hoverPush', name: 'push', cst: 'CONFIG.hoverPush',
-      min: 0, max: 3, step: 0.01, value: CONFIG.hoverPush,
-      text: () => CONFIG.hoverPush.toFixed(2) },
-    // likewise raised from 0.35
-    { key: 'mouseRadius', name: 'reach', cst: 'CONFIG.mouseRadius',
-      min: 0.01, max: 0.6, step: 0.005, value: CONFIG.mouseRadius,
-      place: true, text: () => CONFIG.mouseRadius.toFixed(3) },
-    // how far back in time the cursor is still acting: the several-pushes-at-once dial
-    { key: 'hoverTrail', name: 'memory', cst: 'CONFIG.hoverTrail',
-      min: 0, max: 8, step: 0.05, value: CONFIG.hoverTrail,
-      text: () => CONFIG.hoverTrail.toFixed(2) },
-    // how far from a circle the opening is
-    // likewise raised from 1.5
-    { key: 'mouseWarp', name: 'irregularity', cst: 'CONFIG.mouseWarp',
-      min: 0, max: 3, step: 0.01, value: CONFIG.mouseWarp,
-      text: () => CONFIG.mouseWarp.toFixed(2) },
-    // ver16's three: how long a shove lasts, how much of the path is kept, and how closely
-    // the cloud's pointer follows the real one. Between them they are the whole of whether
-    // the cursor is answered where it is or where it has been.
-    { key: 'hoverHold', name: 'inertia', cst: 'CONFIG.hoverHold',
-      min: 0.1, max: 3, step: 0.05, value: CONFIG.hoverHold,
-      text: () => CONFIG.hoverHold.toFixed(2) + ' s' },
-    { key: 'hoverTrailSlots', name: 'path', cst: 'CONFIG.hoverTrailSlots',
-      min: 1, max: 24, step: 1, value: CONFIG.hoverTrailSlots, round: true,
-      text: () => String(CONFIG.hoverTrailSlots) },
-    // low is a cloud that lags the pointer, which is the smooth end
-    { key: 'mouseSmoothing', name: 'follow', cst: 'CONFIG.mouseSmoothing',
-      min: 0.01, max: 0.4, step: 0.01, value: CONFIG.mouseSmoothing,
-      text: () => CONFIG.mouseSmoothing.toFixed(2) },
-    // ver18's pull toward the sign. Two bars because the pair is one decision: how hard it
-    // gathers, and how far out it reaches for motes to gather.
-    { key: 'attractPull', name: 'attract', cst: 'CONFIG.attractPull',
-      min: 0, max: 1, step: 0.01, value: CONFIG.attractPull,
-      text: () => CONFIG.attractPull.toFixed(2) },
-    { key: 'attractRadius', name: 'attract reach', cst: 'CONFIG.attractRadius',
-      min: 0.02, max: 1, step: 0.01, value: CONFIG.attractRadius,
-      place: true, text: () => CONFIG.attractRadius.toFixed(2) },
   ];
 
-  uiEl.innerHTML = '<h2>hover</h2>' + ROWS.map((r, i) =>
+  uiEl.innerHTML = '<h2>offset</h2>' + ROWS.map((r, i) =>
     '<div class="row"><div class="lbl">'
     + '<span class="name">' + r.name + '</span>'
     + '<span class="val" id="pv' + i + '">' + r.text() + '</span></div>'
