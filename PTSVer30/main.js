@@ -759,12 +759,22 @@ const CONFIG = {
   //
   // What it does cost is LOOK: every mote given to the text is one the free cloud no longer
   // has. At half and half the drifting part is half as dense as the build it came from.
-  signSeats: 0.50,          // share of the population that belongs to the text. 0 is ver29
+  signSeats: 0.20,          // share of the population that belongs to the text. 0 is ver29.
+                            //   Down from 0.50 with the tighter box below: the box lost about
+                            //   two thirds of its area, so a fifth of the motes now sit in it
+                            //   MORE densely than half of them did in the loose one — and the
+                            //   free cloud gets four fifths of the population back, which is
+                            //   the effect that was being lost
   signSeatDepth: 0.5,       // how much of the cloud's depth they are spread through, so the
                             //   group is a slab of the volume and not a decal on a plane
-  signPad: 0.045,           // how far past the type their box reaches, in viewport heights
-  signPadY: 0.030,          // extra on the vertical, so there is ink behind the ascenders and
-                            //   under the baseline rather than a strip level with the type
+  signPad: 0.018,           // how far past the type their box reaches, in viewport heights.
+                            //   Tight to the words now: at 0.045 the box stood about 37 px
+                            //   clear of the type on each side, which is a slab the sign sits
+                            //   in the middle of rather than ink fitted to it
+  signPadY: 0.014,          // extra on the vertical, so there is ink behind the ascenders and
+                            //   under the baseline rather than a strip level with the type.
+                            //   The type is only about 16 px tall, so this stays proportionally
+                            //   larger than signPad — a band, not a hairline
   signLeash: 0.10,          // how far one may drift from its own seat, in mass radii. They
                             //   stir; they do not leave. A dead one respawns on the label,
                             //   because that is where its seat is
