@@ -785,6 +785,28 @@ const CONFIG = {
   // Stated as a speed, the same way the cursor's push is: a fraction of the mass radius per
   // second, with the force solved back out of it through the same gain, so the number means
   // one thing whatever the inertia is set to.
+  // ver13b: THE reason a switch was slow, and it was never the target's journey.
+  //
+  // The pull is a force whose terminal speed is attractPull mass radii per second — 0.72,
+  // which is two thirds of the mass's own width in a whole second — and its grip DECAYS with
+  // distance, exp(-(d/reach)^1.6). So the moment a far tab is picked the mass finds itself
+  // two reaches away with five percent of its pull left: it creeps until it happens to get
+  // closer, then accelerates. Shortening the CSS transition moved the TARGET faster and did
+  // nothing for the motes, which is why three versions of it changed nothing.
+  //
+  // This is the grip a mote gets when it is far from the target AND the target has just
+  // moved. Near the mass it is nothing, so the settled cloud keeps the shaped grip it was
+  // tuned with; out where only a switch puts a mote, it is worth several times the pull —
+  // 6.0 takes the terminal speed to about 4.3 mass radii a second, so the longest journey on
+  // the row is a third of a second rather than several.
+  attractTravel: 2.6,       // 0 restores ver13's behaviour exactly. Read it as: a mote two
+                            //   reaches out is pulled at about 5x the settled rate, one at
+                            //   the far end of the row at about 15x — ?travel= to taste
+  attractTravelHold: 0.55,  // seconds the travel grip stays up after the target stops. The
+                            //   anchor arrives in 0.16s but the motes are still crossing —
+                            //   cut it at the anchor and they would be dropped mid-flight
+                            //   back onto the creeping pull
+
   attractStagger: 0.70,     // AURORA ver13: how far the pull's strength is spread ACROSS the
                             //   population, as a fraction either side of the average. At 0
                             //   every mote is pulled identically and a switch is a rigid
@@ -1309,6 +1331,8 @@ if (numParam('seats', 0, 0.9) !== null) CONFIG.signSeats = numParam('seats', 0, 
 if (numParam('ink', 0, 3) !== null) CONFIG.signInk = numParam('ink', 0, 3);
 if (numParam('shield', 0, 1) !== null) CONFIG.signShield = numParam('shield', 0, 1);
 if (numParam('attract', 0, 2) !== null) CONFIG.attractPull = numParam('attract', 0, 2);
+if (numParam('travel', 0, 12) !== null) CONFIG.attractTravel = numParam('travel', 0, 12);
+if (numParam('hold', 0.05, 3) !== null) CONFIG.attractTravelHold = numParam('hold', 0.05, 3);
 if (numParam('attractr', 0.02, 1.5) !== null) CONFIG.attractRadius = numParam('attractr', 0.02, 1.5);
 if (numParam('warm', 0, 20) !== null) CONFIG.warmSeconds = numParam('warm', 0, 20);
 if (numParam('fade', 0, 5) !== null) CONFIG.fadeInSeconds = numParam('fade', 0, 5);
@@ -1585,6 +1609,7 @@ uniform float uAttractCore;
 uniform float uAttractCenterGrip;
 uniform float uAttractPull;
 uniform float uAttractStagger;   // ver13: per-mote spread in the pull, so the mass streams
+uniform float uAttractTravel;    // ver13b: the far-field grip, alive only during a switch
 // AURORA ver10: the seats move in TEXTURE space, not by translating the group. The group's
 // transform carries every live particle rigidly — which is what made a tab switch read as
 // the emitter sliding along X. The shift is added wherever the SEAT is used as a position,
@@ -1662,6 +1687,19 @@ vec3 attractTo(vec3 p, vec3 target, float eagerness){
   float grip = max(smoothstep(0.0, max(1e-5, uAttractCore * uAttractRadius), d),
                    uAttractCenterGrip)
              * exp(-pow(d / max(1e-5, uAttractRadius), 1.6));
+  // ver13b: and the grip that carries a mote ACROSS. The shaped one above is built to hold a
+  // gathered cloud and dies with distance, which is right at rest and useless the instant the
+  // target jumps to another tab. This one does the opposite: nothing near the mass, rising to
+  // several times the pull out where only a switch puts a mote. uAttractTravel is zero unless
+  // the target has just moved, so the settled cloud never feels it.
+  // and it RISES WITH DISTANCE, which is the difference between a switch that is quick and
+  // one that is quick only between neighbours. A constant far-field pull gives every mote the
+  // same top speed, so crossing the whole row takes as many times longer as it is further —
+  // the complaint exactly. Speed proportional to distance makes the crossing TIME the same
+  // wherever the two tabs are: the far ones simply fly faster.
+  float reach = max(1e-5, uAttractRadius);
+  grip = max(grip, smoothstep(0.55, 1.8, d / reach)
+                 * uAttractTravel * clamp(d / reach, 0.0, 8.0));
   return (to / d) * (uAttractPull * grip * eagerness);
 }
 
@@ -4221,6 +4259,7 @@ function makeSim() {
       uAttractCenterGrip: { value: CONFIG.attractCenterGrip },
       uAttractPull: { value: 0 },
       uAttractStagger: { value: CONFIG.attractStagger },
+      uAttractTravel: { value: 0 },
       // AURORA ver10: seats' texture-space relocation — see glideSeats
       uSeatShift: { value: new THREE.Vector2() },
       uSeatDelta: { value: new THREE.Vector2() },
@@ -4421,6 +4460,7 @@ function stepSim(dt) {
   u.uAttractPull.value = (CONFIG.attractPull * sim.radius) / (dtc * simPushGain) * pullBoost;
   u.uAttractCore.value = Math.max(CONFIG.attractCore / pullBoost, 0.24);
   u.uAttractStagger.value = THREE.MathUtils.clamp(CONFIG.attractStagger, 0, 0.95);
+  u.uAttractTravel.value = CONFIG.attractTravel * travelEnvelope;
   u.uSignLeash.value = CONFIG.signLeash * sim.radius;
   u.uSignShield.value = CONFIG.signShield;
   uniforms.uSignInk.value = CONFIG.signInk;
@@ -4713,6 +4753,9 @@ const attractDelta = new THREE.Vector3();
 let attractSprungInit = false;
 let attractArc = 0;
 let travelBoost = 1;        // sim field speed multiplier while the pull is in motion
+// ver13b: 1 from the frame the target moves, decaying over attractTravelHold. It gates the
+// far-field grip, so the cloud is carried while it is crossing and left alone once it is not.
+let travelEnvelope = 0;
 const seatShift = new THREE.Vector2();   // AURORA ver10: seats' texture-space relocation
 
 // AURORA: the pull's target element GLIDES between the category tabs on a CSS transition,
@@ -4770,6 +4813,10 @@ function updateAttract(vh, dt) {
     // against the pull, and what the customer saw was the mass sagging left out of the
     // journey. Enough boost left to keep the cloud stirring while it travels; not enough for
     // the current to steer it.
+    // rises instantly with the movement and falls on its own clock afterwards, so the motes
+    // still in flight when the anchor arrives are carried the rest of the way
+    travelEnvelope = Math.max(travel,
+      travelEnvelope - dtA / Math.max(0.05, CONFIG.attractTravelHold));
     uniforms.uCurlAmplitude.value = CONFIG.curlAmplitude * (1 + travel * 0.30);
     travelBoost = 1 + travel * 1.6;
     // The half-extents of the words, padded, in the same pre-scale units the seats are in.
