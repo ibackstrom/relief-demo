@@ -25,7 +25,13 @@ import * as THREE from 'three';
 const PARAMS = new URLSearchParams(location.search);
 
 // ---------------------------------------------------------------- CONFIG
-// PTSBottomVer13, rebuilt, then taken halfway back toward ver12: every value where ver12 and
+// PTSBottomVer13: the defaults below are the client's own, set on the ?ui=1 panel -
+// motion 0.048 / pattern change 0.165 / swirl 0.85 / scatter 1.00, pull 0.72 / grip 0 /
+// spread 0.08, crossing 3.00s with no departure spread, lift 0.14, no wander, size 0.295,
+// 200,000 motes, offset y -0.150. (offset x is not a setting: it is taken from the first tab
+// at load - see the seat-parking block - so the panel's -0.167 was that tab, not a choice.)
+//
+// Before that: rebuilt, then taken halfway back toward ver12: every value where ver12 and
 // the rebuilt ver13 differ is set to the midpoint - field speed 0.082 (0.118 / 0.046), field
 // clock 0.455 (0.53 / 0.38), centre grip 0.49 (0.18 / 0.80), pull spread 0.35 (none / 0.70) -
 // and the flight is quicker, between ver12's 0.32s glide and ver17's 2.75s: 0.5s of departures
@@ -206,7 +212,7 @@ const CONFIG = {
   // ver17: 0.22 -> 0.14, ver30's own radius. ver16's mass was spread wide; this is the
   // compact body ver30 has, at ver30's count, so it is as dense as ver30 as well.
   // ver17c: 0.14 -> 0.18, spread a little wider round the tab.
-  cornerRadius: 0.20,       // AURORA ver11: back to ver10's pair (with cornerBias below) —
+  cornerRadius: 0.295,       // AURORA ver11: back to ver10's pair (with cornerBias below) —
                             //   the customer asked for ver10's look
                             //   size dial — it is measured against the FRAME, so it does
                             //   not have to be re-derived when anything else moves
@@ -506,7 +512,7 @@ const CONFIG = {
   // visible mass inward off it. Nudging the group back out is the honest correction for
   // that, and it is easier to set by eye than to derive.
   offsetX: 0.0,             // AURORA: the cloud lives at the bottom-centre, on the category
-  offsetY: -0.14,           //   menu, not in the top-right corner. corner 'br' + anchorY 1
+  offsetY: -0.150,           //   menu, not in the top-right corner. corner 'br' + anchorY 1
                             //   parks the group on the bottom edge; offsetX 0 centres it,
                             //   offsetY lifts the anchor to the tab row (88.95% of the
                             //   frame ≈ 0.11 viewport heights up). AURORA ver11: -0.14 —
@@ -583,7 +589,7 @@ const CONFIG = {
   // it is what breaks a line that does form into grain, which is the 'spread it a bit'.
   // ver17c: 0.30 -> 0.38 - more of each mote's own scatter, so the wider mass stays grain
   // rather than drawing lines across its new width.
-  curlAmplitude: 0.20,      // how far a mote is carried off its seat. This is the main
+  curlAmplitude: 1.00,      // how far a mote is carried off its seat. This is the main
                             //   "how alive is it" dial. AURORA ver11: back to ver10's value
   curlSpeed: 18.0,          // how fast the field itself evolves. The field translates in
                             //   its own z with time, so motes do not retrace a path.
@@ -629,7 +635,7 @@ const CONFIG = {
   // uSpeed * uFrequency, and 0.066 * 1.8 = 0.119 against 0.046 * 2.6 = 0.120. Bigger folds,
   // the same calm pace.
   // ver16: 0.066 -> 0.085, so 0.085 * 1.4 = 0.119 - the same calm field speed as ver13-15.
-  simSpeed: 0.082,          // AURORA ver11: back to ver10's pace — the customer asked for
+  simSpeed: 0.048,          // AURORA ver11: back to ver10's pace — the customer asked for
                             //   ver10's motion. the field's strength, as a fraction of the
                             //   mass radius per
                             //   second, so a resize does not change the pace. The reference
@@ -668,7 +674,7 @@ const CONFIG = {
   // ver17 (test): ver30's pattern. Everything that gives ver30 its look - ink, grain, count,
   // alpha - was already identical here; what differed was the FIELD that folds the seeds into
   // filaments, and these three are ver30's own values, unchanged.
-  simFrequency: 2.6,        // eddy size, as 1/frequency in world units. LOW on purpose: this
+  simFrequency: 0.85,        // eddy size, as 1/frequency in world units. LOW on purpose: this
                             //   octave is the macro swirl and the x3.1 one below carries the
                             //   filament detail. From the reference:
                             //   its field decorrelates over 13-20% of the mass radius.
@@ -676,7 +682,7 @@ const CONFIG = {
   // ver13: 0.53 -> 0.38. The rate the field itself CHANGES, as opposed to how fast it
   // carries. A slower-evolving field is the difference between a mass that churns and one
   // that swells and sags: the same motion, spread over a longer breath.
-  simFieldSpeed: 0.455,      // how fast the field itself changes, from the reference's
+  simFieldSpeed: 0.165,      // how fast the field itself changes, from the reference's
                             //   1.5-second coherence. Too high and the filaments never get
                             //   long enough to fold before the field that drew them is gone.
                             //   AURORA ver11: back to ver10's rate
@@ -860,8 +866,8 @@ const CONFIG = {
   // It runs on REAL seconds. The sim's own clock runs at `speed` (0.55) of real time, so every
   // switch built from forces was integrating at barely half speed however fast its numbers
   // said it was. A flight measured in real seconds takes exactly as long as it says.
-  flightDur: 1.00,          // ver17: 1.80 -> 1.50 (1.05 - 1.95)          // seconds a mote takes to cross, on average (1.26 - 2.34)
-  flightSpread: 0.50,       // ver17: 1.60 -> 0.80. Half the departure spread is half the length
+  flightDur: 3.00,          // ver17: 1.80 -> 1.50 (1.05 - 1.95)          // seconds a mote takes to cross, on average (1.26 - 2.34)
+  flightSpread: 0.00,       // ver17: 1.60 -> 0.80. Half the departure spread is half the length
                             //   the migrating stream stretches to - the moving mass stays a
                             //   body rather than a haze strung between the tabs. Longest
                             //   arrival 0.80 + 1.95 = 2.75s       // seconds of random delay across the population, so it leaves as
@@ -872,7 +878,7 @@ const CONFIG = {
   flightArc: 0.14,          // ver17: 0.28 -> 0.10 - a lift, not a spray          // how far a mote's path bows off the straight line, as a fraction
                             //   of the journey. Mostly upward - the menu is near the bottom of
                             //   the frame and a downward bow would leave it
-  flightNoise: 0.06,        // ver17: 0.18 -> 0.06        // ver15: how far a mote WANDERS off its route, as a fraction of
+  flightNoise: 0.00,        // ver17: 0.18 -> 0.06        // ver15: how far a mote WANDERS off its route, as a fraction of
                             //   the journey. Two waves across it and one along it, each at
                             //   the mote's own frequency and phase, enveloped to nothing at
                             //   both ends so it still leaves from and lands on exactly the
@@ -906,7 +912,7 @@ const CONFIG = {
   flightMinPx: 24,          // journeys shorter than this, in CSS pixels, do not fly: the cloud
                             //   just follows them, which is what a scroll or a resize needs
 
-  attractStagger: 0.35,     // AURORA ver13: how far the pull's strength is spread ACROSS the
+  attractStagger: 0.08,     // AURORA ver13: how far the pull's strength is spread ACROSS the
                             //   population, as a fraction either side of the average. At 0
                             //   every mote is pulled identically and a switch is a rigid
                             //   translation — the emitter appearing to slide to the next tab.
@@ -941,7 +947,7 @@ const CONFIG = {
   // ver17: 0.80 -> 1.0. ver30's field carries a stronger current than ver16's, and full grip
   // pulls the settled mass back from about -15 px to -11 px of the tab; it does not change the
   // spread (measured 17 x 21 px either way).
-  attractCenterGrip: 0.49,   // AURORA ver11: the grip's floor AT the centre. The smoothstep
+  attractCenterGrip: 0.00,   // AURORA ver11: the grip's floor AT the centre. The smoothstep
                             //   above was zero there — a dead zone the motes leaked out of
                             //   down-left on the field's current, leaving a haze trailing
                             //   from the tab. Low on purpose: enough to hold the mass
