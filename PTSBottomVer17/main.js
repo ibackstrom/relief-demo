@@ -195,7 +195,8 @@ const CONFIG = {
   // ver15's was a small tight spill that left most of the word bare.
   // ver17: 0.22 -> 0.14, ver30's own radius. ver16's mass was spread wide; this is the
   // compact body ver30 has, at ver30's count, so it is as dense as ver30 as well.
-  cornerRadius: 0.14,       // AURORA ver11: back to ver10's pair (with cornerBias below) —
+  // ver17c: 0.14 -> 0.18, spread a little wider round the tab.
+  cornerRadius: 0.18,       // AURORA ver11: back to ver10's pair (with cornerBias below) —
                             //   the customer asked for ver10's look
                             //   size dial — it is measured against the FRAME, so it does
                             //   not have to be re-derived when anything else moves
@@ -541,7 +542,9 @@ const CONFIG = {
                             //   the customer asked for ver10's look
   depthDarken: 0.22,        // brightness lost across the same span
 
-  bottomFade: 0.10,         // AURORA ver11: fraction of the viewport height, from the page's
+  // ver17c: 0.10 -> 0.14. The PAGE-BOTTOM fade: the trail sinks into black a little higher.
+  // ?bfade= to taste.
+  bottomFade: 0.14,         // AURORA ver11: fraction of the viewport height, from the page's
                             //   bottom edge up, over which motes fade to black. This is the
                             //   fade ON THE TRAIL: the risers below (ver10's 0.22 share is
                             //   restored) leave a wake, and this sinks it into black at
@@ -568,7 +571,9 @@ const CONFIG = {
                             //   be curling, which is why nothing in it ever folded
   // ver17b: 0.20 -> 0.30. Each mote's own fine scatter, at a scale well under the field's -
   // it is what breaks a line that does form into grain, which is the 'spread it a bit'.
-  curlAmplitude: 0.30,      // how far a mote is carried off its seat. This is the main
+  // ver17c: 0.30 -> 0.38 - more of each mote's own scatter, so the wider mass stays grain
+  // rather than drawing lines across its new width.
+  curlAmplitude: 0.38,      // how far a mote is carried off its seat. This is the main
                             //   "how alive is it" dial. AURORA ver11: back to ver10's value
   curlSpeed: 18.0,          // how fast the field itself evolves. The field translates in
                             //   its own z with time, so motes do not retrace a path.
@@ -864,6 +869,30 @@ const CONFIG = {
                             //   right place. The amplitude is heavy-tailed - most motes
                             //   wobble, a few stray well wide - which is what reads as a
                             //   dispersing cloud rather than a shape that has been moved
+  // ver17c: CENTRED BY MEASUREMENT. Where the settled mass sits is a balance between the pull
+  // and the field's own current, and that balance moves with every change to the field - the
+  // spread, the fold size, the scatter - and with which tab it is, because the field is not the
+  // same at each. Setting it by hand is never done. So twice a second, while nothing is in the
+  // air, the engine reads back the ink in a box around the pressed tab, finds its centre, and
+  // eases the pull and the reservoir by a quarter of the error. It centres what is actually
+  // drawn, whatever put it off.
+  // OFF, and measured to be right off. Averaged over five readings per tab once settled, the
+  // mass with the loop OFF sits -2, 0, +1 and -1 px from the tab along the row, wandering
+  // about +/-5 px as the field turns - that wander is the cloud being alive, not an error.
+  // With the loop ON it averaged up to -13 px: it chased the wander, and the mass answers a
+  // moved target too slowly for a loop to do anything but lag it. The earlier -11 px readings
+  // that prompted it were taken before the mass had settled. Kept behind ?centre=1.
+  centreLoop: false,
+  centreGain: 0.10,         // share of the error corrected per reading. Small on purpose: the
+                            //   mass answers a moved target over a second or two, so a big
+                            //   gain keeps correcting an error that is already being fixed and
+                            //   overshoots - 0.25 swung it from 6 px left to 13 px right
+  centreSettle: 0.8,        // seconds to wait after a flight lands before the first reading
+  centreEvery: 0.6,         // seconds between readings. A readback is a small GPU sync, so
+                            //   not every frame
+  centreBoxW: 520,          // CSS px, the window read around the tab. Wide enough to hold the
+  centreBoxH: 260,          //   whole mass, or the centroid is pulled toward the box's middle
+  centreMaxPx: 90,          // the most it will ever correct, so a bad reading cannot run away
   flightMinPx: 24,          // journeys shorter than this, in CSS pixels, do not fly: the cloud
                             //   just follows them, which is what a scroll or a resize needs
 
@@ -1155,7 +1184,9 @@ const CONFIG = {
     [0.956, 0.155, 0.155],
     [0.956, 0.155, 0.155],
   ],
-  rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
+  // ver17c: 0.16 -> 0.21. The EDGE fade: thin outer specks dissolve sooner, so the wider
+  // mass ends in a soft halo rather than a scatter. ?fringe= to taste.
+  rampFringe: 0.21,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish
   // ver12b: 0.50 -> 0.43, ver30's ink. Each grain gives up a little presence now that
   // there are four times as many of them stacking.
@@ -1409,6 +1440,9 @@ if (numParam('arc', 0, 1) !== null) CONFIG.flightArc = numParam('arc', 0, 1);
 if (numParam('noise', 0, 1) !== null) CONFIG.flightNoise = numParam('noise', 0, 1);
 if (PARAMS.get('full') === '1') { CONFIG.cornerFull = true; CONFIG.cornerHalf = false; }
 if (numParam('lobes', 0, 1) !== null) CONFIG.seedLobes = numParam('lobes', 0, 1);
+if (numParam('fringe', 0, 1) !== null) CONFIG.rampFringe = numParam('fringe', 0, 1);
+if (numParam('bfade', 0, 0.6) !== null) CONFIG.bottomFade = numParam('bfade', 0, 0.6);
+if (PARAMS.get('centre') === '1') CONFIG.centreLoop = true;
 if (numParam('attractr', 0.02, 1.5) !== null) CONFIG.attractRadius = numParam('attractr', 0.02, 1.5);
 if (numParam('warm', 0, 20) !== null) CONFIG.warmSeconds = numParam('warm', 0, 20);
 if (numParam('fade', 0, 5) !== null) CONFIG.fadeInSeconds = numParam('fade', 0, 5);
@@ -4932,6 +4966,17 @@ let flightBusy = 0;         // 0..1, eased: something is in the air
 let committed = null;
 let committedY0 = 0;        // the vertical the cloud was TUNED at, kept as the reference
 let seatsPlaced = false;
+// ver17c: the measured correction, in the group's own units, and the readback's buffer
+const centreFix = new THREE.Vector2();
+let centreLast = 0;
+let centreQuietSince = 0;
+// Each tab keeps its OWN correction. The field is not the same at every tab, so the error is
+// not either - a correction learned on one is wrong on the next, and carried over it made the
+// mass land off-centre after every switch. Remembered per tab, a tab the visitor has been to
+// before is centred the moment they return. Keyed by the tab's centre along the row.
+const centreMemo = new Map();
+let centreKey = null;
+let centreBuf = null;
 let lastFlightTick = '0';
 const anchorLocal = new THREE.Vector3();
 
@@ -4996,6 +5041,13 @@ function updateAttract(vh, dt) {
       committed.x += dx; committed.y += dy;
     }
     committed.z = anchorLocal.z;
+    const key = Math.round((r.left + r.width / 2) / 10);
+    if (key !== centreKey) {
+      if (centreKey !== null) centreMemo.set(centreKey, centreFix.clone());
+      const known = centreMemo.get(key);
+      if (known) centreFix.copy(known); else centreFix.set(0, 0);
+      centreKey = key;
+    }
 
     // retire flights every mote has finished: the latest start plus the longest duration
     const life = CONFIG.flightSpread + CONFIG.flightDur * 1.3 + 0.05;
@@ -5009,7 +5061,8 @@ function updateAttract(vh, dt) {
 
     // The pull holds the cloud AT the destination; each mote's own flight tells it where
     // along the way it should be meanwhile (see the velocity pass).
-    sim.step.uniforms.uAttractPoint.value.copy(committed);
+    sim.step.uniforms.uAttractPoint.value.set(
+      committed.x + centreFix.x, committed.y + centreFix.y, committed.z);
     // a little more stir while the cloud is in the air, handed back on arrival
     uniforms.uCurlAmplitude.value = CONFIG.curlAmplitude * (1 + flightBusy * 0.30);
     travelBoost = 1 + flightBusy * 1.6;
@@ -5024,6 +5077,54 @@ function updateAttract(vh, dt) {
   }
   sim.step.uniforms.uAttractRadius.value =
     (CONFIG.attractRadius * vh) / Math.max(1e-6, CONFIG.massScale);
+}
+
+// ver17c: read the drawn ink around the pressed tab and ease the mass onto it. Called straight
+// after the frame is rendered, while the drawing buffer is still this frame's.
+function centreOnInk() {
+  if (!CONFIG.centreLoop || !sim || !committed) return;
+  // on the WALL clock: counted in frames it would correct four times as rarely on a device
+  // running at a quarter of the frame rate - exactly the ones where it matters most
+  const nowC = performance.now() / 1000;
+  if (flightBusy > 0.05) { centreQuietSince = nowC; return; }
+  if (nowC - centreQuietSince < CONFIG.centreSettle) return;
+  if (nowC - centreLast < CONFIG.centreEvery) return;
+  centreLast = nowC;
+  // (a flight moves the mass on purpose, so the checks above skip it and the settle after)
+  const el = document.getElementById('booknow');
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const gl = renderer.getContext();
+  const dpr = renderer.getPixelRatio();
+  const cw = gl.drawingBufferWidth, ch = gl.drawingBufferHeight;
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const x0 = Math.max(0, Math.floor((cx - CONFIG.centreBoxW / 2) * dpr));
+  const x1 = Math.min(cw, Math.ceil((cx + CONFIG.centreBoxW / 2) * dpr));
+  const yT = Math.max(0, Math.floor((cy - CONFIG.centreBoxH / 2) * dpr));
+  const yB = Math.min(ch, Math.ceil((cy + CONFIG.centreBoxH / 2) * dpr));
+  const w = x1 - x0, h = yB - yT;
+  if (w < 8 || h < 8) return;
+  if (!centreBuf || centreBuf.length < w * h * 4) centreBuf = new Uint8Array(w * h * 4);
+  const glY = ch - yB;                       // GL's rows run bottom-up
+  gl.readPixels(x0, glY, w, h, gl.RGBA, gl.UNSIGNED_BYTE, centreBuf);
+  let sx = 0, sy = 0, sa = 0;
+  for (let j = 0; j < h; j += 2) {
+    for (let i = 0; i < w; i += 2) {
+      const a = centreBuf[(j * w + i) * 4 + 3];
+      if (a > 6) { sx += i * a; sy += j * a; sa += a; }
+    }
+  }
+  if (sa < 1500) return;                     // too little ink to judge
+  const inkX = (x0 + sx / sa) / dpr;
+  const inkY = (ch - (glY + sy / sa)) / dpr;
+  const ex = cx - inkX, ey = cy - inkY;      // CSS px the ink is off the tab
+  if (Math.abs(ex) < 2 && Math.abs(ey) < 2) return;
+  const k = viewHeightAt(CONFIG.anchorZ) / innerHeight / Math.max(1e-6, CONFIG.massScale);
+  centreFix.x += CONFIG.centreGain * ex * k;
+  centreFix.y -= CONFIG.centreGain * ey * k;   // screen y runs down, the group's up
+  const lim = CONFIG.centreMaxPx * k;
+  const len = centreFix.length();
+  if (len > lim) centreFix.multiplyScalar(lim / len);
 }
 
 // AURORA: the SEAT reservoir - where a dead mote is reborn - sits on the destination.
@@ -5042,8 +5143,8 @@ function glideSeats() {
   if (!sim) return;
   if (!committed) readAnchor(viewHeightAt(CONFIG.anchorZ));
   if (!committed || !sim.centre) { sim.step.uniforms.uSeatDelta.value.set(0, 0); return; }
-  const tx = committed.x - sim.centre.x;
-  const ty = committed.y - committedY0;
+  const tx = committed.x + centreFix.x - sim.centre.x;
+  const ty = committed.y + centreFix.y - committedY0;
   // The first placement moves the seats WITH the motes on them: nothing has been simulated
   // yet, so there is no living position to preserve, and compensating would leave the whole
   // population a seat-shift away from its own seats for the warm-up to drag back.
@@ -5415,6 +5516,7 @@ function tick() {
   if (CONFIG.bloom && bloomChain) renderBloom();
   else if (CONFIG.shadow && shadowChain) renderShadowed();
   else renderer.render(scene, camera);
+  centreOnInk();
   if (firstFrame) { firstFrame = false; dismissLoading(); }
 }
 tick();
