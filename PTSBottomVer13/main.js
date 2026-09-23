@@ -25,7 +25,13 @@ import * as THREE from 'three';
 const PARAMS = new URLSearchParams(location.search);
 
 // ---------------------------------------------------------------- CONFIG
-// PTSBottomVer13, rebuilt: ver13's LOOK with ver17's TRANSITION. The code is ver17's - the
+// PTSBottomVer13, rebuilt, then taken halfway back toward ver12: every value where ver12 and
+// the rebuilt ver13 differ is set to the midpoint - field speed 0.082 (0.118 / 0.046), field
+// clock 0.455 (0.53 / 0.38), centre grip 0.49 (0.18 / 0.80), pull spread 0.35 (none / 0.70) -
+// and the flight is quicker, between ver12's 0.32s glide and ver17's 2.75s: 0.5s of departures
+// and about a second each, the last landing by 1.8s, with ver12's arc half restored (0.14).
+//
+// Originally: ver13's LOOK with ver17's TRANSITION. The code is ver17's - the
 // per-mote flight between tabs - and every value that shapes the cloud itself is ver13's own:
 // the calm field, the round full throw, 200,000 grains, its fades and its scatter. The
 // earlier ver13 is in the repo history.
@@ -623,7 +629,7 @@ const CONFIG = {
   // uSpeed * uFrequency, and 0.066 * 1.8 = 0.119 against 0.046 * 2.6 = 0.120. Bigger folds,
   // the same calm pace.
   // ver16: 0.066 -> 0.085, so 0.085 * 1.4 = 0.119 - the same calm field speed as ver13-15.
-  simSpeed: 0.046,          // AURORA ver11: back to ver10's pace — the customer asked for
+  simSpeed: 0.082,          // AURORA ver11: back to ver10's pace — the customer asked for
                             //   ver10's motion. the field's strength, as a fraction of the
                             //   mass radius per
                             //   second, so a resize does not change the pace. The reference
@@ -670,7 +676,7 @@ const CONFIG = {
   // ver13: 0.53 -> 0.38. The rate the field itself CHANGES, as opposed to how fast it
   // carries. A slower-evolving field is the difference between a mass that churns and one
   // that swells and sags: the same motion, spread over a longer breath.
-  simFieldSpeed: 0.38,      // how fast the field itself changes, from the reference's
+  simFieldSpeed: 0.455,      // how fast the field itself changes, from the reference's
                             //   1.5-second coherence. Too high and the filaments never get
                             //   long enough to fold before the field that drew them is gone.
                             //   AURORA ver11: back to ver10's rate
@@ -854,8 +860,8 @@ const CONFIG = {
   // It runs on REAL seconds. The sim's own clock runs at `speed` (0.55) of real time, so every
   // switch built from forces was integrating at barely half speed however fast its numbers
   // said it was. A flight measured in real seconds takes exactly as long as it says.
-  flightDur: 1.50,          // ver17: 1.80 -> 1.50 (1.05 - 1.95)          // seconds a mote takes to cross, on average (1.26 - 2.34)
-  flightSpread: 0.80,       // ver17: 1.60 -> 0.80. Half the departure spread is half the length
+  flightDur: 1.00,          // ver17: 1.80 -> 1.50 (1.05 - 1.95)          // seconds a mote takes to cross, on average (1.26 - 2.34)
+  flightSpread: 0.50,       // ver17: 1.60 -> 0.80. Half the departure spread is half the length
                             //   the migrating stream stretches to - the moving mass stays a
                             //   body rather than a haze strung between the tabs. Longest
                             //   arrival 0.80 + 1.95 = 2.75s       // seconds of random delay across the population, so it leaves as
@@ -863,7 +869,7 @@ const CONFIG = {
                             //   3.94s, inside the four asked for. The spread is the
                             //   larger half of that on purpose - a long spread is what lets
                             //   the first motes land while the last are only leaving
-  flightArc: 0.10,          // ver17: 0.28 -> 0.10 - a lift, not a spray          // how far a mote's path bows off the straight line, as a fraction
+  flightArc: 0.14,          // ver17: 0.28 -> 0.10 - a lift, not a spray          // how far a mote's path bows off the straight line, as a fraction
                             //   of the journey. Mostly upward - the menu is near the bottom of
                             //   the frame and a downward bow would leave it
   flightNoise: 0.06,        // ver17: 0.18 -> 0.06        // ver15: how far a mote WANDERS off its route, as a fraction of
@@ -900,7 +906,7 @@ const CONFIG = {
   flightMinPx: 24,          // journeys shorter than this, in CSS pixels, do not fly: the cloud
                             //   just follows them, which is what a scroll or a resize needs
 
-  attractStagger: 0.70,     // AURORA ver13: how far the pull's strength is spread ACROSS the
+  attractStagger: 0.35,     // AURORA ver13: how far the pull's strength is spread ACROSS the
                             //   population, as a fraction either side of the average. At 0
                             //   every mote is pulled identically and a switch is a rigid
                             //   translation — the emitter appearing to slide to the next tab.
@@ -935,7 +941,7 @@ const CONFIG = {
   // ver17: 0.80 -> 1.0. ver30's field carries a stronger current than ver16's, and full grip
   // pulls the settled mass back from about -15 px to -11 px of the tab; it does not change the
   // spread (measured 17 x 21 px either way).
-  attractCenterGrip: 0.80,   // AURORA ver11: the grip's floor AT the centre. The smoothstep
+  attractCenterGrip: 0.49,   // AURORA ver11: the grip's floor AT the centre. The smoothstep
                             //   above was zero there — a dead zone the motes leaked out of
                             //   down-left on the field's current, leaving a haze trailing
                             //   from the tab. Low on purpose: enough to hold the mass
