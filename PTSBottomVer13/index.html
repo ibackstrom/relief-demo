@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Aurora Botanique — Services — ver13 (streamed switch)</title>
+  <title>Aurora Botanique — Services — ver13 (ver13 look, ver17 transition)</title>
   <link rel="icon" href="data:,">
   <style>
     @font-face { font-family: Montreal; src: url('./assets/NeueMontreal-Regular.woff2') format('woff2'); }
@@ -26,14 +26,10 @@
     /* The invisible anchor the particle cloud gathers on. It glides from tab to tab with a
        CSS transition, and the engine reads its box every frame, so the existing population
        flows after it — no respawn, just the cloud travelling. */
-    #booknow { position: absolute; z-index: 0; pointer-events: none;
-      /* ver12: 1.1s -> 0.55s, and the curve turned round. cubic-bezier(.45,.05,...) is slow
-         to start — nothing visible happened for the first fifth of a second after a click,
-         which is the delay the customer was watching, and the engine's own springs then
-         added their lag on top of it. (.16,.84,.30,1) leaves at full speed and eases only
-         into the arrival, so the cloud is already moving on the frame the tab is pressed. */
-      transition: left .16s cubic-bezier(.16,.84,.30,1), top .16s cubic-bezier(.16,.84,.30,1),
-        width .16s cubic-bezier(.16,.84,.30,1), height .16s cubic-bezier(.16,.84,.30,1); }
+    #booknow {
+      /* ver14: no transition. The anchor jumps to the pressed tab in one frame and the engine
+         flies the particles there itself - a CSS glide only put a second journey on top. */ position: absolute; z-index: 0; pointer-events: none;
+       }
     #status { position: fixed; bottom: 8px; left: 12px; color: #aaa; font: 11px Arial; z-index: 3; }
     /* The tuning rail: hidden unless the page is opened with ?ui=1. */
     #pui {
@@ -91,6 +87,8 @@
     for (const button of buttons) {
       button.addEventListener('click', () => {
         for (const item of buttons) item.setAttribute('aria-pressed', String(item === button));
+        // declare the move as a switch, so the engine FLIES the cloud rather than following it
+        anchor.dataset.flight = String((+anchor.dataset.flight || 0) + 1);
         syncAnchor();
       });
       button.addEventListener('keydown', event => {
