@@ -361,7 +361,9 @@ const CONFIG = {
   lifeFadeStart: 0.68,      // where it starts shrinking away again. Between grow and this
                             //   the mote is at full size, which is where the cloud gets
                             //   its body — bring the two together and it reads as twinkle
-  lifeDrift: 0.150,         // how far a mote travels over one life, in plane widths, ALONG
+  // ver17b: 0.150 -> 0.090. Travel along the flow draws each mote out into its own trail,
+  // and trails lying side by side read as lines.
+  lifeDrift: 0.090,         // how far a mote travels over one life, in plane widths, ALONG
                             //   the flow. Measured on Ref1 the motes cover about 39% of the
                             //   mass radius per second; this is 4.7% of the plane width per
                             //   second, well under that, and the reason is legibility rather
@@ -564,7 +566,9 @@ const CONFIG = {
                             //   over 13-20% of the mass radius, where this cloud's ran to
                             //   45% — eddies larger than the cloud they were supposed to
                             //   be curling, which is why nothing in it ever folded
-  curlAmplitude: 0.20,      // how far a mote is carried off its seat. This is the main
+  // ver17b: 0.20 -> 0.30. Each mote's own fine scatter, at a scale well under the field's -
+  // it is what breaks a line that does form into grain, which is the 'spread it a bit'.
+  curlAmplitude: 0.30,      // how far a mote is carried off its seat. This is the main
                             //   "how alive is it" dial. AURORA ver11: back to ver10's value
   curlSpeed: 18.0,          // how fast the field itself evolves. The field translates in
                             //   its own z with time, so motes do not retrace a path.
@@ -661,10 +665,14 @@ const CONFIG = {
                             //   1.5-second coherence. Too high and the filaments never get
                             //   long enough to fold before the field that drew them is gone.
                             //   AURORA ver11: back to ver10's rate
-  simDivergence: 0.75,      // the spreading half of the field — see curlNoise. Held under 1
+  // ver17b: 0.75 -> 0.45. The spreading half also CONVERGES, and where it converges it piles
+  // motes onto a line. Less of it, and the field turns the ink over rather than combing it.
+  simDivergence: 0.45,      // the spreading half of the field — see curlNoise. Held under 1
                             //   so the field turns more than it spreads: the first clip's
                             //   look is curling ink, not a burst opening out
-  simFine: 0.70,            // weight of a second octave at 3.1x the frequency. The large
+  // ver17b: 0.70 -> 0.30. This octave draws the HAIRS - the thin lines the customer does not
+  // want. At 0.30 it still roughens the lobes without drawing lines through them.
+  simFine: 0.30,            // weight of a second octave at 3.1x the frequency. The large
                             //   octave makes the lobes, this one the hairs inside them.
                             //   AURORA ver11: back to ver10's weight
   simGravity: 0.0,          // world units per second, straight down, always. Off here: a
