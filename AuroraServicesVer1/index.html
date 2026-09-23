@@ -17,9 +17,9 @@ $RC=function(a,b){if(b=document.getElementById(b))(a=document.getElementById(a))
   /* Under the menu row (the page puts that at z-80) and over everything behind it. */
   canvas.pts-cloud,
   body > canvas:last-child:not(.pts-cloud) { position: fixed; inset: 0; pointer-events: none; z-index: 60; }
-  #booknow { position: fixed; z-index: 0; pointer-events: none; opacity: 0;
-    transition: left .55s cubic-bezier(.16,.84,.30,1), top .55s cubic-bezier(.16,.84,.30,1),
-      width .55s cubic-bezier(.16,.84,.30,1), height .55s cubic-bezier(.16,.84,.30,1); }
+  /* No transition: the anchor jumps to the pressed tab and the engine flies the particles
+     there itself. data-flight counts the clicks, so a scroll is followed, not flown. */
+  #booknow { position: fixed; z-index: 0; pointer-events: none; opacity: 0; }
 </style>
 <div id="booknow" aria-hidden="true"></div>
 <div id="pui" hidden></div>
@@ -51,7 +51,10 @@ $RC=function(a,b){if(b=document.getElementById(b))(a=document.getElementById(a))
 
   document.addEventListener('click', (e) => {
     const b = e.target.closest && e.target.closest('button[aria-label]');
-    if (b && LABELS.includes(b.getAttribute('aria-label'))) park(b);
+    if (b && LABELS.includes(b.getAttribute('aria-label'))) {
+      anchor.dataset.flight = String((+anchor.dataset.flight || 0) + 1);   // a switch, fly it
+      park(b);
+    }
   }, true);
   addEventListener('resize', sync);
   addEventListener('scroll', sync, { passive: true });
