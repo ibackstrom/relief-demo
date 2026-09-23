@@ -909,6 +909,9 @@ const CONFIG = {
   centreBoxW: 520,          // CSS px, the window read around the tab. Wide enough to hold the
   centreBoxH: 260,          //   whole mass, or the centroid is pulled toward the box's middle
   centreMaxPx: 90,          // the most it will ever correct, so a bad reading cannot run away
+  flightWanderFreq: 1.0,    // how fast the WANDER sways: sways per journey. 1 is one slow S;
+                            //   higher weaves back and forth more often. Only visible when
+                            //   wander (flightNoise) is above 0
   flightMinPx: 24,          // journeys shorter than this, in CSS pixels, do not fly: the cloud
                             //   just follows them, which is what a scroll or a resize needs
 
@@ -1746,6 +1749,7 @@ uniform float uFlightDur;
 uniform float uFlightSpread;
 uniform float uFlightArc;
 uniform float uFlightNoise;      // ver15: how far a mote wanders off its route
+uniform float uWanderFreq;       // how many sways it makes doing so
 uniform vec2  uJump;             // this frame's instant follow - a scroll, not a switch
 
 // smootherstep: zero velocity AND zero acceleration at both ends, so a mote eases out of
@@ -1780,7 +1784,9 @@ vec2 flightOwed(float seedw, float now, float birth){
     vec2 perp = vec2(-D.y, D.x);
     if (perp.y < 0.0) perp = -perp;              // "up" means up whichever way it flies
     float env = sin(3.14159265 * e);    // one hump: zero at both ends, so the endpoints stay exact
-    float ess = sin(6.2831853 * e);     // one S: zero at both ends and in the middle
+    // the sway, at the chosen rate and the mote's own phase, inside the one-hump envelope so
+    // it is zero at both ends whatever the rate - the endpoints stay exact
+    float ess = env * sin(6.2831853 * uWanderFreq * e + fract(seedw * 29.71) * 6.2831853);
     owed += D * (1.0 - e)
           - perp * (env * uFlightArc * side + ess * sway)
           - D * (env * surge * 0.6);
@@ -2082,6 +2088,7 @@ uniform float uFloatingSpeed;
 uniform float uCurlFrequency;
 uniform float uCurlAmplitude;
 uniform float uCurlSpeed;
+uniform float uCurlPhase;        // accumulated uTime * uCurlSpeed * 0.01 - see the scatter
 uniform vec3  uInfluencePoint;
 uniform float uInfluenceRadius;
 uniform float uInfluenceIntensity;
@@ -2242,7 +2249,10 @@ void main(){
   // has to be instantaneous to answer the pointer and so cannot come from the buffer.
   float curlInfluence = aCurlResp * step(0.001, amplification - 1.0);
   if (curlInfluence > 0.0) {
-    float ct = uTime * uCurlSpeed * 0.01;
+    // Its own accumulated phase rather than uTime * uCurlSpeed: multiplying the running clock
+    // by a new speed jumps the whole pattern the instant the speed changes, which a slider
+    // would do on every drag. Accumulated, a change of speed only changes the pace from now on.
+    float ct = uCurlPhase;
     vec3 curlOffset = curlNoise(vec3(pos.x, pos.y, ct), uCurlFrequency, ct, effectiveCurl,
                                 uCurlDivergence);
     pos.x += curlOffset.x * curlInfluence;
@@ -4264,6 +4274,7 @@ const uniforms = {
   uCurlAmplitude: { value: CONFIG.curlAmplitude },
   uSeatShift: { value: new THREE.Vector2() },   // AURORA ver10: seats' texture-space relocation
   uCurlSpeed: { value: CONFIG.curlSpeed },
+  uCurlPhase: { value: 0 },
   uCurlDivergence: { value: CONFIG.curlDivergence },
   uInfluencePoint: { value: new THREE.Vector3(
     CONFIG.influencePointX, CONFIG.influencePointY, CONFIG.influencePointZ) },
@@ -4469,6 +4480,7 @@ function makeSim() {
       uFlightSpread: { value: CONFIG.flightSpread },
       uFlightArc: { value: CONFIG.flightArc },
       uFlightNoise: { value: CONFIG.flightNoise },
+      uWanderFreq: { value: CONFIG.flightWanderFreq },
       uJump: { value: flightJump },
       // AURORA ver10: seats' texture-space relocation — see glideSeats
       uSeatShift: { value: new THREE.Vector2() },
@@ -4679,6 +4691,7 @@ function stepSim(dt) {
   u.uFlightSpread.value = CONFIG.flightSpread;
   u.uFlightArc.value = CONFIG.flightArc;
   u.uFlightNoise.value = CONFIG.flightNoise;
+  u.uWanderFreq.value = CONFIG.flightWanderFreq;
   u.uSignLeash.value = CONFIG.signLeash * sim.radius;
   u.uSignShield.value = CONFIG.signShield;
   uniforms.uSignInk.value = CONFIG.signInk;
@@ -5515,6 +5528,9 @@ function tick() {
   // the motes' own clock, which the speed control scales. Accumulated rather than
   // multiplied at read time, so changing the pace never jumps their phase.
   uniforms.uTime.value += dt * CONFIG.speed;
+  // the scatter's phase, advanced at its OWN speed so the scatter-speed bar changes the pace
+  // without jumping the pattern
+  uniforms.uCurlPhase.value += dt * CONFIG.speed * CONFIG.curlSpeed * 0.01;
   stepSim(dt * CONFIG.speed);
   parallax();
   uniforms.uCentreViewZ.value =
@@ -5595,6 +5611,10 @@ if (uiEl && PARAMS.get('ui') === '0') {
     { key: 'curlAmplitude', name: 'scatter', cst: 'CONFIG.curlAmplitude',
       min: 0, max: 1, step: 0.01, value: CONFIG.curlAmplitude,
       text: () => CONFIG.curlAmplitude.toFixed(2) },
+    // how fast that scatter moves - the jitter every mote has at rest
+    { key: 'curlSpeed', name: 'scatter speed', cst: 'CONFIG.curlSpeed',
+      min: 0, max: 60, step: 0.5, value: CONFIG.curlSpeed,
+      text: () => CONFIG.curlSpeed.toFixed(1) },
 
     sec('hold on the tab'),
     { key: 'attractPull', name: 'pull', cst: 'CONFIG.attractPull',
@@ -5621,6 +5641,10 @@ if (uiEl && PARAMS.get('ui') === '0') {
     { key: 'flightNoise', name: 'wander', cst: 'CONFIG.flightNoise',
       min: 0, max: 0.5, step: 0.01, value: CONFIG.flightNoise,
       text: () => CONFIG.flightNoise.toFixed(2) },
+    // how fast the wander sways - sways per journey; nothing to see while wander is 0
+    { key: 'flightWanderFreq', name: 'wander speed', cst: 'CONFIG.flightWanderFreq',
+      min: 0.25, max: 6, step: 0.05, value: CONFIG.flightWanderFreq,
+      text: () => CONFIG.flightWanderFreq.toFixed(2) },
 
     sec('mass'),
     { key: 'cornerRadius', name: 'size', cst: 'CONFIG.cornerRadius',
