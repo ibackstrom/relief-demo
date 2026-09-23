@@ -5547,7 +5547,9 @@ tick();
 // why it is a bar and not a live drag: the seats are re-thrown and the buffers re-made.
 const uiEl = document.getElementById('pui');
 // Hidden unless ?ui=1. It is a tuning rail, not part of the piece.
-if (uiEl && PARAMS.get('ui') !== '1') {
+// The panel is ON by default in this build - it is how the settings are being chosen - and
+// ?ui=0 removes it altogether.
+if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
   // The page ships the rail with the HIDDEN attribute so it cannot flash before this runs;
@@ -5645,7 +5647,27 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     + '<span class="cst">' + r.cst + '</span>'
     + '<input type="range" id="pr' + i + '" min="' + r.min + '" max="' + r.max + '"'
     + ' step="' + r.step + '" value="' + r.value + '"></div>'
-  ).join('') + '<div class="foot">?ui=0 hides this</div>';
+  ).join('') + '<div class="foot"><a href="#" id="puiHide">hide controls</a> &middot; ?ui=0 removes them</div>';
+
+  // Hide folds the rail away and leaves one small button to bring it back, so the effect can
+  // be looked at full-frame without losing the settings or reloading the page.
+  const showBtn = document.createElement('button');
+  showBtn.type = 'button';
+  showBtn.textContent = 'controls';
+  showBtn.style.cssText = 'position:fixed;left:12px;top:12px;z-index:21;padding:6px 10px;'
+    + 'font:600 10px/1 Helvetica,Arial,sans-serif;letter-spacing:.12em;text-transform:uppercase;'
+    + 'color:rgba(0,0,0,.7);background:rgba(255,255,255,.88);border:1px solid rgba(0,0,0,.15);'
+    + 'border-radius:3px;cursor:pointer;display:none';
+  document.body.appendChild(showBtn);
+  document.getElementById('puiHide').addEventListener('click', (e) => {
+    e.preventDefault();
+    uiEl.hidden = true;
+    showBtn.style.display = 'block';
+  });
+  showBtn.addEventListener('click', () => {
+    uiEl.hidden = false;
+    showBtn.style.display = 'none';
+  });
 
   ROWS.forEach((r, i) => {
     if (r.section) return;
