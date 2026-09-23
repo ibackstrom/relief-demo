@@ -4665,6 +4665,7 @@ function stepSim(dt) {
   u.uAttractPull.value = (CONFIG.attractPull * sim.radius) / (dtc * simPushGain) * pullBoost;
   u.uAttractCore.value = Math.max(CONFIG.attractCore / pullBoost, 0.24);
   u.uAttractStagger.value = THREE.MathUtils.clamp(CONFIG.attractStagger, 0, 0.95);
+  u.uAttractCenterGrip.value = CONFIG.attractCenterGrip;   // live, for the panel
   u.uNow.value = flightNow;
   u.uNowPrev.value = flightPrev;
   u.uClockScale.value = CONFIG.speed;
@@ -5563,15 +5564,62 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     return c.map((n) => n.toFixed(3)).join(', ');
   };
 
-  // ver17: the panel is the HOVER and nothing else, as ver14's was. Everything the cloud
-  // itself does is settled and baked, and a bar for a settled value is only a way to knock
-  // it out of tune. All seven are read out of CONFIG every frame, so none needs a rebuild
-  // and none costs anything to drag.
-  // The panel is the PLACEMENT and nothing else. Viewport heights, positive toward the
-  // corner's own side, so x runs right and y runs up. Both are group transforms: place()
-  // re-runs and nothing is re-thrown, so they drag live at any population, and each prints
-  // the value to paste into CONFIG once it is settled.
+  // The panel for this build: the settings the last rounds have been moving, grouped by what
+  // they change. Every row prints the value to paste into CONFIG. All are live except the two
+  // in MASS, which re-throw the population on release.
+  const sec = (title) => ({ section: title });
   const ROWS = [
+    sec('motion'),
+    { key: 'simSpeed', name: 'motion speed', cst: 'CONFIG.simSpeed',
+      min: 0, max: 0.30, step: 0.002, value: CONFIG.simSpeed,
+      text: () => CONFIG.simSpeed.toFixed(3) },
+    { key: 'simFieldSpeed', name: 'pattern change', cst: 'CONFIG.simFieldSpeed',
+      min: 0, max: 1.5, step: 0.005, value: CONFIG.simFieldSpeed,
+      text: () => CONFIG.simFieldSpeed.toFixed(3) },
+    // higher is SMALLER swirls. Note the field's speed is simSpeed x this, so raising it also
+    // speeds the motion up - pull motion speed down with it to keep the pace
+    { key: 'simFrequency', name: 'swirl fineness', cst: 'CONFIG.simFrequency',
+      min: 0.5, max: 5, step: 0.05, value: CONFIG.simFrequency,
+      text: () => CONFIG.simFrequency.toFixed(2) },
+    { key: 'curlAmplitude', name: 'scatter', cst: 'CONFIG.curlAmplitude',
+      min: 0, max: 1, step: 0.01, value: CONFIG.curlAmplitude,
+      text: () => CONFIG.curlAmplitude.toFixed(2) },
+
+    sec('hold on the tab'),
+    { key: 'attractPull', name: 'pull', cst: 'CONFIG.attractPull',
+      min: 0, max: 2, step: 0.01, value: CONFIG.attractPull,
+      text: () => CONFIG.attractPull.toFixed(2) },
+    // high holds the mass on the tab's centre; too high and it draws into one point
+    { key: 'attractCenterGrip', name: 'centre grip', cst: 'CONFIG.attractCenterGrip',
+      min: 0, max: 1, step: 0.01, value: CONFIG.attractCenterGrip,
+      text: () => CONFIG.attractCenterGrip.toFixed(2) },
+    { key: 'attractStagger', name: 'pull spread', cst: 'CONFIG.attractStagger',
+      min: 0, max: 0.95, step: 0.01, value: CONFIG.attractStagger,
+      text: () => CONFIG.attractStagger.toFixed(2) },
+
+    sec('switching tabs'),
+    { key: 'flightDur', name: 'crossing time', cst: 'CONFIG.flightDur',
+      min: 0.2, max: 3, step: 0.05, value: CONFIG.flightDur,
+      text: () => CONFIG.flightDur.toFixed(2) + ' s' },
+    { key: 'flightSpread', name: 'departure spread', cst: 'CONFIG.flightSpread',
+      min: 0, max: 2, step: 0.05, value: CONFIG.flightSpread,
+      text: () => CONFIG.flightSpread.toFixed(2) + ' s' },
+    { key: 'flightArc', name: 'lift', cst: 'CONFIG.flightArc',
+      min: 0, max: 0.5, step: 0.01, value: CONFIG.flightArc,
+      text: () => CONFIG.flightArc.toFixed(2) },
+    { key: 'flightNoise', name: 'wander', cst: 'CONFIG.flightNoise',
+      min: 0, max: 0.5, step: 0.01, value: CONFIG.flightNoise,
+      text: () => CONFIG.flightNoise.toFixed(2) },
+
+    sec('mass'),
+    { key: 'cornerRadius', name: 'size', cst: 'CONFIG.cornerRadius',
+      min: 0.05, max: 0.40, step: 0.005, value: CONFIG.cornerRadius,
+      rebuild: true, text: () => CONFIG.cornerRadius.toFixed(3) },
+    { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
+      min: 20000, max: 600000, step: 10000, value: CONFIG.particleCount,
+      rebuild: true, round: true, text: () => String(CONFIG.particleCount) },
+
+    sec('placement'),
     { key: 'offsetX', name: 'offset x', cst: 'CONFIG.offsetX',
       min: -0.5, max: 1.0, step: 0.005, value: CONFIG.offsetX,
       place: true, text: () => CONFIG.offsetX.toFixed(3) },
@@ -5580,8 +5628,9 @@ if (uiEl && PARAMS.get('ui') !== '1') {
       place: true, text: () => CONFIG.offsetY.toFixed(3) },
   ];
 
-  uiEl.innerHTML = '<h2>offset</h2>' + ROWS.map((r, i) =>
-    '<div class="row"><div class="lbl">'
+  uiEl.innerHTML = '<h2>particles</h2>' + ROWS.map((r, i) => r.section
+    ? '<h2 style="margin-top:16px">' + r.section + '</h2>'
+    : '<div class="row"><div class="lbl">'
     + '<span class="name">' + r.name + '</span>'
     + '<span class="val" id="pv' + i + '">' + r.text() + '</span></div>'
     + '<span class="cst">' + r.cst + '</span>'
@@ -5590,6 +5639,7 @@ if (uiEl && PARAMS.get('ui') !== '1') {
   ).join('') + '<div class="foot">?ui=0 hides this</div>';
 
   ROWS.forEach((r, i) => {
+    if (r.section) return;
     const slider = document.getElementById('pr' + i);
     // Rebuilds fire on release, not on every pixel of the drag: re-throwing a quarter of a
     // million seats per input event locks the page up.
