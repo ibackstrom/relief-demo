@@ -31,7 +31,12 @@ const CONFIG = {
   // read the shading and it becomes an object at a distance; at 4 px it is a dot and the
   // cloud flattens into a spray however deep the box is. This is the single biggest
   // lever on whether the thing looks volumetric.
-  particleCount: 45000,     // AURORA ver11: back to ver10's population — the customer asked
+  // ver12b: 45,000 -> 200,000. This is the whole of "volume like PTSVer30": that build
+  // reads as a body of pigment because it has 450,000 faint grains, where 45,000 larger
+  // ones can only ever be a scatter — no opacity or size setting substitutes for the
+  // number of overlaps, because the tone IS the overlaps. Held below ver30's count on
+  // purpose: this one shares a page with the site's own WebGL scene.
+  particleCount: 200000,    // AURORA ver11: back to ver10's population — the customer asked
                             //   for ver10's look again; ver11's 160k finer grains read thin
                             //   dust as flat — ver30's CTA cloud carried its volume from
                             //   density. ~3.5x the population, paired with the smaller
@@ -49,7 +54,9 @@ const CONFIG = {
   // down past about a pixel does not make finer grains, it makes invisible ones. At 0.62
   // with sizeMax 3.2 the whole population went sub-pixel and the drawn pixels fell a
   // hundredfold — the cloud read as a speck.
-  particleSize: 2.40,       // AURORA ver11: back to ver10's grain — the bigger motes carry
+  // ver12b: 2.40 -> 2.05, ver30's grain. The bigger mote was compensating for there being
+  // too few of them; with the count up it only makes the mass coarse.
+  particleSize: 2.05,       // AURORA ver11: back to ver10's grain — the bigger motes carry
                             //   the volume at 45k; ver30's 2.05 suited only the dense mass
 
   // Size comes from a HEAVY-TAILED draw rather than a +/- spread around the base:
@@ -590,7 +597,11 @@ const CONFIG = {
                             //   thins once, seven seconds after load — radius 42 to 36 and
                             //   a quarter of the drawn pixels gone. At 0.85 the same deaths
                             //   are smeared over twelve seconds and there is nothing to see
-  simFrequency: 1.2,        // eddy size, as 1/frequency in world units. LOW on purpose: this
+  // ver12b: 1.2 -> 2.6. This octave is the MACRO swirl, and its eddies were wider than
+  // the cloud itself — so the whole mass leaned and slid as one body instead of churning
+  // inside its own outline, which is what read as spread-out movement. Smaller eddies keep
+  // the motion local: the grain stirs, the silhouette stays where it was put.
+  simFrequency: 2.6,        // eddy size, as 1/frequency in world units. LOW on purpose: this
                             //   octave is the macro swirl and the x3.1 one below carries the
                             //   filament detail. From the reference:
                             //   its field decorrelates over 13-20% of the mass radius.
@@ -1036,7 +1047,9 @@ const CONFIG = {
   ],
   rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish
-  alphaGain: 0.50,          // AURORA ver11: back to ver10's ink level, paired with ver10's
+  // ver12b: 0.50 -> 0.43, ver30's ink. Each grain gives up a little presence now that
+  // there are four times as many of them stacking.
+  alphaGain: 0.43,          // AURORA ver11: back to ver10's ink level, paired with ver10's
                             //   45k count and 2.40 grain above
                             //   overall presence against the page, applied last. The bloom used
                             //   to provide this as a side effect of lifting the canvas alpha
@@ -4696,7 +4709,10 @@ function updateAttract(vh, dt) {
     // answers a movement with a 180 ms lag of its own, so a click cost the ease-in of the
     // transition plus that before anything left the old tab. The travel is the transition's
     // job now; this only takes the corners off it.
-    attractSprung.addScaledVector(attractDelta, 1 - Math.exp(-dtA * 10.0));
+    // ver12b: 10.0 -> 18.0. The spring is not the transition — the CSS curve below is —
+    // so its only job is to take the corner off a direction change. Anything slower than the
+    // journey itself just adds a tail to it.
+    attractSprung.addScaledVector(attractDelta, 1 - Math.exp(-dtA * 18.0));
     // how hard the pull is travelling, in frame heights per second, 0 at rest
     const speed = attractDelta.length() / Math.max(1e-4, dtA) / Math.max(1e-6, vh);
     const travel = Math.min(1, speed / 0.35);
@@ -4763,7 +4779,7 @@ function glideSeats(dt) {
   // DEAD mote is reborn, so while it trails the destination the new tab keeps being fed at
   // the old one's position — the switch then finishes twice, once as the living mass arrives
   // and again as the respawns catch up, which is the second half of the stutter.
-  const k = 1 - Math.exp(-Math.min(Math.max(dt, 1e-3), 0.05) * 9.0);
+  const k = 1 - Math.exp(-Math.min(Math.max(dt, 1e-3), 0.05) * 16.0);   // ver12b: 9 -> 16
   // AURORA ver10: the sim's offsets are stored relative to the PREVIOUS shift, so every
   // frame the passes must know how far the seats just moved (uSeatDelta) and subtract it —
   // otherwise the glide itself translates the living particles, which they read as being
