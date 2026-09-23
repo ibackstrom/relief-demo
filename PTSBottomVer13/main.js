@@ -799,10 +799,20 @@ const CONFIG = {
   // tuned with; out where only a switch puts a mote, it is worth several times the pull —
   // 6.0 takes the terminal speed to about 4.3 mass radii a second, so the longest journey on
   // the row is a third of a second rather than several.
+  // ver13c: THE FERRY. A switch carries every mote to the new tab at a speed stated in
+  // VIEWPORT HEIGHTS PER SECOND — not in mass radii like every other force here.
+  //
+  // That unit is the whole fix. Every pull in this file is a multiple of the mass's own
+  // radius a second, which is right for the shape of a gathered cloud and wrong for a
+  // journey: the mass is small and the row is long, so even twenty times the pull still
+  // took several seconds to cross it — which is why ?travel did so little. A journey is
+  // measured against the screen, so its speed has to be too. At 3.0 the longest crossing on
+  // the row is about a third of a second; the whole cloud is under the new tab inside one.
+  ferrySpeed: 3.0,          // viewport heights per second. 0 turns the ferry off
   attractTravel: 2.6,       // 0 restores ver13's behaviour exactly. Read it as: a mote two
                             //   reaches out is pulled at about 5x the settled rate, one at
                             //   the far end of the row at about 15x — ?travel= to taste
-  attractTravelHold: 0.55,  // seconds the travel grip stays up after the target stops. The
+  attractTravelHold: 0.90,  // seconds the travel grip stays up after the target stops. The
                             //   anchor arrives in 0.16s but the motes are still crossing —
                             //   cut it at the anchor and they would be dropped mid-flight
                             //   back onto the creeping pull
@@ -1332,6 +1342,7 @@ if (numParam('ink', 0, 3) !== null) CONFIG.signInk = numParam('ink', 0, 3);
 if (numParam('shield', 0, 1) !== null) CONFIG.signShield = numParam('shield', 0, 1);
 if (numParam('attract', 0, 2) !== null) CONFIG.attractPull = numParam('attract', 0, 2);
 if (numParam('travel', 0, 12) !== null) CONFIG.attractTravel = numParam('travel', 0, 12);
+if (numParam('ferry', 0, 12) !== null) CONFIG.ferrySpeed = numParam('ferry', 0, 12);
 if (numParam('hold', 0.05, 3) !== null) CONFIG.attractTravelHold = numParam('hold', 0.05, 3);
 if (numParam('attractr', 0.02, 1.5) !== null) CONFIG.attractRadius = numParam('attractr', 0.02, 1.5);
 if (numParam('warm', 0, 20) !== null) CONFIG.warmSeconds = numParam('warm', 0, 20);
@@ -1610,6 +1621,8 @@ uniform float uAttractCenterGrip;
 uniform float uAttractPull;
 uniform float uAttractStagger;   // ver13: per-mote spread in the pull, so the mass streams
 uniform float uAttractTravel;    // ver13b: the far-field grip, alive only during a switch
+uniform float uFerry;            // ver13c: the ferry's speed, world units a second, gated
+uniform float uFerryLand;        // ver13c: where it lets go — the mass's own radius
 // AURORA ver10: the seats move in TEXTURE space, not by translating the group. The group's
 // transform carries every live particle rigidly — which is what made a tab switch read as
 // the emitter sliding along X. The shift is added wherever the SEAT is used as a position,
@@ -1786,6 +1799,32 @@ void main(){
   // one indirection is what the smoothness is made of.
   offset += texture2D(tVel, vUv).xyz * uDt;
 
+  // ver13c: THE FERRY. On a switch, every mote not already at the new tab is CARRIED there at
+  // a speed measured against the screen. Carried, not pushed: a force would have to accelerate
+  // the mote through the build's inertia first, which takes most of half a second on its own
+  // before any distance is covered — the step here is taken at full speed from the frame of
+  // the click. Nothing touches the velocity, so whatever the field and the cursor were doing
+  // to a mote carries on around the carry and it arrives still moving like part of the cloud.
+  //
+  // It lands motes on the cloud's own footprint, not on the anchor point: inside about one
+  // mass radius of the tab the carry has eased to nothing and the shaped grip and the field
+  // take the mote from there. Aimed at the point itself, the whole population would be packed
+  // onto one spot at the end of every switch.
+  if (uFerry > 0.0) {
+    vec3 pos = vec3(seed.xy + uSeatShift, seed.z) + offset;
+    vec3 toT = uAttractPoint - pos;
+    float dT = length(toT);
+    if (dT > 1e-5) {
+      float go = smoothstep(0.5 * uFerryLand, 1.3 * uFerryLand, dT);
+      // half the settled pull's spread: still a stream, but the last of it lands with the
+      // rest rather than a second behind them
+      float spread = mix(1.0 - 0.5 * uAttractStagger, 1.0 + 0.5 * uAttractStagger,
+                         fract(seed.w * 23.17));
+      // never further than most of the way in one step, so a mote cannot jump the target
+      offset += (toT / dT) * min(dT * 0.9, uFerry * go * spread * uDt);
+    }
+  }
+
   // The text's group is bound to a short radius about its own seat. Applied to the position
   // rather than to the velocity, so a mote at the limit keeps its momentum and slides along
   // the boundary instead of stopping dead on it.
@@ -1848,6 +1887,7 @@ void main(){
   // gripped exactly as hard as before, it just no longer moves as one piece.
   float eager = mix(1.0 - uAttractStagger, 1.0 + uAttractStagger, fract(seed.w * 23.17));
   v += attractTo(here, uAttractPoint, eager) * uDt;
+
   v *= uDrag;
 
   // a reborn particle starts still, or it would arrive at its seat carrying whatever it was
@@ -4260,6 +4300,8 @@ function makeSim() {
       uAttractPull: { value: 0 },
       uAttractStagger: { value: CONFIG.attractStagger },
       uAttractTravel: { value: 0 },
+      uFerry: { value: 0 },
+      uFerryLand: { value: d.radius },
       // AURORA ver10: seats' texture-space relocation — see glideSeats
       uSeatShift: { value: new THREE.Vector2() },
       uSeatDelta: { value: new THREE.Vector2() },
@@ -4461,6 +4503,12 @@ function stepSim(dt) {
   u.uAttractCore.value = Math.max(CONFIG.attractCore / pullBoost, 0.24);
   u.uAttractStagger.value = THREE.MathUtils.clamp(CONFIG.attractStagger, 0, 0.95);
   u.uAttractTravel.value = CONFIG.attractTravel * travelEnvelope;
+  // A plain speed, not a force: world units a second, from the SCREEN's height, divided by
+  // the group's scale because the sim works in the group's own units. No gain to divide
+  // through, because the carry does not go through the velocity.
+  const vhFerry = viewHeightAt(CONFIG.anchorZ) / Math.max(1e-6, CONFIG.massScale);
+  u.uFerry.value = CONFIG.ferrySpeed * vhFerry * travelEnvelope;
+  u.uFerryLand.value = sim.radius;
   u.uSignLeash.value = CONFIG.signLeash * sim.radius;
   u.uSignShield.value = CONFIG.signShield;
   uniforms.uSignInk.value = CONFIG.signInk;
