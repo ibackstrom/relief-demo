@@ -5544,6 +5544,9 @@ const uiEl = document.getElementById('pui');
 if (uiEl && PARAMS.get('ui') !== '1') {
   uiEl.remove();
 } else if (uiEl) {
+  // The page ships the rail with the HIDDEN attribute so it cannot flash before this runs;
+  // it has to be taken off here, or the panel is built and never seen.
+  uiEl.hidden = false;
   // Colour. Every particle carries the same colour now — the tone in the picture is how many
   // of them overlap, not what any one of them is — so hue, saturation and lightness are one
   // colour rather than a ramp, and all five ramp stops are written from it. The readout is
