@@ -25,10 +25,10 @@ import * as THREE from 'three';
 const PARAMS = new URLSearchParams(location.search);
 
 // ---------------------------------------------------------------- CONFIG
-// PTSBottomVer13: the defaults below are the client's own, set on the ?ui=1 panel -
-// motion 0.048 / pattern change 0.165 / swirl 0.85 / scatter 1.00, pull 0.72 / grip 0 /
-// spread 0.08, crossing 3.00s with no departure spread, lift 0.14, no wander, size 0.295,
-// 200,000 motes, offset y -0.150. (offset x is not a setting: it is taken from the first tab
+// PTSBottomVer13: the defaults below are the client's own, set on the panel - motion 0.048 /
+// pattern change 0.165 / swirl 2.80 / scatter 1.00 at speed 18, pull 0.72 / grip 0 /
+// spread 0.08, crossing 3.00s with no departure spread, lift 0.14, no wander (wander speed
+// 0.25), size 0.295, 150,000 motes, offset y -0.150. (offset x is not a setting: it is taken from the first tab
 // at load - see the seat-parking block - so the panel's -0.167 was that tab, not a choice.)
 //
 // Before that: rebuilt, then taken halfway back toward ver12: every value where ver12 and
@@ -56,7 +56,7 @@ const CONFIG = {
   // area, and the complaint was that it was already too thin - so the population grows with
   // it to hold ver30's density rather than spreading the same grains wider. This is the one
   // number that costs: ?p= takes it down live on slower machines.
-  particleCount: 200000,    // AURORA ver11: back to ver10's population — the customer asked
+  particleCount: 150000,    // AURORA ver11: back to ver10's population — the customer asked
                             //   for ver10's look again; ver11's 160k finer grains read thin
                             //   dust as flat — ver30's CTA cloud carried its volume from
                             //   density. ~3.5x the population, paired with the smaller
@@ -674,7 +674,7 @@ const CONFIG = {
   // ver17 (test): ver30's pattern. Everything that gives ver30 its look - ink, grain, count,
   // alpha - was already identical here; what differed was the FIELD that folds the seeds into
   // filaments, and these three are ver30's own values, unchanged.
-  simFrequency: 0.85,        // eddy size, as 1/frequency in world units. LOW on purpose: this
+  simFrequency: 2.80,        // eddy size, as 1/frequency in world units. LOW on purpose: this
                             //   octave is the macro swirl and the x3.1 one below carries the
                             //   filament detail. From the reference:
                             //   its field decorrelates over 13-20% of the mass radius.
@@ -909,7 +909,7 @@ const CONFIG = {
   centreBoxW: 520,          // CSS px, the window read around the tab. Wide enough to hold the
   centreBoxH: 260,          //   whole mass, or the centroid is pulled toward the box's middle
   centreMaxPx: 90,          // the most it will ever correct, so a bad reading cannot run away
-  flightWanderFreq: 1.0,    // how fast the WANDER sways: sways per journey. 1 is one slow S;
+  flightWanderFreq: 0.25,    // how fast the WANDER sways: sways per journey. 1 is one slow S;
                             //   higher weaves back and forth more often. Only visible when
                             //   wander (flightNoise) is above 0
   flightMinPx: 24,          // journeys shorter than this, in CSS pixels, do not fly: the cloud
@@ -5643,7 +5643,7 @@ if (uiEl && PARAMS.get('ui') === '0') {
       text: () => CONFIG.flightNoise.toFixed(2) },
     // how fast the wander sways - sways per journey; nothing to see while wander is 0
     { key: 'flightWanderFreq', name: 'wander speed', cst: 'CONFIG.flightWanderFreq',
-      min: 0.25, max: 6, step: 0.05, value: CONFIG.flightWanderFreq,
+      min: 0, max: 12, step: 0.01, value: CONFIG.flightWanderFreq,
       text: () => CONFIG.flightWanderFreq.toFixed(2) },
 
     sec('mass'),
