@@ -902,7 +902,12 @@ const CONFIG = {
   // With the loop ON it averaged up to -13 px: it chased the wander, and the mass answers a
   // moved target too slowly for a loop to do anything but lag it. The earlier -11 px readings
   // that prompted it were taken before the mass had settled. Kept behind ?centre=1.
-  centreLoop: false,
+  // ON again in ver14c. It was switched off when the field's drift was large and fast - the
+  // loop chased it and lagged it. The mean wind has cut that drift to a fraction, and what is
+  // left is a STEADY offset where the field piles the mass up at a given tab, which is exactly
+  // what a slow loop is good at. Remembered per tab, so a tab once visited is centred on
+  // arrival; asynchronous, so it never stalls a frame.
+  centreLoop: true,
   centreGain: 0.10,         // share of the error corrected per reading. Small on purpose: the
                             //   mass answers a moved target over a second or two, so a big
                             //   gain keeps correcting an error that is already being fixed and
@@ -934,8 +939,15 @@ const CONFIG = {
   // CSS px. The menu sits inside the page-bottom fade, so the half of the cloud below the
   // words is dimmed and the visible ink weighs high - measured 21 px above the tab with the
   // mass itself centred. This lowers the seats and the pull together by that much.
+  meanWind: true,           // ver14b: subtract the field's mean over the mass (see the wind
+                            //   pass). ?wind=0 goes back to the value at the middle only
   inkDropPx: 21,
-  massLock: true,           // ?lock=0 turns it off, to see the drift it removes
+  // OFF in ver14b, and it was the jiggle. It measured every fourth frame and moved the whole
+  // cloud back by a third of the drift at once, so the mass drifted, snapped back, drifted,
+  // snapped back - a sawtooth at 15 Hz that read as a buzz - and each reading stalled the GPU
+  // to fetch the sample, which put a hitch in the frame as well. The mean wind above removes
+  // the same drift at its source, continuously and with no readback. ?lock=1 brings it back.
+  massLock: false,
   massLockGain: 0.35,       // share of the measured drift removed per reading
   massLockEvery: 4,         // frames between readings
   massLockRows: 8,          // rows of the sim texture sampled per reading (256 motes each)
@@ -1487,10 +1499,11 @@ if (numParam('noise', 0, 1) !== null) CONFIG.flightNoise = numParam('noise', 0, 
 if (PARAMS.get('full') === '1') { CONFIG.cornerFull = true; CONFIG.cornerHalf = false; }
 if (numParam('lobes', 0, 1) !== null) CONFIG.seedLobes = numParam('lobes', 0, 1);
 if (numParam('fringe', 0, 1) !== null) CONFIG.rampFringe = numParam('fringe', 0, 1);
-if (PARAMS.get('lock') === '0') CONFIG.massLock = false;
+if (PARAMS.get('lock') === '1') CONFIG.massLock = true;
+if (PARAMS.get('wind') === '0') CONFIG.meanWind = false;
 if (numParam('drop', -80, 80) !== null) CONFIG.inkDropPx = numParam('drop', -80, 80);
 if (numParam('bfade', 0, 0.6) !== null) CONFIG.bottomFade = numParam('bfade', 0, 0.6);
-if (PARAMS.get('centre') === '1') CONFIG.centreLoop = true;
+if (PARAMS.get('centre') === '0') CONFIG.centreLoop = false;
 if (numParam('attractr', 0.02, 1.5) !== null) CONFIG.attractRadius = numParam('attractr', 0.02, 1.5);
 if (numParam('warm', 0, 20) !== null) CONFIG.warmSeconds = numParam('warm', 0, 20);
 if (numParam('fade', 0, 5) !== null) CONFIG.fadeInSeconds = numParam('fade', 0, 5);
@@ -1780,6 +1793,8 @@ uniform float uFlightArc;
 uniform float uFlightNoise;      // ver15: how far a mote wanders off its route
 uniform float uWanderFreq;       // how many sways it makes doing so
 uniform vec2  uJump;             // this frame's instant follow - a scroll, not a switch
+uniform sampler2D tWind;         // ver14b: the field's mean over the mass, one texel
+uniform float uMeanWind;
 uniform vec3  uLockShift;        // ver14: this frame's share of the mass's drift, removed
 
 // smootherstep: zero velocity AND zero acceleration at both ends, so a mote eases out of
@@ -2047,7 +2062,9 @@ void main(){
   // no grip could fully hold against: the settled mass leaked motes downwind, which read as
   // a haze trailing from the tab. With the bias removed there is no net wind where the mass
   // sits, while the field's own variation — the organic wander — is untouched.
-  vec3 fieldBias = fieldVelocity(uAttractPoint);
+  // ver14b: the field's MEAN over the mass, from the wind pass - not its value at the middle
+  vec3 fieldBias = uMeanWind > 0.5 ? texture2D(tWind, vec2(0.5)).xyz
+                                   : fieldVelocity(uAttractPoint);
   vec3 target = fieldVelocity(here) - fieldBias + birthImpulse(here, age) + vec3(0.0, -uGravity, 0.0);
   v += (target - v) * clamp(uSettle, 0.0, 1.0);
   v += cursorForce(here, fract(seed.w * 7.31)) * uDt * mix(1.0, uSignShield, mine);
@@ -2085,6 +2102,36 @@ void main(){
 const SIM_INIT_FRAG = /* glsl */`
 precision highp float;
 void main(){ gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0); }`;
+
+// ver14b: THE MEAN WIND. The field that stirs the cloud also carries it: averaged over the
+// mass it has a net current, and that current moves the whole cloud off its tab as a body.
+// The velocity pass has always subtracted the field read at ONE point - the middle - but at
+// fine swirl settings the field changes a lot across the mass, so the middle's value is not
+// the mass's average and the difference was left to carry the cloud sideways.
+//
+// This pass reads the field at 48 points spread over the mass the way the seats are - a
+// golden-angle disc stretched to the throw's own proportions, through its depth - and
+// writes their mean into a single texel. The velocity pass subtracts THAT. It is measured on
+// the GPU every frame and never read back, so there is no stall, and it changes as smoothly
+// as the field does, so there is nothing for the cloud to jump on. The slide is not
+// corrected after it happens; it is taken out of the field before it can happen.
+const SIM_WIND_FRAG = SIM_FRAG.replace('void main(){', 'void mainPos(){') + /* glsl */`
+uniform vec3  uWindCentre;
+uniform vec2  uWindHalf;
+uniform float uWindDepth;
+void main(){
+  vec3 acc = vec3(0.0);
+  for (int i = 0; i < 48; i++) {
+    float fi = float(i);
+    float r  = sqrt((fi + 0.5) / 48.0);
+    float a  = fi * 2.3999632;
+    vec3 q = uWindCentre + vec3(cos(a) * r * uWindHalf.x,
+                                sin(a) * r * uWindHalf.y,
+                                (fract(fi * 0.6180340) - 0.5) * uWindDepth);
+    acc += fieldVelocity(q);
+  }
+  gl_FragColor = vec4(acc / 48.0, 1.0);
+}`;
 
 // ---------------------------------------------------------------- GLSL: vertex
 // Instanced camera-facing quads. Sizing is in WORLD units (not gl_PointSize), so motes
@@ -4514,6 +4561,8 @@ function makeSim() {
       uWanderFreq: { value: CONFIG.flightWanderFreq },
       uJump: { value: flightJump },
       uLockShift: { value: new THREE.Vector3() },
+      tWind: { value: null },
+      uMeanWind: { value: 1 },
       // AURORA ver10: seats' texture-space relocation — see glideSeats
       uSeatShift: { value: new THREE.Vector2() },
       uSeatDelta: { value: new THREE.Vector2() },
@@ -4530,9 +4579,23 @@ function makeSim() {
     vertexShader: FS_VERT, fragmentShader: SIM_INIT_FRAG,
     depthTest: false, depthWrite: false, uniforms: {},
   });
+  // ver14b: the wind pass shares every field uniform with the step - the SAME objects, so it
+  // always reads the field the motes are about to move through - plus where to sample it
+  const wind = new THREE.ShaderMaterial({
+    vertexShader: FS_VERT, fragmentShader: SIM_WIND_FRAG, depthTest: false, depthWrite: false,
+    uniforms: Object.assign({}, step.uniforms, {
+      uWindCentre: { value: new THREE.Vector3() },
+      uWindHalf: { value: new THREE.Vector2(1, 1) },
+      uWindDepth: { value: 0.1 },
+    }),
+  });
+  const windRT = new THREE.WebGLRenderTarget(1, 1, {
+    type, format: THREE.RGBAFormat, depthBuffer: false, stencilBuffer: false,
+    minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false,
+  });
 
   const sim = { a: rt(), b: rt(), va: rt(), vb: rt(),
-                step, vel, init, quad, fsScene, fsCam, radius: d.radius,
+                step, vel, init, wind, windRT, quad, fsScene, fsCam, radius: d.radius,
                 centre: d.centre.clone(),
                 draw(material, target) {
                   this.quad.material = material;
@@ -4729,6 +4792,15 @@ function stepSim(dt) {
   uniforms.uSignInk.value = CONFIG.signInk;
 
   // velocity first, then the position that integrates it
+  // ver14b: the mass's mean wind, sampled over its own extent round where it is held
+  const wu = sim.wind.uniforms;
+  wu.uWindCentre.value.copy(u.uAttractPoint.value);
+  wu.uWindHalf.value.set(sim.radius * CONFIG.seedAspectX, sim.radius * CONFIG.seedAspectY);
+  wu.uWindDepth.value = sim.radius * CONFIG.cornerDepth;
+  sim.draw(sim.wind, sim.windRT);
+  u.tWind.value = sim.windRT.texture;
+  u.uMeanWind.value = CONFIG.meanWind ? 1 : 0;
+
   u.tVel.value = sim.va.texture;
   sim.draw(sim.vel, sim.vb);
   const tv = sim.va; sim.va = sim.vb; sim.vb = tv;
@@ -5034,6 +5106,9 @@ let seatsPlaced = false;
 // ver17c: the measured correction, in the group's own units, and the readback's buffer
 const centreFix = new THREE.Vector2();
 let centreLast = 0;
+let inkPbo = null;          // ver14c: the async readback's GPU-side buffer, its fence, and
+let inkFence = null;        //   what the pending reading was taken of
+let inkPending = null;
 let centreQuietSince = 0;
 // Each tab keeps its OWN correction. The field is not the same at every tab, so the error is
 // not either - a correction learned on one is wrong on the next, and carried over it made the
@@ -5155,6 +5230,7 @@ function centreOnInk() {
   if (flightBusy > 0.05) { centreQuietSince = nowC; return; }
   if (nowC - centreQuietSince < CONFIG.centreSettle) return;
   if (nowC - centreLast < CONFIG.centreEvery) return;
+  if (inkFence) return;                      // the last reading has not come back yet
   centreLast = nowC;
   // (a flight moves the mass on purpose, so the checks above skip it and the settle after)
   const el = document.getElementById('booknow');
@@ -5170,9 +5246,36 @@ function centreOnInk() {
   const yB = Math.min(ch, Math.ceil((cy + CONFIG.centreBoxH / 2) * dpr));
   const w = x1 - x0, h = yB - yT;
   if (w < 8 || h < 8) return;
-  if (!centreBuf || centreBuf.length < w * h * 4) centreBuf = new Uint8Array(w * h * 4);
+  // ASYNCHRONOUS: the pixels are copied into a GPU-side buffer in the background and fetched
+  // a frame or two later, once a fence says the copy is done. A plain readPixels makes the
+  // CPU wait for the whole frame to finish on the GPU - with a few hundred thousand motes a
+  // visible hitch, which is exactly the kind of jolt this build exists to get rid of.
   const glY = ch - yB;                       // GL's rows run bottom-up
-  gl.readPixels(x0, glY, w, h, gl.RGBA, gl.UNSIGNED_BYTE, centreBuf);
+  if (!inkPbo) inkPbo = gl.createBuffer();
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, inkPbo);
+  gl.bufferData(gl.PIXEL_PACK_BUFFER, w * h * 4, gl.STREAM_READ);
+  gl.readPixels(x0, glY, w, h, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  inkFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  gl.flush();
+  inkPending = { x0, glY, w, h, ch, dpr, cx, cy, key: centreKey };
+}
+
+// ...and the second half, called every frame: when the copy has landed, read it and correct.
+function finishInk() {
+  if (!inkFence) return;
+  const gl = renderer.getContext();
+  const st = gl.clientWaitSync(inkFence, 0, 0);
+  if (st === gl.TIMEOUT_EXPIRED) return;           // not there yet - try next frame
+  gl.deleteSync(inkFence);
+  inkFence = null;
+  const P = inkPending; inkPending = null;
+  if (!P || P.key !== centreKey || flightBusy > 0.05) return;   // tab changed meanwhile
+  const { x0, glY, w, h, ch, dpr, cx, cy } = P;
+  if (!centreBuf || centreBuf.length < w * h * 4) centreBuf = new Uint8Array(w * h * 4);
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, inkPbo);
+  gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, centreBuf, 0, w * h * 4);
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   let sx = 0, sy = 0, sa = 0;
   for (let j = 0; j < h; j += 2) {
     for (let i = 0; i < w; i += 2) {
@@ -5502,7 +5605,8 @@ function rebuildCloud(count) {
   CONFIG.particleCount = count;
   group.remove(mesh);
   mesh.geometry.dispose();
-  if (sim) { sim.a.dispose(); sim.b.dispose(); sim.va.dispose(); sim.vb.dispose(); }
+  if (sim) { sim.a.dispose(); sim.b.dispose(); sim.va.dispose(); sim.vb.dispose();
+             sim.windRT.dispose(); }
   mesh = new THREE.Mesh(buildParticles(count), material);
   mesh.frustumCulled = false;
   group.add(mesh);
@@ -5631,6 +5735,7 @@ function tick() {
   else if (CONFIG.shadow && shadowChain) renderShadowed();
   else renderer.render(scene, camera);
   centreOnInk();
+  finishInk();
   if (firstFrame) { firstFrame = false; dismissLoading(); }
 }
 tick();
