@@ -25,6 +25,26 @@ import * as THREE from 'three';
 const PARAMS = new URLSearchParams(location.search);
 
 // ---------------------------------------------------------------- CONFIG
+// PTSBottomVer14: ver13 at the client's newest panel values, plus the MASS LOCK (see
+// CONFIG.massLock) - with a strong, fast field and a weak pull the whole cloud was being
+// carried to one side however hard the centre grip was set.
+//
+// PTSBottomVer13: the defaults below are the client's own, set on the panel - motion 0.048 /
+// pattern change 0.165 / swirl 2.80 / scatter 1.00 at speed 18, pull 0.72 / grip 0 /
+// spread 0.08, crossing 3.00s with no departure spread, lift 0.14, no wander (wander speed
+// 0.25), size 0.295, 150,000 motes, offset y -0.150. (offset x is not a setting: it is taken from the first tab
+// at load - see the seat-parking block - so the panel's -0.167 was that tab, not a choice.)
+//
+// Before that: rebuilt, then taken halfway back toward ver12: every value where ver12 and
+// the rebuilt ver13 differ is set to the midpoint - field speed 0.082 (0.118 / 0.046), field
+// clock 0.455 (0.53 / 0.38), centre grip 0.49 (0.18 / 0.80), pull spread 0.35 (none / 0.70) -
+// and the flight is quicker, between ver12's 0.32s glide and ver17's 2.75s: 0.5s of departures
+// and about a second each, the last landing by 1.8s, with ver12's arc half restored (0.14).
+//
+// Originally: ver13's LOOK with ver17's TRANSITION. The code is ver17's - the
+// per-mote flight between tabs - and every value that shapes the cloud itself is ver13's own:
+// the calm field, the round full throw, 200,000 grains, its fades and its scatter. The
+// earlier ver13 is in the repo history.
 const CONFIG = {
   // ------------------------------------------------------------ population
   // Few and large, not many and small. A mote is a shaded sphere, and at 15-40 px you
@@ -36,7 +56,11 @@ const CONFIG = {
   // ones can only ever be a scatter — no opacity or size setting substitutes for the
   // number of overlaps, because the tone IS the overlaps. Held below ver30's count on
   // purpose: this one shares a page with the site's own WebGL scene.
-  particleCount: 200000,    // AURORA ver11: back to ver10's population — the customer asked
+  // ver16: 200,000 -> 450,000, ver30's own count. The mass got two and a half times bigger in
+  // area, and the complaint was that it was already too thin - so the population grows with
+  // it to hold ver30's density rather than spreading the same grains wider. This is the one
+  // number that costs: ?p= takes it down live on slower machines.
+  particleCount: 330000,    // AURORA ver11: back to ver10's population — the customer asked
                             //   for ver10's look again; ver11's 160k finer grains read thin
                             //   dust as flat — ver30's CTA cloud carried its volume from
                             //   density. ~3.5x the population, paired with the smaller
@@ -159,16 +183,40 @@ const CONFIG = {
   // Everything that gives the cloud its look happens downstream of this, in the flow.
   cornerSeed: true,         // false falls back to the model-and-mask seeding below
   cornerFull: true,         // AURORA: throw the seeds the whole way round instead of a
-                            //   quarter-disc. The cloud is parked mid-edge, not in a
-                            //   corner, so a quarter spill would hang it lopsidedly to
-                            //   one side of the menu
+                            //   quarter-disc. ver16: back ON, but no longer a round ball -
+                            //   see seedLobes and seedAspect below
+  // ver15: a HALF-disc spilling up out of the menu row. This is what ver30's shape actually
+  // is, moved to the bottom edge: ver30 throws a quarter-disc INTO the frame from its corner,
+  // dense along the edge it spills from and thinning outward, and the field then folds that
+  // lopsided mass into filaments. The full circle this replaces was a round Gaussian ball
+  // centred on the tab - symmetric every way, so the flow had nothing to fold and the cloud
+  // read as one solid shape. A mid-edge anchor has a half-plane going into the frame where a
+  // corner has a quarter, so the half is the same gesture, not a compromise between them.
+  cornerHalf: false,        // ver15's upward half-disc. OFF in ver16: its flat underside and
+                            //   dome read as a shape, and it left the ground UNDER the tab
+                            //   bare - the mass sat above the words rather than behind them
+  // ver16: the full throw, made shapeless. A plain Gaussian disc has a perfectly circular
+  // density falloff, and the eye finds that circle however soft its edge is. The radius is
+  // modulated by a few slow lobes round the angle and the whole throw is stretched along the
+  // menu row, so there is no outline to recognise - an irregular mass with no rim, wider than
+  // it is tall like the row it sits on - and the field then folds that further.
+  seedLobes: 0,          // ver17: 0.42 -> 0.20 - irregular, but held together          // how far the lobes push the radius in and out. 0 is a circle
+  seedAspectX: 1,        // ver17: 1.45 -> 1.15        // stretch along the row ...
+  seedAspectY: 1,        // ver17: 0.85 -> 0.92        // ... and across it
   // A third of what it was. Note that particleSize came down by the same third rather than
   // staying put, and that pairing is what keeps the look identical instead of merely smaller:
   // shrinking the mass alone cuts its area to a ninth and makes the same population nine
   // times denser, while shrinking the grain alone cuts each mote's coverage to a ninth. Doing
   // both at once cancels exactly, so the density that was tuned on the large version is the
   // density that arrives on the small one, with no change to the count.
-  cornerRadius: 0.20,       // AURORA ver11: back to ver10's pair (with cornerBias below) —
+  // ver15: 0.20 -> 0.14, ver30's value. The half-disc covers half the area the full circle
+  // did, so at ver30's radius the mass is as dense as ver30's rather than half as dense.
+  // ver16: 0.14 -> 0.22. The mass has to cover the ground under the tab, not sit on it -
+  // ver15's was a small tight spill that left most of the word bare.
+  // ver17: 0.22 -> 0.14, ver30's own radius. ver16's mass was spread wide; this is the
+  // compact body ver30 has, at ver30's count, so it is as dense as ver30 as well.
+  // ver17c: 0.14 -> 0.18, spread a little wider round the tab.
+  cornerRadius: 0.275,       // AURORA ver11: back to ver10's pair (with cornerBias below) —
                             //   the customer asked for ver10's look
                             //   size dial — it is measured against the FRAME, so it does
                             //   not have to be re-derived when anything else moves
@@ -191,6 +239,8 @@ const CONFIG = {
   // cut from, and the grains themselves are all long along the throw axis and compressed
   // across it. A field that is isotropic anywhere in that chain pulls the shape back toward
   // a circle, which is what a blob is.
+  // ver17: ver30's lean, mirrored for the bottom edge - 196 there runs left and slightly down
+  // into the frame from the top corner; 164 is the same lean pointing up into it from below.
   flowAngle: 180,           // degrees, the throw axis: which way the pigment was dragged.
                             //   AURORA: 180 runs flat along the tab row — the CTA's 196
                             //   smeared the grains down-left, which read as the cloud
@@ -332,6 +382,8 @@ const CONFIG = {
   lifeFadeStart: 0.68,      // where it starts shrinking away again. Between grow and this
                             //   the mote is at full size, which is where the cloud gets
                             //   its body — bring the two together and it reads as twinkle
+  // ver17b: 0.150 -> 0.090. Travel along the flow draws each mote out into its own trail,
+  // and trails lying side by side read as lines.
   lifeDrift: 0.150,         // how far a mote travels over one life, in plane widths, ALONG
                             //   the flow. Measured on Ref1 the motes cover about 39% of the
                             //   mass radius per second; this is 4.7% of the plane width per
@@ -464,7 +516,7 @@ const CONFIG = {
   // visible mass inward off it. Nudging the group back out is the honest correction for
   // that, and it is easier to set by eye than to derive.
   offsetX: 0.0,             // AURORA: the cloud lives at the bottom-centre, on the category
-  offsetY: -0.14,           //   menu, not in the top-right corner. corner 'br' + anchorY 1
+  offsetY: -0.150,           //   menu, not in the top-right corner. corner 'br' + anchorY 1
                             //   parks the group on the bottom edge; offsetX 0 centres it,
                             //   offsetY lifts the anchor to the tab row (88.95% of the
                             //   frame ≈ 0.11 viewport heights up). AURORA ver11: -0.14 —
@@ -510,6 +562,8 @@ const CONFIG = {
                             //   the customer asked for ver10's look
   depthDarken: 0.22,        // brightness lost across the same span
 
+  // ver17c: 0.10 -> 0.14. The PAGE-BOTTOM fade: the trail sinks into black a little higher.
+  // ?bfade= to taste.
   bottomFade: 0.10,         // AURORA ver11: fraction of the viewport height, from the page's
                             //   bottom edge up, over which motes fade to black. This is the
                             //   fade ON THE TRAIL: the risers below (ver10's 0.22 share is
@@ -535,9 +589,13 @@ const CONFIG = {
                             //   over 13-20% of the mass radius, where this cloud's ran to
                             //   45% — eddies larger than the cloud they were supposed to
                             //   be curling, which is why nothing in it ever folded
-  curlAmplitude: 0.20,      // how far a mote is carried off its seat. This is the main
+  // ver17b: 0.20 -> 0.30. Each mote's own fine scatter, at a scale well under the field's -
+  // it is what breaks a line that does form into grain, which is the 'spread it a bit'.
+  // ver17c: 0.30 -> 0.38 - more of each mote's own scatter, so the wider mass stays grain
+  // rather than drawing lines across its new width.
+  curlAmplitude: 0.60,      // how far a mote is carried off its seat. This is the main
                             //   "how alive is it" dial. AURORA ver11: back to ver10's value
-  curlSpeed: 18.0,          // how fast the field itself evolves. The field translates in
+  curlSpeed: 30.0,          // how fast the field itself evolves. The field translates in
                             //   its own z with time, so motes do not retrace a path.
                             //   AURORA ver11: back to ver10's rate
   curlDivergence: 1.00,     // how much of a purely SPREADING field is mixed into the swirl,
@@ -577,7 +635,11 @@ const CONFIG = {
   // speed the field carries motes at. Smaller eddies travelled twice as fast is exactly the
   // big restless wave: 0.118 * 1.2 = 0.142 of field speed before, and 0.046 * 2.6 = 0.120
   // now, which is calmer than the build this came from rather than merely restored.
-  simSpeed: 0.046,          // AURORA ver11: back to ver10's pace — the customer asked for
+  // ver15: 0.046 -> 0.066, to keep the field's SPEED where ver13 put it: the velocity is
+  // uSpeed * uFrequency, and 0.066 * 1.8 = 0.119 against 0.046 * 2.6 = 0.120. Bigger folds,
+  // the same calm pace.
+  // ver16: 0.066 -> 0.085, so 0.085 * 1.4 = 0.119 - the same calm field speed as ver13-15.
+  simSpeed: 0.100,          // AURORA ver11: back to ver10's pace — the customer asked for
                             //   ver10's motion. the field's strength, as a fraction of the
                             //   mass radius per
                             //   second, so a resize does not change the pace. The reference
@@ -607,7 +669,16 @@ const CONFIG = {
   // the cloud itself — so the whole mass leaned and slid as one body instead of churning
   // inside its own outline, which is what read as spread-out movement. Smaller eddies keep
   // the motion local: the grain stirs, the silhouette stays where it was put.
-  simFrequency: 2.6,        // eddy size, as 1/frequency in world units. LOW on purpose: this
+  // ver15: 2.6 -> 1.8. The folds that make ver30's filaments come from eddies about the size
+  // of the mass - at 2.6 they were a fraction of it, so the cloud churned finely inside a round
+  // outline and had no large structure. 1.8 brings the folds back toward ver30's 1.2 without
+  // the whole-mass sway that 1.2 caused down here.
+  // ver16: 1.8 -> 1.4, closer again to ver30's 1.2: the long slow folds are what make its
+  // flow read as smooth rather than busy.
+  // ver17 (test): ver30's pattern. Everything that gives ver30 its look - ink, grain, count,
+  // alpha - was already identical here; what differed was the FIELD that folds the seeds into
+  // filaments, and these three are ver30's own values, unchanged.
+  simFrequency: 2.95,        // eddy size, as 1/frequency in world units. LOW on purpose: this
                             //   octave is the macro swirl and the x3.1 one below carries the
                             //   filament detail. From the reference:
                             //   its field decorrelates over 13-20% of the mass radius.
@@ -615,13 +686,17 @@ const CONFIG = {
   // ver13: 0.53 -> 0.38. The rate the field itself CHANGES, as opposed to how fast it
   // carries. A slower-evolving field is the difference between a mass that churns and one
   // that swells and sags: the same motion, spread over a longer breath.
-  simFieldSpeed: 0.38,      // how fast the field itself changes, from the reference's
+  simFieldSpeed: 1.040,      // how fast the field itself changes, from the reference's
                             //   1.5-second coherence. Too high and the filaments never get
                             //   long enough to fold before the field that drew them is gone.
                             //   AURORA ver11: back to ver10's rate
+  // ver17b: 0.75 -> 0.45. The spreading half also CONVERGES, and where it converges it piles
+  // motes onto a line. Less of it, and the field turns the ink over rather than combing it.
   simDivergence: 0.75,      // the spreading half of the field — see curlNoise. Held under 1
                             //   so the field turns more than it spreads: the first clip's
                             //   look is curling ink, not a burst opening out
+  // ver17b: 0.70 -> 0.30. This octave draws the HAIRS - the thin lines the customer does not
+  // want. At 0.30 it still roughens the lobes without drawing lines through them.
   simFine: 0.70,            // weight of a second octave at 3.1x the frequency. The large
                             //   octave makes the lobes, this one the hairs inside them.
                             //   AURORA ver11: back to ver10's weight
@@ -795,17 +870,79 @@ const CONFIG = {
   // It runs on REAL seconds. The sim's own clock runs at `speed` (0.55) of real time, so every
   // switch built from forces was integrating at barely half speed however fast its numbers
   // said it was. A flight measured in real seconds takes exactly as long as it says.
-  flightDur: 0.80,          // seconds a mote takes to cross, on average (0.56 - 1.04)
-  flightSpread: 0.45,       // seconds of random delay across the population, so it leaves as
-                            //   a stream rather than a block. Longest arrival: 0.45 + 1.04 =
-                            //   1.49s, inside the second and a half asked for
-  flightArc: 0.22,          // how far a mote's path bows off the straight line, as a fraction
+  flightDur: 3.00,          // ver17: 1.80 -> 1.50 (1.05 - 1.95)          // seconds a mote takes to cross, on average (1.26 - 2.34)
+  flightSpread: 0.00,       // ver17: 1.60 -> 0.80. Half the departure spread is half the length
+                            //   the migrating stream stretches to - the moving mass stays a
+                            //   body rather than a haze strung between the tabs. Longest
+                            //   arrival 0.80 + 1.95 = 2.75s       // seconds of random delay across the population, so it leaves as
+                            //   a stream rather than a block. Longest arrival: 1.60 + 2.34 =
+                            //   3.94s, inside the four asked for. The spread is the
+                            //   larger half of that on purpose - a long spread is what lets
+                            //   the first motes land while the last are only leaving
+  flightArc: 0.06,          // ver17: 0.28 -> 0.10 - a lift, not a spray          // how far a mote's path bows off the straight line, as a fraction
                             //   of the journey. Mostly upward - the menu is near the bottom of
                             //   the frame and a downward bow would leave it
+  flightNoise: 0.11,        // ver17: 0.18 -> 0.06        // ver15: how far a mote WANDERS off its route, as a fraction of
+                            //   the journey. Two waves across it and one along it, each at
+                            //   the mote's own frequency and phase, enveloped to nothing at
+                            //   both ends so it still leaves from and lands on exactly the
+                            //   right place. The amplitude is heavy-tailed - most motes
+                            //   wobble, a few stray well wide - which is what reads as a
+                            //   dispersing cloud rather than a shape that has been moved
+  // ver17c: CENTRED BY MEASUREMENT. Where the settled mass sits is a balance between the pull
+  // and the field's own current, and that balance moves with every change to the field - the
+  // spread, the fold size, the scatter - and with which tab it is, because the field is not the
+  // same at each. Setting it by hand is never done. So twice a second, while nothing is in the
+  // air, the engine reads back the ink in a box around the pressed tab, finds its centre, and
+  // eases the pull and the reservoir by a quarter of the error. It centres what is actually
+  // drawn, whatever put it off.
+  // OFF, and measured to be right off. Averaged over five readings per tab once settled, the
+  // mass with the loop OFF sits -2, 0, +1 and -1 px from the tab along the row, wandering
+  // about +/-5 px as the field turns - that wander is the cloud being alive, not an error.
+  // With the loop ON it averaged up to -13 px: it chased the wander, and the mass answers a
+  // moved target too slowly for a loop to do anything but lag it. The earlier -11 px readings
+  // that prompted it were taken before the mass had settled. Kept behind ?centre=1.
+  centreLoop: false,
+  centreGain: 0.10,         // share of the error corrected per reading. Small on purpose: the
+                            //   mass answers a moved target over a second or two, so a big
+                            //   gain keeps correcting an error that is already being fixed and
+                            //   overshoots - 0.25 swung it from 6 px left to 13 px right
+  centreSettle: 0.8,        // seconds to wait after a flight lands before the first reading
+  centreEvery: 0.6,         // seconds between readings. A readback is a small GPU sync, so
+                            //   not every frame
+  centreBoxW: 520,          // CSS px, the window read around the tab. Wide enough to hold the
+  centreBoxH: 260,          //   whole mass, or the centroid is pulled toward the box's middle
+  centreMaxPx: 90,          // the most it will ever correct, so a bad reading cannot run away
+  flightWanderFreq: 0.60,    // how fast the WANDER sways: sways per journey. 1 is one slow S;
+                            //   higher weaves back and forth more often. Only visible when
+                            //   wander (flightNoise) is above 0
+  // ver14: THE MASS LOCK. The field carries the cloud as well as stirring it: at this build's
+  // settings - a fast field (motion 0.100 x fineness 2.95) against a weak pull (0.25) that is
+  // spread very unevenly (0.88) - the whole mass drifted off its tab to one side and back.
+  // The centre grip cannot stop that: it shapes the pull near the middle, it does not make the
+  // pull any stronger, and a drift of the WHOLE mass is not something a pull toward the middle
+  // can see anyway, because every mote moves with it.
+  //
+  // So the drift is measured and removed directly. Every few frames a sample of the motes'
+  // offsets from their own seats is read back; its mean is how far the population has slid
+  // as a body. A share of it is subtracted from EVERY mote at once. The same shift for all of
+  // them leaves the pattern and each mote's own motion untouched - only the slide goes. It is
+  // a correction of position, not another force, so there is nothing for it to overshoot:
+  // the earlier attempt that moved the pull's target lagged the mass by a second and swung.
+  // Off during a switch, when the mass is SUPPOSED to be travelling.
+  // How far below the tab's centre the mass is placed so the part you SEE is centred on it,
+  // CSS px. The menu sits inside the page-bottom fade, so the half of the cloud below the
+  // words is dimmed and the visible ink weighs high - measured 21 px above the tab with the
+  // mass itself centred. This lowers the seats and the pull together by that much.
+  inkDropPx: 21,
+  massLock: true,           // ?lock=0 turns it off, to see the drift it removes
+  massLockGain: 0.35,       // share of the measured drift removed per reading
+  massLockEvery: 4,         // frames between readings
+  massLockRows: 8,          // rows of the sim texture sampled per reading (256 motes each)
   flightMinPx: 24,          // journeys shorter than this, in CSS pixels, do not fly: the cloud
                             //   just follows them, which is what a scroll or a resize needs
 
-  attractStagger: 0.70,     // AURORA ver13: how far the pull's strength is spread ACROSS the
+  attractStagger: 0.88,     // AURORA ver13: how far the pull's strength is spread ACROSS the
                             //   population, as a fraction either side of the average. At 0
                             //   every mote is pulled identically and a switch is a rigid
                             //   translation — the emitter appearing to slide to the next tab.
@@ -813,7 +950,7 @@ const CONFIG = {
                             //   than the laziest, so the mass leaves as a stream and arrives
                             //   over a window. The average is unchanged, so the settled cloud
                             //   is gripped exactly as it was.
-  attractPull: 0.72,        // AURORA ver11: was 0.85 — softened so the gathering keeps its
+  attractPull: 0.25,        // AURORA ver11: was 0.85 — softened so the gathering keeps its
                             //   volume; the wider reach below carries the mass anyway
                             //   most of the frame — up to six mass radii of travel. The old
                             //   0.10 was a standing bias for a label that never moved; this
@@ -837,7 +974,10 @@ const CONFIG = {
   // 0.80 -> -2/-7/-3, 1.0 -> -1/-4/-4. The cloud's own spread did NOT tighten with it (about
   // 23 px std-dev either way), so this holds the mass on the tab without packing it into a
   // bead, which is what the core was there to prevent.
-  attractCenterGrip: 0.80,  // AURORA ver11: the grip's floor AT the centre. The smoothstep
+  // ver17: 0.80 -> 1.0. ver30's field carries a stronger current than ver16's, and full grip
+  // pulls the settled mass back from about -15 px to -11 px of the tab; it does not change the
+  // spread (measured 17 x 21 px either way).
+  attractCenterGrip: 1.00,   // AURORA ver11: the grip's floor AT the centre. The smoothstep
                             //   above was zero there — a dead zone the motes leaked out of
                             //   down-left on the field's current, leaving a haze trailing
                             //   from the tab. Low on purpose: enough to hold the mass
@@ -1090,6 +1230,8 @@ const CONFIG = {
     [0.956, 0.155, 0.155],
     [0.956, 0.155, 0.155],
   ],
+  // ver17c: 0.16 -> 0.21. The EDGE fade: thin outer specks dissolve sooner, so the wider
+  // mass ends in a soft halo rather than a scatter. ?fringe= to taste.
   rampFringe: 0.16,         // density below which alpha ramps to zero. This is the dial for
                             //   how far the scattered specks reach before they vanish
   // ver12b: 0.50 -> 0.43, ver30's ink. Each grain gives up a little presence now that
@@ -1341,6 +1483,14 @@ if (numParam('fly', 0.1, 3) !== null) CONFIG.flightDur = numParam('fly', 0.1, 3)
 if (numParam('grip', 0, 1) !== null) CONFIG.attractCenterGrip = numParam('grip', 0, 1);
 if (numParam('spread', 0, 2) !== null) CONFIG.flightSpread = numParam('spread', 0, 2);
 if (numParam('arc', 0, 1) !== null) CONFIG.flightArc = numParam('arc', 0, 1);
+if (numParam('noise', 0, 1) !== null) CONFIG.flightNoise = numParam('noise', 0, 1);
+if (PARAMS.get('full') === '1') { CONFIG.cornerFull = true; CONFIG.cornerHalf = false; }
+if (numParam('lobes', 0, 1) !== null) CONFIG.seedLobes = numParam('lobes', 0, 1);
+if (numParam('fringe', 0, 1) !== null) CONFIG.rampFringe = numParam('fringe', 0, 1);
+if (PARAMS.get('lock') === '0') CONFIG.massLock = false;
+if (numParam('drop', -80, 80) !== null) CONFIG.inkDropPx = numParam('drop', -80, 80);
+if (numParam('bfade', 0, 0.6) !== null) CONFIG.bottomFade = numParam('bfade', 0, 0.6);
+if (PARAMS.get('centre') === '1') CONFIG.centreLoop = true;
 if (numParam('attractr', 0.02, 1.5) !== null) CONFIG.attractRadius = numParam('attractr', 0.02, 1.5);
 if (numParam('warm', 0, 20) !== null) CONFIG.warmSeconds = numParam('warm', 0, 20);
 if (numParam('fade', 0, 5) !== null) CONFIG.fadeInSeconds = numParam('fade', 0, 5);
@@ -1627,7 +1777,10 @@ uniform float uClockScale;       // the sim clock's rate against real time, to d
 uniform float uFlightDur;
 uniform float uFlightSpread;
 uniform float uFlightArc;
+uniform float uFlightNoise;      // ver15: how far a mote wanders off its route
+uniform float uWanderFreq;       // how many sways it makes doing so
 uniform vec2  uJump;             // this frame's instant follow - a scroll, not a switch
+uniform vec3  uLockShift;        // ver14: this frame's share of the mass's drift, removed
 
 // smootherstep: zero velocity AND zero acceleration at both ends, so a mote eases out of
 // the old tab and into the new one without a jolt at either
@@ -1639,7 +1792,18 @@ float flightEase(float t){ t = clamp(t, 0.0, 1.0); return t * t * t * (t * (t * 
 vec2 flightOwed(float seedw, float now, float birth){
   float delay = fract(seedw * 23.17) * uFlightSpread;
   float dur   = uFlightDur * mix(0.7, 1.3, fract(seedw * 57.31));
-  float side  = mix(-0.25, 1.0, fract(seedw * 91.73));   // mostly up
+  // ver15: the bow now takes a wider range either way, so the population does not share one
+  // arc - still mostly up, since the menu sits near the bottom of the frame
+  float side  = mix(-0.45, 1.0, fract(seedw * 91.73));
+  // ver15: the mote's own wander - two frequencies across the route and one along it, at its
+  // own phases, and a heavy-tailed size so most wobble and a few stray wide
+  // ver16: the wander is two SMOOTH terms per mote, not ver15's waves. Up to four wiggles a
+  // journey on every mote read as glitching, not as organic - organic is slow. One term bows
+  // the path into an S (a full sine across the flight, so some drift one way then the other)
+  // and one lets the mote lead or lag the rest mid-flight. Both are per-mote and signed, so no
+  // two share a route and the population migrates as a haze rather than moving as a shape.
+  float sway  = mix(-1.0, 1.0, fract(seedw * 13.31)) * uFlightNoise;
+  float surge = mix(-1.0, 1.0, fract(seedw * 71.17)) * uFlightNoise;
   vec2 owed = vec2(0.0);
   for (int k = 0; k < 8; k++) {
     vec2 D = uFlightD[k];
@@ -1649,7 +1813,13 @@ vec2 flightOwed(float seedw, float now, float birth){
     float e = flightEase((now - uFlightT0[k] - delay) / max(1e-3, dur));
     vec2 perp = vec2(-D.y, D.x);
     if (perp.y < 0.0) perp = -perp;              // "up" means up whichever way it flies
-    owed += D * (1.0 - e) - perp * (sin(3.14159265 * e) * uFlightArc * side);
+    float env = sin(3.14159265 * e);    // one hump: zero at both ends, so the endpoints stay exact
+    // the sway, at the chosen rate and the mote's own phase, inside the one-hump envelope so
+    // it is zero at both ends whatever the rate - the endpoints stay exact
+    float ess = env * sin(6.2831853 * uWanderFreq * e + fract(seedw * 29.71) * 6.2831853);
+    owed += D * (1.0 - e)
+          - perp * (env * uFlightArc * side + ess * sway)
+          - D * (env * surge * 0.6);
   }
   return owed;
 }
@@ -1825,6 +1995,7 @@ void main(){
   {
     float birthP = texture2D(tVel, vUv).w;   // written by the velocity pass this frame
     offset.xy += flightOwed(seed.w, uNowPrev, birthP) - flightOwed(seed.w, uNow, birthP) + uJump;
+    offset += uLockShift;   // the whole population, by the same amount - see CONFIG.massLock
   }
 
   // The text's group is bound to a short radius about its own seat. Applied to the position
@@ -1948,6 +2119,7 @@ uniform float uFloatingSpeed;
 uniform float uCurlFrequency;
 uniform float uCurlAmplitude;
 uniform float uCurlSpeed;
+uniform float uCurlPhase;        // accumulated uTime * uCurlSpeed * 0.01 - see the scatter
 uniform vec3  uInfluencePoint;
 uniform float uInfluenceRadius;
 uniform float uInfluenceIntensity;
@@ -2108,7 +2280,10 @@ void main(){
   // has to be instantaneous to answer the pointer and so cannot come from the buffer.
   float curlInfluence = aCurlResp * step(0.001, amplification - 1.0);
   if (curlInfluence > 0.0) {
-    float ct = uTime * uCurlSpeed * 0.01;
+    // Its own accumulated phase rather than uTime * uCurlSpeed: multiplying the running clock
+    // by a new speed jumps the whole pattern the instant the speed changes, which a slider
+    // would do on every drag. Accumulated, a change of speed only changes the pace from now on.
+    float ct = uCurlPhase;
     vec3 curlOffset = curlNoise(vec3(pos.x, pos.y, ct), uCurlFrequency, ct, effectiveCurl,
                                 uCurlDivergence);
     pos.x += curlOffset.x * curlInfluence;
@@ -3593,17 +3768,32 @@ function buildParticles(count) {
       const base = Math.atan2(-cs.y, -cs.x);
       // AURORA cornerFull: the whole circle. The anchor sits mid-edge on the menu, so
       // there is no quadrant to keep to — a round Gaussian mass centred on it.
+      // ver15 cornerHalf: the half-plane that runs INTO the frame from the edge the anchor
+      // sits on - straight up, for a menu on the bottom edge - with the same spill either side
+      // as the corner quarter, so its flat edge does not read as a cut.
+      const up = Math.atan2(-cs.y, 0);
       const ang = CONFIG.cornerFull
         ? Math.random() * Math.PI * 2
-        : base - Math.PI * 0.25 + Math.random() * (Math.PI * 0.5)
-          + (Math.random() - 0.5) * CONFIG.cornerSpill;
+        : CONFIG.cornerHalf
+          ? up - Math.PI * 0.5 + Math.random() * Math.PI
+            + (Math.random() - 0.5) * CONFIG.cornerSpill
+          : base - Math.PI * 0.25 + Math.random() * (Math.PI * 0.5)
+            + (Math.random() - 0.5) * CONFIG.cornerSpill;
       // A GAUSSIAN falloff, not a disc. A bounded radius puts a hard rim on the cloud, and
       // a hard rim on a radial draw is a circle — which is visible as a mask edge however
       // the inside is shaded. A Gaussian has no last radius: it just runs out, so there is
       // no contour anywhere for the eye to find.
-      const rad = Math.abs(gauss1()) * cornerRadiusWorld * CONFIG.cornerBias;
-      seat.x = Math.cos(ang) * rad;
-      seat.y = Math.sin(ang) * rad;
+      let rad = Math.abs(gauss1()) * cornerRadiusWorld * CONFIG.cornerBias;
+      let ax = 1, ay = 1;
+      if (CONFIG.cornerFull) {
+        // ver16: slow lobes round the angle - three and five of them at fixed, unrelated
+        // phases - so the radius swells and dips irregularly and there is no circle to find
+        rad *= 1 + CONFIG.seedLobes * (0.62 * Math.sin(3 * ang + 0.7)
+                                     + 0.38 * Math.sin(5 * ang + 2.3));
+        ax = CONFIG.seedAspectX; ay = CONFIG.seedAspectY;
+      }
+      seat.x = Math.cos(ang) * rad * ax;
+      seat.y = Math.sin(ang) * rad * ay;
       seat.z = (Math.random() - 0.5) * cornerRadiusWorld * CONFIG.cornerDepth;
       seat.nz01 = 1;
       return seat;
@@ -4115,6 +4305,7 @@ const uniforms = {
   uCurlAmplitude: { value: CONFIG.curlAmplitude },
   uSeatShift: { value: new THREE.Vector2() },   // AURORA ver10: seats' texture-space relocation
   uCurlSpeed: { value: CONFIG.curlSpeed },
+  uCurlPhase: { value: 0 },
   uCurlDivergence: { value: CONFIG.curlDivergence },
   uInfluencePoint: { value: new THREE.Vector3(
     CONFIG.influencePointX, CONFIG.influencePointY, CONFIG.influencePointZ) },
@@ -4319,7 +4510,10 @@ function makeSim() {
       uFlightDur: { value: CONFIG.flightDur },
       uFlightSpread: { value: CONFIG.flightSpread },
       uFlightArc: { value: CONFIG.flightArc },
+      uFlightNoise: { value: CONFIG.flightNoise },
+      uWanderFreq: { value: CONFIG.flightWanderFreq },
       uJump: { value: flightJump },
+      uLockShift: { value: new THREE.Vector3() },
       // AURORA ver10: seats' texture-space relocation — see glideSeats
       uSeatShift: { value: new THREE.Vector2() },
       uSeatDelta: { value: new THREE.Vector2() },
@@ -4521,12 +4715,15 @@ function stepSim(dt) {
   u.uAttractPull.value = (CONFIG.attractPull * sim.radius) / (dtc * simPushGain) * pullBoost;
   u.uAttractCore.value = Math.max(CONFIG.attractCore / pullBoost, 0.24);
   u.uAttractStagger.value = THREE.MathUtils.clamp(CONFIG.attractStagger, 0, 0.95);
+  u.uAttractCenterGrip.value = CONFIG.attractCenterGrip;   // live, for the panel
   u.uNow.value = flightNow;
   u.uNowPrev.value = flightPrev;
   u.uClockScale.value = CONFIG.speed;
   u.uFlightDur.value = CONFIG.flightDur;
   u.uFlightSpread.value = CONFIG.flightSpread;
   u.uFlightArc.value = CONFIG.flightArc;
+  u.uFlightNoise.value = CONFIG.flightNoise;
+  u.uWanderFreq.value = CONFIG.flightWanderFreq;
   u.uSignLeash.value = CONFIG.signLeash * sim.radius;
   u.uSignShield.value = CONFIG.signShield;
   uniforms.uSignInk.value = CONFIG.signInk;
@@ -4539,6 +4736,9 @@ function stepSim(dt) {
   u.tVel.value = sim.va.texture;
   sim.draw(sim.step, sim.b);
   const t = sim.a; sim.a = sim.b; sim.b = t;
+  // the correction was for this step only
+  u.uLockShift.value.set(0, 0, 0);
+  readMassDrift();
   uniforms.tSimPos.value = sim.a.texture;
 }
 
@@ -4831,6 +5031,17 @@ let flightBusy = 0;         // 0..1, eased: something is in the air
 let committed = null;
 let committedY0 = 0;        // the vertical the cloud was TUNED at, kept as the reference
 let seatsPlaced = false;
+// ver17c: the measured correction, in the group's own units, and the readback's buffer
+const centreFix = new THREE.Vector2();
+let centreLast = 0;
+let centreQuietSince = 0;
+// Each tab keeps its OWN correction. The field is not the same at every tab, so the error is
+// not either - a correction learned on one is wrong on the next, and carried over it made the
+// mass land off-centre after every switch. Remembered per tab, a tab the visitor has been to
+// before is centred the moment they return. Keyed by the tab's centre along the row.
+const centreMemo = new Map();
+let centreKey = null;
+let centreBuf = null;
 let lastFlightTick = '0';
 const anchorLocal = new THREE.Vector3();
 
@@ -4895,6 +5106,13 @@ function updateAttract(vh, dt) {
       committed.x += dx; committed.y += dy;
     }
     committed.z = anchorLocal.z;
+    const key = Math.round((r.left + r.width / 2) / 10);
+    if (key !== centreKey) {
+      if (centreKey !== null) centreMemo.set(centreKey, centreFix.clone());
+      const known = centreMemo.get(key);
+      if (known) centreFix.copy(known); else centreFix.set(0, 0);
+      centreKey = key;
+    }
 
     // retire flights every mote has finished: the latest start plus the longest duration
     const life = CONFIG.flightSpread + CONFIG.flightDur * 1.3 + 0.05;
@@ -4908,7 +5126,9 @@ function updateAttract(vh, dt) {
 
     // The pull holds the cloud AT the destination; each mote's own flight tells it where
     // along the way it should be meanwhile (see the velocity pass).
-    sim.step.uniforms.uAttractPoint.value.copy(committed);
+    const dropA = CONFIG.inkDropPx * vh / innerHeight / ms;   // see CONFIG.inkDropPx
+    sim.step.uniforms.uAttractPoint.value.set(
+      committed.x + centreFix.x, committed.y + centreFix.y - dropA, committed.z);
     // a little more stir while the cloud is in the air, handed back on arrival
     uniforms.uCurlAmplitude.value = CONFIG.curlAmplitude * (1 + flightBusy * 0.30);
     travelBoost = 1 + flightBusy * 1.6;
@@ -4923,6 +5143,93 @@ function updateAttract(vh, dt) {
   }
   sim.step.uniforms.uAttractRadius.value =
     (CONFIG.attractRadius * vh) / Math.max(1e-6, CONFIG.massScale);
+}
+
+// ver17c: read the drawn ink around the pressed tab and ease the mass onto it. Called straight
+// after the frame is rendered, while the drawing buffer is still this frame's.
+function centreOnInk() {
+  if (!CONFIG.centreLoop || !sim || !committed) return;
+  // on the WALL clock: counted in frames it would correct four times as rarely on a device
+  // running at a quarter of the frame rate - exactly the ones where it matters most
+  const nowC = performance.now() / 1000;
+  if (flightBusy > 0.05) { centreQuietSince = nowC; return; }
+  if (nowC - centreQuietSince < CONFIG.centreSettle) return;
+  if (nowC - centreLast < CONFIG.centreEvery) return;
+  centreLast = nowC;
+  // (a flight moves the mass on purpose, so the checks above skip it and the settle after)
+  const el = document.getElementById('booknow');
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const gl = renderer.getContext();
+  const dpr = renderer.getPixelRatio();
+  const cw = gl.drawingBufferWidth, ch = gl.drawingBufferHeight;
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const x0 = Math.max(0, Math.floor((cx - CONFIG.centreBoxW / 2) * dpr));
+  const x1 = Math.min(cw, Math.ceil((cx + CONFIG.centreBoxW / 2) * dpr));
+  const yT = Math.max(0, Math.floor((cy - CONFIG.centreBoxH / 2) * dpr));
+  const yB = Math.min(ch, Math.ceil((cy + CONFIG.centreBoxH / 2) * dpr));
+  const w = x1 - x0, h = yB - yT;
+  if (w < 8 || h < 8) return;
+  if (!centreBuf || centreBuf.length < w * h * 4) centreBuf = new Uint8Array(w * h * 4);
+  const glY = ch - yB;                       // GL's rows run bottom-up
+  gl.readPixels(x0, glY, w, h, gl.RGBA, gl.UNSIGNED_BYTE, centreBuf);
+  let sx = 0, sy = 0, sa = 0;
+  for (let j = 0; j < h; j += 2) {
+    for (let i = 0; i < w; i += 2) {
+      const a = centreBuf[(j * w + i) * 4 + 3];
+      if (a > 6) { sx += i * a; sy += j * a; sa += a; }
+    }
+  }
+  if (sa < 1500) return;                     // too little ink to judge
+  const inkX = (x0 + sx / sa) / dpr;
+  const inkY = (ch - (glY + sy / sa)) / dpr;
+  const ex = cx - inkX, ey = cy - inkY;      // CSS px the ink is off the tab
+  if (Math.abs(ex) < 2 && Math.abs(ey) < 2) return;
+  const k = viewHeightAt(CONFIG.anchorZ) / innerHeight / Math.max(1e-6, CONFIG.massScale);
+  centreFix.x += CONFIG.centreGain * ex * k;
+  centreFix.y -= CONFIG.centreGain * ey * k;   // screen y runs down, the group's up
+  const lim = CONFIG.centreMaxPx * k;
+  const len = centreFix.length();
+  if (len > lim) centreFix.multiplyScalar(lim / len);
+}
+
+// ver14: the mass lock's reading. A block of rows from the position texture - the offsets of
+// ~2,000 motes from their own seats - averaged. The motes are thrown in random order, so a
+// contiguous block is a fair sample of the population, and the block moves on every reading
+// so over a second the whole population is seen. The mean offset IS the slide: the seats sit
+// where the mass belongs, so a population that has not drifted averages to zero.
+let lockFrame = 0;
+let lockRow = 0;
+let lockBuf = null;
+function readMassDrift() {
+  if (!CONFIG.massLock || !sim) return;
+  if (++lockFrame % Math.max(1, CONFIG.massLockEvery) !== 0) return;
+  if (flightBusy > 0.05) return;                  // a switch is meant to move the mass
+  const w = sim.a.width;
+  const fullRows = Math.floor(CONFIG.particleCount / w);   // rows entirely inside the population
+  const rows = Math.min(CONFIG.massLockRows, fullRows);
+  if (rows < 1) return;
+  if (lockRow + rows > fullRows) lockRow = 0;
+  const half = sim.a.texture.type === THREE.HalfFloatType;
+  const n = w * rows * 4;
+  if (!lockBuf || lockBuf.length !== n || (half !== (lockBuf instanceof Uint16Array))) {
+    lockBuf = half ? new Uint16Array(n) : new Float32Array(n);
+  }
+  renderer.readRenderTargetPixels(sim.a, 0, lockRow, w, rows, lockBuf);
+  lockRow += rows;
+  let mx = 0, my = 0, mz = 0;
+  const cnt = w * rows;
+  for (let i = 0; i < n; i += 4) {
+    if (half) {
+      mx += THREE.DataUtils.fromHalfFloat(lockBuf[i]);
+      my += THREE.DataUtils.fromHalfFloat(lockBuf[i + 1]);
+      mz += THREE.DataUtils.fromHalfFloat(lockBuf[i + 2]);
+    } else {
+      mx += lockBuf[i]; my += lockBuf[i + 1]; mz += lockBuf[i + 2];
+    }
+  }
+  const g = CONFIG.massLockGain;
+  sim.step.uniforms.uLockShift.value.set(-g * mx / cnt, -g * my / cnt, -g * mz / cnt);
 }
 
 // AURORA: the SEAT reservoir - where a dead mote is reborn - sits on the destination.
@@ -4941,8 +5248,14 @@ function glideSeats() {
   if (!sim) return;
   if (!committed) readAnchor(viewHeightAt(CONFIG.anchorZ));
   if (!committed || !sim.centre) { sim.step.uniforms.uSeatDelta.value.set(0, 0); return; }
-  const tx = committed.x - sim.centre.x;
-  const ty = committed.y - committedY0;
+  // ver14: vertically centred on the tab as well. With the mass lock holding the population
+  // on its seats, the seats' own mean IS where the cloud sits - and that had been kept at the
+  // height the throw first gave it, about 10 px below the tab. The field's upward drift used
+  // to carry the mass past it; locked, nothing does, so the seats go on the tab itself.
+  const tx = committed.x + centreFix.x - sim.centre.x;
+  const dropL = CONFIG.inkDropPx * viewHeightAt(CONFIG.anchorZ) / innerHeight
+              / Math.max(1e-6, CONFIG.massScale);
+  const ty = committed.y + centreFix.y - sim.centre.y - dropL;
   // The first placement moves the seats WITH the motes on them: nothing has been simulated
   // yet, so there is no living position to preserve, and compensating would leave the whole
   // population a seat-shift away from its own seats for the warm-up to drag back.
@@ -5296,6 +5609,9 @@ function tick() {
   // the motes' own clock, which the speed control scales. Accumulated rather than
   // multiplied at read time, so changing the pace never jumps their phase.
   uniforms.uTime.value += dt * CONFIG.speed;
+  // the scatter's phase, advanced at its OWN speed so the scatter-speed bar changes the pace
+  // without jumping the pattern
+  uniforms.uCurlPhase.value += dt * CONFIG.speed * CONFIG.curlSpeed * 0.01;
   stepSim(dt * CONFIG.speed);
   parallax();
   uniforms.uCentreViewZ.value =
@@ -5314,6 +5630,7 @@ function tick() {
   if (CONFIG.bloom && bloomChain) renderBloom();
   else if (CONFIG.shadow && shadowChain) renderShadowed();
   else renderer.render(scene, camera);
+  centreOnInk();
   if (firstFrame) { firstFrame = false; dismissLoading(); }
 }
 tick();
@@ -5327,9 +5644,14 @@ tick();
 // why it is a bar and not a live drag: the seats are re-thrown and the buffers re-made.
 const uiEl = document.getElementById('pui');
 // Hidden unless ?ui=1. It is a tuning rail, not part of the piece.
-if (uiEl && PARAMS.get('ui') !== '1') {
+// The panel is ON by default in this build - it is how the settings are being chosen - and
+// ?ui=0 removes it altogether.
+if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
+  // The page ships the rail with the HIDDEN attribute so it cannot flash before this runs;
+  // it has to be taken off here, or the panel is built and never seen.
+  uiEl.hidden = false;
   // Colour. Every particle carries the same colour now — the tone in the picture is how many
   // of them overlap, not what any one of them is — so hue, saturation and lightness are one
   // colour rather than a ramp, and all five ramp stops are written from it. The readout is
@@ -5350,15 +5672,70 @@ if (uiEl && PARAMS.get('ui') !== '1') {
     return c.map((n) => n.toFixed(3)).join(', ');
   };
 
-  // ver17: the panel is the HOVER and nothing else, as ver14's was. Everything the cloud
-  // itself does is settled and baked, and a bar for a settled value is only a way to knock
-  // it out of tune. All seven are read out of CONFIG every frame, so none needs a rebuild
-  // and none costs anything to drag.
-  // The panel is the PLACEMENT and nothing else. Viewport heights, positive toward the
-  // corner's own side, so x runs right and y runs up. Both are group transforms: place()
-  // re-runs and nothing is re-thrown, so they drag live at any population, and each prints
-  // the value to paste into CONFIG once it is settled.
+  // The panel for this build: the settings the last rounds have been moving, grouped by what
+  // they change. Every row prints the value to paste into CONFIG. All are live except the two
+  // in MASS, which re-throw the population on release.
+  const sec = (title) => ({ section: title });
   const ROWS = [
+    sec('motion'),
+    { key: 'simSpeed', name: 'motion speed', cst: 'CONFIG.simSpeed',
+      min: 0, max: 0.30, step: 0.002, value: CONFIG.simSpeed,
+      text: () => CONFIG.simSpeed.toFixed(3) },
+    { key: 'simFieldSpeed', name: 'pattern change', cst: 'CONFIG.simFieldSpeed',
+      min: 0, max: 1.5, step: 0.005, value: CONFIG.simFieldSpeed,
+      text: () => CONFIG.simFieldSpeed.toFixed(3) },
+    // higher is SMALLER swirls. Note the field's speed is simSpeed x this, so raising it also
+    // speeds the motion up - pull motion speed down with it to keep the pace
+    { key: 'simFrequency', name: 'swirl fineness', cst: 'CONFIG.simFrequency',
+      min: 0.5, max: 5, step: 0.05, value: CONFIG.simFrequency,
+      text: () => CONFIG.simFrequency.toFixed(2) },
+    { key: 'curlAmplitude', name: 'scatter', cst: 'CONFIG.curlAmplitude',
+      min: 0, max: 1, step: 0.01, value: CONFIG.curlAmplitude,
+      text: () => CONFIG.curlAmplitude.toFixed(2) },
+    // how fast that scatter moves - the jitter every mote has at rest
+    { key: 'curlSpeed', name: 'scatter speed', cst: 'CONFIG.curlSpeed',
+      min: 0, max: 60, step: 0.5, value: CONFIG.curlSpeed,
+      text: () => CONFIG.curlSpeed.toFixed(1) },
+
+    sec('hold on the tab'),
+    { key: 'attractPull', name: 'pull', cst: 'CONFIG.attractPull',
+      min: 0, max: 2, step: 0.01, value: CONFIG.attractPull,
+      text: () => CONFIG.attractPull.toFixed(2) },
+    // high holds the mass on the tab's centre; too high and it draws into one point
+    { key: 'attractCenterGrip', name: 'centre grip', cst: 'CONFIG.attractCenterGrip',
+      min: 0, max: 1, step: 0.01, value: CONFIG.attractCenterGrip,
+      text: () => CONFIG.attractCenterGrip.toFixed(2) },
+    { key: 'attractStagger', name: 'pull spread', cst: 'CONFIG.attractStagger',
+      min: 0, max: 0.95, step: 0.01, value: CONFIG.attractStagger,
+      text: () => CONFIG.attractStagger.toFixed(2) },
+
+    sec('switching tabs'),
+    { key: 'flightDur', name: 'crossing time', cst: 'CONFIG.flightDur',
+      min: 0.2, max: 3, step: 0.05, value: CONFIG.flightDur,
+      text: () => CONFIG.flightDur.toFixed(2) + ' s' },
+    { key: 'flightSpread', name: 'departure spread', cst: 'CONFIG.flightSpread',
+      min: 0, max: 2, step: 0.05, value: CONFIG.flightSpread,
+      text: () => CONFIG.flightSpread.toFixed(2) + ' s' },
+    { key: 'flightArc', name: 'lift', cst: 'CONFIG.flightArc',
+      min: 0, max: 0.5, step: 0.01, value: CONFIG.flightArc,
+      text: () => CONFIG.flightArc.toFixed(2) },
+    { key: 'flightNoise', name: 'wander', cst: 'CONFIG.flightNoise',
+      min: 0, max: 0.5, step: 0.01, value: CONFIG.flightNoise,
+      text: () => CONFIG.flightNoise.toFixed(2) },
+    // how fast the wander sways - sways per journey; nothing to see while wander is 0
+    { key: 'flightWanderFreq', name: 'wander speed', cst: 'CONFIG.flightWanderFreq',
+      min: 0, max: 12, step: 0.01, value: CONFIG.flightWanderFreq,
+      text: () => CONFIG.flightWanderFreq.toFixed(2) },
+
+    sec('mass'),
+    { key: 'cornerRadius', name: 'size', cst: 'CONFIG.cornerRadius',
+      min: 0.05, max: 0.40, step: 0.005, value: CONFIG.cornerRadius,
+      rebuild: true, text: () => CONFIG.cornerRadius.toFixed(3) },
+    { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
+      min: 20000, max: 600000, step: 10000, value: CONFIG.particleCount,
+      rebuild: true, round: true, text: () => String(CONFIG.particleCount) },
+
+    sec('placement'),
     { key: 'offsetX', name: 'offset x', cst: 'CONFIG.offsetX',
       min: -0.5, max: 1.0, step: 0.005, value: CONFIG.offsetX,
       place: true, text: () => CONFIG.offsetX.toFixed(3) },
@@ -5367,16 +5744,38 @@ if (uiEl && PARAMS.get('ui') !== '1') {
       place: true, text: () => CONFIG.offsetY.toFixed(3) },
   ];
 
-  uiEl.innerHTML = '<h2>offset</h2>' + ROWS.map((r, i) =>
-    '<div class="row"><div class="lbl">'
+  uiEl.innerHTML = '<h2>particles</h2>' + ROWS.map((r, i) => r.section
+    ? '<h2 style="margin-top:16px">' + r.section + '</h2>'
+    : '<div class="row"><div class="lbl">'
     + '<span class="name">' + r.name + '</span>'
     + '<span class="val" id="pv' + i + '">' + r.text() + '</span></div>'
     + '<span class="cst">' + r.cst + '</span>'
     + '<input type="range" id="pr' + i + '" min="' + r.min + '" max="' + r.max + '"'
     + ' step="' + r.step + '" value="' + r.value + '"></div>'
-  ).join('') + '<div class="foot">?ui=0 hides this</div>';
+  ).join('') + '<div class="foot"><a href="#" id="puiHide">hide controls</a> &middot; ?ui=0 removes them</div>';
+
+  // Hide folds the rail away and leaves one small button to bring it back, so the effect can
+  // be looked at full-frame without losing the settings or reloading the page.
+  const showBtn = document.createElement('button');
+  showBtn.type = 'button';
+  showBtn.textContent = 'controls';
+  showBtn.style.cssText = 'position:fixed;left:12px;top:12px;z-index:21;padding:6px 10px;'
+    + 'font:600 10px/1 Helvetica,Arial,sans-serif;letter-spacing:.12em;text-transform:uppercase;'
+    + 'color:rgba(0,0,0,.7);background:rgba(255,255,255,.88);border:1px solid rgba(0,0,0,.15);'
+    + 'border-radius:3px;cursor:pointer;display:none';
+  document.body.appendChild(showBtn);
+  document.getElementById('puiHide').addEventListener('click', (e) => {
+    e.preventDefault();
+    uiEl.hidden = true;
+    showBtn.style.display = 'block';
+  });
+  showBtn.addEventListener('click', () => {
+    uiEl.hidden = false;
+    showBtn.style.display = 'none';
+  });
 
   ROWS.forEach((r, i) => {
+    if (r.section) return;
     const slider = document.getElementById('pr' + i);
     // Rebuilds fire on release, not on every pixel of the drag: re-throwing a quarter of a
     // million seats per input event locks the page up.
