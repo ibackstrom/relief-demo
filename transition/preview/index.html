@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sand Transition — Preview</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { --bg: #0e0e0f; --fg: #ececec; --dim: #8a8a8a; --line: #2a2a2c; --accent: #d9c9a8; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--fg);
+      font: 400 15px/1.55 "Helvetica Neue", Arial, sans-serif; }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 44px 24px 64px; }
+    header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; }
+    h1 { margin: 0; font-weight: 400; font-size: clamp(26px, 3.4vw, 40px); letter-spacing: -.01em; }
+    .tag { color: var(--dim); font-size: 12px; letter-spacing: .2em; text-transform: uppercase; }
+    .lede { margin: 14px 0 28px; max-width: 640px; color: #bdbdbd; }
+
+    .stage { position: relative; aspect-ratio: 16 / 9; width: 100%; border-radius: 10px; overflow: hidden;
+      background: #000; box-shadow: 0 30px 80px rgba(0,0,0,.55), 0 0 0 1px var(--line); }
+    .stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+
+    .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0 0; }
+    .bar .sp { flex: 1; }
+    button, .btn { appearance: none; border: 1px solid var(--line); background: #18181a; color: var(--fg);
+      font: inherit; font-size: 13px; padding: 9px 16px; border-radius: 999px; cursor: pointer;
+      text-decoration: none; transition: background .2s, border-color .2s, color .2s; }
+    button:hover, .btn:hover { border-color: #4a4a4e; background: #202023; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #141414; }
+    button.primary:hover { background: #e8dcc2; }
+    .seg button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+    .seg { display: flex; flex-wrap: wrap; gap: 8px; }
+    .label { color: var(--dim); font-size: 12px; letter-spacing: .15em; text-transform: uppercase; margin-right: 4px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 28px;
+      margin-top: 48px; padding-top: 32px; border-top: 1px solid var(--line); }
+    .grid h3 { margin: 0 0 6px; font-weight: 500; font-size: 14px; }
+    .grid p { margin: 0; color: #a9a9a9; font-size: 14px; }
+    .grid .n { color: var(--accent); font-size: 12px; letter-spacing: .15em; margin-bottom: 8px; }
+    footer { margin-top: 44px; color: var(--dim); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Sand Transition</h1>
+      <span class="tag">Preview</span>
+    </header>
+    <p class="lede">Scrolling down, the first image comes apart like sand: the next image opens through it
+      in several places at once, and grains of the first image fall away from every edge.
+      Scroll inside the frame, or use the buttons below.</p>
+
+    <div class="stage"><iframe id="demo" src="../" title="Sand transition demo"></iframe></div>
+
+    <div class="bar">
+      <button class="primary" id="play">Play ↓</button>
+      <button id="back">Reverse ↑</button>
+      <span class="sp"></span>
+      <a class="btn" id="full" href="../" target="_blank" rel="noopener">Open full screen ↗</a>
+    </div>
+
+    <div class="bar">
+      <span class="label">Variant</span>
+      <div class="seg" id="variants">
+        <button aria-pressed="true" data-q="">Default · 7 openings</button>
+        <button data-q="seeds=3">Few, large</button>
+        <button data-q="seeds=12">Many, small</button>
+        <button data-q="dur=6">Slow</button>
+        <button data-q="dur=2.2">Fast</button>
+      </div>
+    </div>
+
+    <section class="grid">
+      <div><div class="n">01</div><h3>Opens in several places</h3>
+        <p>On scroll, the new image breaks through at several points at the same moment. Each opening
+          appears in a new spot every time.</p></div>
+      <div><div class="n">02</div><h3>Organic edges</h3>
+        <p>The openings grow with an irregular, cellular edge rather than clean circles, until they meet and
+          the new image fills the screen.</p></div>
+      <div><div class="n">03</div><h3>Falling sand</h3>
+        <p>Along every edge the first image crumbles into fine grains in its own colours, which fall away
+          under gravity.</p></div>
+      <div><div class="n">04</div><h3>Reversible</h3>
+        <p>Scrolling back up closes the openings and returns to the first image. Works with mouse wheel,
+          trackpad, touch swipe and keyboard.</p></div>
+    </section>
+
+    <footer>Demo images are placeholders; any pair of images can be used.</footer>
+  </div>
+
+  <script>
+    const frame = document.getElementById('demo');
+    const full = document.getElementById('full');
+    const ctl = () => frame.contentWindow && frame.contentWindow.transitionControl;
+    document.getElementById('play').onclick = () => ctl() && ctl().forward();
+    document.getElementById('back').onclick = () => ctl() && ctl().backward();
+    document.querySelectorAll('#variants button').forEach(b => b.onclick = () => {
+      document.querySelectorAll('#variants button').forEach(x => x.setAttribute('aria-pressed', x === b));
+      const url = '../' + (b.dataset.q ? '?' + b.dataset.q : '');
+      frame.src = url;
+      full.href = url;
+    });
+  </script>
+</body>
+</html>

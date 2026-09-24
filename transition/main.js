@@ -297,6 +297,9 @@ function resize() {
 addEventListener('resize', resize);
 resize();
 
+// for the preview page: it drives the demo from its own buttons (same origin, in an iframe)
+window.transitionControl = { forward, backward, get progress() { return Math.min(s, 1); } };
+
 let last = performance.now();
 const tailEnd = 1 + (CONFIG.grainLife[1] + 0.2) / CONFIG.duration;
 renderer.setAnimationLoop(() => {
