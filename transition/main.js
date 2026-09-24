@@ -1,551 +1,363 @@
-// TRANSITION — image 1 crumbles into image 2 like sand.
+// TRANSITION v4 — the "sand reveal": image 1 is a sheet of sand that a sweep front crosses.
+// Ahead of the front it lies flat; inside the fold band it lifts into long curling folds,
+// shaded by the light; past the band it tears into grains that the wind blows off, and
+// image 2 is underneath.
 //
-// Scroll down: the ver20 mask (immersiveg/Ver20Final, assets/mask-noise.webp, the same two
-// scales and the same smoothstep(0.4, 1.0, g) as its flowmap stamp) opens at several points at
-// once and every opening grows until they meet. Along each border image 1 breaks into grains
-// and the grains fall, gather in a heap along the bottom, and the heap drains away.
-// Scroll up: the openings close again (no sand on the way back).
-//
-// Both the page's dissolve and the grains read ONE field, F(x, e):
-//   F = max over seeds ( e * a_i - b - |x - s_i| ) + N(x)
-// where N is the ver20 mask noise and e is the eased progress. A pixel of image 1 goes when F
-// passes its own grain threshold h * band; a grain is released at exactly that moment, so the
-// hole in image 1 and the grain leaving it are the same event. F is linear in e for each seed,
-// so a grain's release time is solved in closed form in the vertex shader - no simulation, no
-// state, and it plays back identically every frame.
-//
-// v2 - what makes it read as SAND rather than dots:
-//  - the fall has air drag: each grain accelerates to its own terminal speed (bigger = faster),
-//    so a stream stretches out and separates instead of dropping as one sheet
-//  - grains come off in CLUMPS that share a push and then break apart as they fall
-//  - every grain is a tiny lit sphere, stretched along its fall by motion blur; a few glint
-//  - image 1 is a layer ON TOP of image 2: it casts a soft shadow into the openings, and its
-//    broken edge is speckled and lit
-//  - the sand lands in a heap along the bottom edge, which grows while it rains and then
-//    drains away through the floor, leaving image 2 clean
+// Ported from the client's "Sand reveal" page, with its defaults. What changed:
+//  - the sheet is IMAGE 1 (its folds shade the picture) and the grains carry image 1's
+//    colours; behind is IMAGE 2 instead of the gradient
+//  - image 2 lies in the folded sheet's shadow just behind the tear
+//  - driven by scroll: down plays it, up plays it backwards (the sand builds back in). Every
+//    frame is computed from the timeline value alone, so backwards is exact
+//  - no panel; the panel's values are CONFIG below
+// (v3, the ver20-mask openings with falling sand, is in git history / main_v3.js.bak)
 
 import * as THREE from 'three';
 
 const PARAMS = new URLSearchParams(location.search);
 const num = (k, d) => (PARAMS.has(k) && isFinite(+PARAMS.get(k)) ? +PARAMS.get(k) : d);
-// a page can preset values before loading this module (the preview does: the slow template)
+// a page can preset values before loading this module (the preview does)
 const PRESET = window.TRANSITION_CONFIG || {};
 const pre = (k, d) => (k in PRESET ? PRESET[k] : d);
 
 const CONFIG = {
-  duration: num('dur', pre('duration', 3.4)),   // s, first opening to fully image 2
-  reverseDuration: 2.0,          // s, back again on scroll up
-  seeds: num('seeds', pre('seeds', 7)),         // openings, all starting together (max 12)
-  seedMinDist: 0.28,             // how far apart the openings start (screen heights)
-  seedSizeVar: 0.35,             // +- share by which one opening grows faster than another
-  maskAmount: 0.13,              // how ragged the ver20 mask makes the border (screen heights)
-  band: 0.035,                   // width of the crumbling border (screen heights)
-  grainPx: 1.5,                  // css px per dissolve cell on the page
-
-  // the layer: image 1 lying on top of image 2
-  shadow: 0.45,                  // darkness of the shadow image 1 casts into the openings
-  shadowOffset: [-0.004, 0.011], // light from above-left (screen heights)
-  shadowSoft: 1.6,               // shadow softness, in border widths
-  edgeSpeckle: 0.22,             // image 1 breaks up into grain texture just before it goes
-  edgeLight: 0.10,               // its broken edge lit from above
-  // v3: the layer's VOLUME
-  wall: 0.009,                   // thickness of image 1: the cut side seen under upper edges
-                                 //   (screen heights); 0 = paper-thin as in v2
-  wallShade: [0.50, 0.78],       // the side's brightness at its foot and at its lip
-  shadowWide: 0.22,              // a second, wide soft shadow, as if the layer stands off
-  shadowFar: 3.2,                //   the picture: how much further it reaches than the tight one
-
-  // the grains
-  grains: num('grains', pre('grains', 300000)),
-  grainSize: [0.7, 3.0],         // css px; most are small, a few coarse
-  gravity: 2.6,                  // screen heights / s^2
-  terminal: 1.05,                // terminal fall speed (screen heights / s), +-25% by size
-  clump: 0.011,                  // size of the clumps that come off together (screen heights)
-  spread: 0.10,                  // sideways push off the edge (screen heights / s)
-  scatter: 0.012,                // how far a clump breaks apart in its first second
-  blur: 1.0,                     // motion streak length, 1 = one frame's travel
-  shade: [0.80, 1.08],           // brightness range of grains vs image 1
-  darkSpecks: 0.07,              // share of dark grains
-  glints: 0.18,                  // share of grains that catch the light as they tumble
-  maxLife: 7.0,                  // s, safety cap
-  // v3: the grains' own shadows, and a second curtain of sand in front
-  grainShadow: 0.30,             // darkness of a falling grain's shadow on the picture; 0 = none
-  grainShadowOffset: [0.006, -0.016], // down-right of the grain, away from the light
-  grainShadowShare: 0.5,         // share of the grains drawn with a shadow (it is a second pass)
-  frontGrains: num('front', pre('frontGrains', 22000)),   // the near curtain; 0 = none
-  frontSize: [3.0, 8.0],         // css px - closer, so bigger
-  frontSpeed: 1.7,               // x the main fall speed
-  frontAlpha: 0.85,
-
-  // the heap
-  pileHeight: num('pile', pre('pileHeight', 0.055)),   // screen heights at its fullest; 0 = none
-  pileDrain: 1.8,                // s it takes to drain after the last grains land
+  duration: num('dur', pre('duration', 6)),   // s, the whole sweep
+  sweepAngle: num('ang', pre('sweepAngle', 225)), // deg, direction the front travels (225: from top right)
+  foldBand: 0.30,           // width of the fold band (sweep units)
+  foldHeight: 0.08,         // how high the folds lift
+  foldContrast: 1.4,        // how strongly the folds are shaded
+  edgeBreakup: 0.25,        // noise on the front
+  flySpeed: 4.0,            // how fast grains fly off once released
+  grainSize: 1.4,           // px
+  grains: num('grains', pre('grains', 700000)),
+  speckle: 0.36,            // grain texture on the sheet inside the fold band
+  shadow: 0.35,             // image 2 in the folded sheet's shadow just behind the tear
+  shadowLength: 0.15,       // how far behind the tear that shadow reaches (sweep units)
 };
 
 // ---------------------------------------------------------------- renderer ----
 const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-renderer.setSize(innerWidth, innerHeight);
-renderer.autoClear = true;
+renderer.setClearColor(0x000000, 1);
 document.body.appendChild(renderer.domElement);
+
+const FOV = 20;
+const camDist = 0.5 / Math.tan(THREE.MathUtils.degToRad(FOV / 2));
+const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 10);
+camera.position.set(0, 0, camDist);
 const scene = new THREE.Scene();
-const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
 const loader = new THREE.TextureLoader();
 const asset = (f) => new URL('./assets/' + f, import.meta.url).href;
-function tex(file, repeat) {
+function tex(file) {
   const t = loader.load(asset(file));
   t.colorSpace = THREE.NoColorSpace;   // raw pass-through: the shaders output what they read
-  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.minFilter = THREE.LinearFilter;
   t.generateMipmaps = false;
   return t;
 }
-const tImg1 = tex('img1.jpg');
-const tImg2 = tex('img2.jpg');
-const tNoise = tex('mask-noise.webp', true);
 const IMG1_ASPECT = 1512 / 900;
 const IMG2_ASPECT = 2560 / 1663;
 
-// ------------------------------------------------------------- shared GLSL ----
-const MAX_SEEDS = 12;
-const FIELD_GLSL = /* glsl */`
-uniform sampler2D tNoise;
-uniform sampler2D tImg1;
-uniform float uAspect;
-uniform vec3  uSeeds[${MAX_SEEDS}];   // xy: centre (aspect space), z: growth a_i
-uniform int   uSeedCount;
-uniform float uB;
-uniform float uA;
-uniform vec2  uNoiseOff;
-uniform float uBand;
-uniform float uPile;                  // the heap's height right now (screen heights)
+// ---------------------------------------------------------------------------
+// Shared GLSL: sweep front, fold height field, shading.
+// Plane coords p: x in [-aspect/2, aspect/2], y in [-0.5, 0.5], y up.
+// ---------------------------------------------------------------------------
+const COMMON = /* glsl */`
+  uniform float uF;       // sweep front position
+  uniform vec2  uDir;     // travel direction of the reveal edge
+  uniform vec2  uExt;     // half extents of the screen in plane units
+  uniform float uFoldW;   // width of the fold band (in sweep units)
+  uniform float uFoldH;   // fold height
+  uniform float uEdgeN;   // noise on the front
+  uniform float uShadeK;  // normal exaggeration
+  uniform sampler2D tImg1;
 
-// the ver20 mask: the same texture, channel, scales and curve as its flowmap stamp
-float maskNoise(vec2 uv) {
-  vec2 q = uv * vec2(uAspect, 1.0);
-  float n1 = 0.00 + 1.00 * smoothstep(0.4, 1.0, texture2D(tNoise, q * 0.35 + uNoiseOff).g);
-  float n2 = 0.15 + 0.85 * smoothstep(0.4, 1.0, texture2D(tNoise, q * 0.8 + uNoiseOff * 1.7).g);
-  return uA * (0.65 * n1 + 0.35 * n2 - 0.5);
-}
-
-// the field without the noise, at progress e
-float seedField(vec2 q, float e) {
-  float F = -1e3;
-  for (int i = 0; i < ${MAX_SEEDS}; i++) {
-    if (i >= uSeedCount) break;
-    F = max(F, e * uSeeds[i].z - uB - length(q - uSeeds[i].xy));
+  vec3 permute(vec3 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
+  float snoise(vec2 v) {
+    const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+    vec2 i = floor(v + dot(v, C.yy));
+    vec2 x0 = v - i + dot(i, C.xx);
+    vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod(i, 289.0);
+    vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+    vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+    m = m * m; m = m * m;
+    vec3 x = 2.0 * fract(p * C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+    vec3 g;
+    g.x = a0.x * x0.x + h.x * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
   }
-  return F;
-}
+  float fbm(vec2 p) {
+    float a = 0.5, s = 0.0;
+    for (int i = 0; i < 4; i++) { s += a * snoise(p); p = p * 2.03 + 17.1; a *= 0.5; }
+    return s;
+  }
+  float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+  }
 
-vec2 cover(vec2 uv, float imgAspect) {
-  vec2 s = uAspect > imgAspect ? vec2(1.0, imgAspect / uAspect) : vec2(uAspect / imgAspect, 1.0);
-  return (uv - 0.5) * s + 0.5;
-}
+  // 0 at the start corner, 1 at the far corner
+  float sweepS(vec2 p) {
+    float m = dot(abs(uDir), uExt);
+    return (dot(p, uDir) + m) / (2.0 * m);
+  }
+  // how far past the front this point is (<0 untouched)
+  float localT(vec2 p) { return uF - sweepS(p) + fbm(p * 2.2 + 3.7) * uEdgeN; }
 
-float hash12(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
-}
+  // long curling folds running across the sweep direction
+  float foldNoise(vec2 p) {
+    vec2 perp = vec2(-uDir.y, uDir.x);
+    vec2 q = vec2(dot(p, perp), dot(p, uDir));
+    vec2 w = vec2(fbm(q * 1.2), fbm(q * 1.2 + 9.2));
+    return fbm(vec2(q.x * 1.3, q.y * 3.2) + w * 0.9 + vec2(0.0, uF * 1.2));
+  }
+  float heightAt(vec2 p, out float n) {
+    float d = smoothstep(0.0, uFoldW, localT(p));
+    n = foldNoise(p);
+    float r = 1.0 - abs(n);
+    r *= r;
+    return d * d * uFoldH * (0.35 + r);
+  }
+  vec3 sheetPos(vec2 p, float t, out float h) {
+    float n;
+    h = heightAt(p, n);
+    float d = smoothstep(0.0, uFoldW, t);
+    vec2 perp = vec2(-uDir.y, uDir.x);
+    vec2 off = -uDir * d * d * 0.04 + perp * n * d * 0.02;
+    return vec3(p + off, h);
+  }
+  vec3 sheetNormal(vec2 p, float h) {
+    float e = 0.004, n;
+    float hx = heightAt(p + vec2(e, 0.0), n);
+    float hy = heightAt(p + vec2(0.0, e), n);
+    return normalize(vec3(-(hx - h) / e * uShadeK, -(hy - h) / e * uShadeK, 1.0));
+  }
+  float shade(vec3 n) {
+    vec3 L = normalize(vec3(-0.45, 0.55, 0.7));
+    return 0.42 + 0.72 * max(dot(n, L), 0.0);
+  }
+  // shading relative to a flat sheet, so image 1 at rest looks exactly like image 1
+  float relShade(vec3 n) { return shade(n) / shade(vec3(0.0, 0.0, 1.0)); }
 
-// the heap's surface at x: gentle dunes from the same mask texture, at a very low frequency
-float pileSurface(float x) {
-  float xa = x * uAspect;
-  float d = 0.55 * texture2D(tNoise, vec2(xa * 0.11, 0.31) + uNoiseOff).g
-          + 0.45 * texture2D(tNoise, vec2(xa * 0.27, 0.73) + uNoiseOff * 0.5).g;
-  return uPile * (0.55 + 0.6 * d);
-}
-
-// what the sand in the heap under x is made of: image 1's column above it, averaged
-vec3 columnColour(float x) {
-  return (texture2D(tImg1, cover(vec2(x, 0.2), ${IMG1_ASPECT.toFixed(6)})).rgb
-        + texture2D(tImg1, cover(vec2(x, 0.5), ${IMG1_ASPECT.toFixed(6)})).rgb
-        + texture2D(tImg1, cover(vec2(x, 0.8), ${IMG1_ASPECT.toFixed(6)})).rgb) / 3.0;
-}
+  // image 1 at plane point p, fitted like background-size: cover
+  vec3 img1At(vec2 p) {
+    vec2 uv = p / (2.0 * uExt) + 0.5;
+    float sa = uExt.x / uExt.y, ia = ${IMG1_ASPECT.toFixed(6)};
+    vec2 s = sa > ia ? vec2(1.0, ia / sa) : vec2(sa / ia, 1.0);
+    return texture2D(tImg1, clamp((uv - 0.5) * s + 0.5, 0.0, 1.0)).rgb;
+  }
 `;
 
-// ------------------------------------------------------------------ the page ----
-const pageMat = new THREE.ShaderMaterial({
-  depthTest: false, depthWrite: false,
-  uniforms: {
-    tNoise: { value: tNoise }, tImg1: { value: tImg1 }, tImg2: { value: tImg2 },
-    uAspect: { value: 1 }, uSeeds: { value: Array.from({ length: MAX_SEEDS }, () => new THREE.Vector3()) },
-    uSeedCount: { value: 0 }, uB: { value: 0 }, uA: { value: CONFIG.maskAmount },
-    uNoiseOff: { value: new THREE.Vector2() }, uBand: { value: CONFIG.band }, uPile: { value: 0 },
-    uE: { value: 0 }, uFill: { value: 0 }, uCell: { value: 1.5 },
-    uShadow: { value: CONFIG.shadow }, uShadowOff: { value: new THREE.Vector2(...CONFIG.shadowOffset) },
-    uShadowSoft: { value: CONFIG.shadowSoft }, uSpeckle: { value: CONFIG.edgeSpeckle },
-    uEdgeLight: { value: CONFIG.edgeLight }, uShadowWide: { value: CONFIG.shadowWide },
-    uShadowFar: { value: CONFIG.shadowFar }, uWall: { value: CONFIG.wall },
-    uWallShade: { value: new THREE.Vector2(...CONFIG.wallShade) },
-  },
+const U = {
+  uF: { value: 0 },
+  uDir: { value: new THREE.Vector2() },
+  uExt: { value: new THREE.Vector2(0.889, 0.5) },
+  uFoldW: { value: CONFIG.foldBand },
+  uFoldH: { value: CONFIG.foldHeight },
+  uEdgeN: { value: CONFIG.edgeBreakup },
+  uShadeK: { value: CONFIG.foldContrast },
+  uGrainRes: { value: 700 },
+  uSize: { value: CONFIG.grainSize },
+  uDpr: { value: 1 },
+  uAgeK: { value: CONFIG.flySpeed },
+  uCamDist: { value: camDist },
+  uSpeckle: { value: CONFIG.speckle },
+  uShadow: { value: CONFIG.shadow },
+  uShadowLen: { value: CONFIG.shadowLength },
+  tImg1: { value: tex('img1.jpg') },
+  tImg2: { value: tex('img2.jpg') },
+};
+{
+  const a = THREE.MathUtils.degToRad(CONFIG.sweepAngle);
+  U.uDir.value.set(Math.cos(a), Math.sin(a));
+}
+
+// ---- image 2, underneath: a screen quad drawn first --------------------------------------
+const under = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms: U, depthTest: false, depthWrite: false,
   vertexShader: /* glsl */`
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
-  fragmentShader: /* glsl */`
-    precision highp float;
-    ${FIELD_GLSL}
+  fragmentShader: COMMON + /* glsl */`
     uniform sampler2D tImg2;
-    uniform float uE, uFill, uCell, uShadow, uShadowSoft, uSpeckle, uEdgeLight;
-    uniform float uShadowWide, uShadowFar, uWall;
-    uniform vec2 uWallShade;
-    uniform vec2 uShadowOff;
+    uniform float uShadow, uShadowLen;
     varying vec2 vUv;
     void main() {
-      vec2 q = vUv * vec2(uAspect, 1.0);
-      float F = seedField(q, uE) + maskNoise(vUv);
-      float t = F / uBand;                               // 0..1 across the crumbling border
-      vec2 cell = floor(gl_FragCoord.xy / uCell);
-      float h = hash12(cell);                            // this cell's grain threshold
-      float m = max(t > h ? 1.0 : 0.0, uFill);
-
-      vec3 c1 = texture2D(tImg1, cover(vUv, ${IMG1_ASPECT.toFixed(6)})).rgb;
-      vec3 c2 = texture2D(tImg2, cover(vUv, ${IMG2_ASPECT.toFixed(6)})).rgb;
-
-      // image 1 about to go: its surface loosens into grain, and the broken edge catches the
-      // light where it faces up
-      float zone = smoothstep(-2.5, 0.0, t) * step(t, 0.0);
-      float g2 = hash12(cell + 71.3);
-      c1 *= 1.0 - zone * uSpeckle * (g2 - 0.35);
-      vec2 grad = vec2(dFdx(F), dFdy(F));
-      vec2 n = grad / max(length(grad), 1e-6);          // points into the opening
-      float rim = smoothstep(-1.2, 0.0, t) * step(t, 0.0);
-      c1 *= 1.0 + uEdgeLight * rim * (-n.y);
-
-      // image 1 lies ON image 2, the light comes from above-left. Two shadows: a tight dark
-      // one where the layer's edge meets the picture below, and a wide soft one as if the
-      // layer stood off it - together they give the layer its height
-      float lit = 1.0;
-      {
-        vec2 so = vUv + uShadowOff * vec2(1.0 / uAspect, 1.0);
-        float Fs = seedField(so * vec2(uAspect, 1.0), uE) + maskNoise(so);
-        lit -= uShadow * (1.0 - smoothstep(-uShadowSoft * uBand * 0.5, uShadowSoft * uBand, Fs));
-        vec2 so2 = vUv + uShadowOff * uShadowFar * vec2(1.0 / uAspect, 1.0);
-        float Fs2 = seedField(so2 * vec2(uAspect, 1.0), uE) + maskNoise(so2);
-        lit -= uShadowWide * (1.0 - smoothstep(-2.0 * uBand, uShadowFar * uShadowSoft * uBand, Fs2));
-      }
-      c2 *= max(mix(lit, 1.0, uFill), 0.0);
-
-      // THE WALL: image 1 has a thickness. Under the upper edge of every opening we see the
-      // cut side of the layer - sand, darker than the lit top, striated, crumbling at its
-      // foot - before the picture below begins
-      if (m > 0.5 && uFill < 1.0 && uWall > 0.0) {
-        vec2 wo = vUv + vec2(0.0, uWall);
-        float Fw = seedField(wo * vec2(uAspect, 1.0), uE) + maskNoise(wo);
-        float hw = hash12(cell + 29.1);
-        if (Fw / uBand < hw) {
-          float along = clamp(F / uWall, 0.0, 1.0);        // 0 at the top lip, 1 at the foot
-          vec3 wc = texture2D(tImg1, cover(wo, ${IMG1_ASPECT.toFixed(6)})).rgb;
-          float stri = hash12(vec2(floor(gl_FragCoord.x / uCell), floor(gl_FragCoord.y / (uCell * 4.0))));
-          wc *= mix(uWallShade.y, uWallShade.x, along) * (0.86 + 0.26 * stri);
-          wc *= 1.0 - 0.25 * max(n.x, 0.0);              // faces turned from the light darker
-          c2 = mix(c2, wc, 1.0 - uFill);
-        }
-      }
-
-      vec3 col = mix(c1, c2, m);
-
-      // the heap along the bottom
-      float ph = pileSurface(vUv.x);
-      float grainEdge = (hash12(cell + 13.1) - 0.5) * 0.004;
-      if (uPile > 0.0005 && vUv.y + grainEdge < ph) {
-        float depth = clamp((ph - vUv.y) / max(ph, 1e-4), 0.0, 1.0);
-        vec3 sand = columnColour(vUv.x) * (0.80 + 0.32 * hash12(cell + 5.7));
-        sand *= mix(1.08, 0.72, sqrt(depth));            // lit on top, darker inside
-        float slope = (pileSurface(vUv.x + 0.004) - pileSurface(vUv.x - 0.004)) / 0.008;
-        sand *= 1.0 + 0.8 * slope * (1.0 - depth);        // slopes facing the light (left) lit
-        col = sand;
-      }
-      gl_FragColor = vec4(col, 1.0);
+      float sa = uExt.x / uExt.y, ia = ${IMG2_ASPECT.toFixed(6)};
+      vec2 s = sa > ia ? vec2(1.0, ia / sa) : vec2(sa / ia, 1.0);
+      vec3 c = texture2D(tImg2, (vUv - 0.5) * s + 0.5).rgb;
+      // the folded sheet stands up just ahead of here: its shadow, fading with distance
+      vec2 p = (vUv - 0.5) * 2.0 * uExt;
+      float t = localT(p) - uFoldW;
+      c *= 1.0 - uShadow * (1.0 - smoothstep(0.0, uShadowLen, t));
+      gl_FragColor = vec4(c, 1.0);
     }`,
-});
-pageMat.extensions = { derivatives: true };
-scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), pageMat));
+}));
+under.frustumCulled = false;
+under.renderOrder = -1;
+scene.add(under);
 
-// ---------------------------------------------------------------- the grains ----
-function buildGrains(n) {
-  const pos = new Float32Array(n * 3);
-  const rnd = new Float32Array(n * 4);
-  for (let i = 0; i < n; i++) {
-    pos[i * 3] = Math.random();
-    pos[i * 3 + 1] = Math.random();
-    pos[i * 3 + 2] = Math.random();          // its threshold h, same law as the page's cells
-    for (let k = 0; k < 4; k++) rnd[i * 4 + k] = Math.random();
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('aRand', new THREE.BufferAttribute(rnd, 4));
-  return g;
-}
+// ---- the sheet: image 1, which folds and then tears --------------------------------------
+const sheet = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1, 480, 270),
+  new THREE.ShaderMaterial({
+    uniforms: U,
+    vertexShader: COMMON + /* glsl */`
+      varying vec2 vP; varying vec3 vN; varying float vT;
+      void main() {
+        vec2 p = (uv - 0.5) * 2.0 * uExt * 1.04;
+        float t = localT(p);
+        vec3 pos = vec3(p, 0.0);
+        vec3 n = vec3(0.0, 0.0, 1.0);
+        if (t > 0.0) {
+          float h;
+          pos = sheetPos(p, t, h);
+          n = sheetNormal(p, h);
+        }
+        vP = p; vN = n; vT = t;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      }`,
+    fragmentShader: COMMON + /* glsl */`
+      uniform float uGrainRes, uSpeckle;
+      varying vec2 vP; varying vec3 vN; varying float vT;
+      void main() {
+        vec2 cell = floor(vP * uGrainRes);
+        float g = hash12(cell);
+        float speck = hash12(cell + 17.0);
+        // the sheet goes speckled, then disappears just before the grains fly
+        if (vT > uFoldW + 0.03 - speck * 0.06) discard;
+        // the picture turns to sand texture as it enters the fold band
+        float loose = smoothstep(0.0, uFoldW * 0.5, vT);
+        vec3 base = img1At(vP) * (1.0 + loose * uSpeckle * (g - 0.5));
+        gl_FragColor = vec4(base * relShade(vN), 1.0);
+      }`,
+  }),
+);
+sheet.frustumCulled = false;
+scene.add(sheet);
 
-// v3: three passes share one shader and one set of uniform objects -
-//   layer 0  the grains
-//   layer 1  their shadows on the picture (drawn first, under them)
-//   layer 2  a second, closer curtain of sand in front: bigger, soft (out of focus), faster
-const GRAIN_U = {
-    ...pageMat.uniforms,
-    uGrainShadow: { value: CONFIG.grainShadow },
-    uGrainShadowOff: { value: new THREE.Vector2(...CONFIG.grainShadowOffset) },
-    uFrontSize: { value: new THREE.Vector2(...CONFIG.frontSize) },
-    uFrontSpeed: { value: CONFIG.frontSpeed }, uFrontAlpha: { value: CONFIG.frontAlpha },
-    uS: { value: 0 }, uDur: { value: CONFIG.duration }, uVis: { value: 0 }, uPx: { value: 1 },
-    uHpx: { value: 900 }, uG: { value: CONFIG.gravity }, uVt: { value: CONFIG.terminal },
-    uSize: { value: new THREE.Vector2(...CONFIG.grainSize) }, uClump: { value: CONFIG.clump },
-    uSpread: { value: CONFIG.spread }, uScatter: { value: CONFIG.scatter }, uBlur: { value: CONFIG.blur },
-    uShade: { value: new THREE.Vector2(...CONFIG.shade) }, uDark: { value: CONFIG.darkSpecks },
-    uGlints: { value: CONFIG.glints }, uMaxLife: { value: CONFIG.maxLife },
-    uPileOn: { value: CONFIG.pileHeight > 0 ? 1 : 0 }, uPileK: { value: 0 },
-};
-const grainMaterial = (layer) => new THREE.ShaderMaterial({
-  transparent: true, depthTest: false, depthWrite: false,
-  uniforms: { ...GRAIN_U, uLayer: { value: layer } },
-  vertexShader: /* glsl */`
-    precision highp float;
-    ${FIELD_GLSL}
-    uniform float uS, uDur, uVis, uPx, uHpx, uG, uVt, uClump, uSpread, uScatter, uBlur;
-    uniform float uDark, uGlints, uMaxLife, uPileOn, uPileK;
-    uniform float uLayer, uGrainShadow, uFrontSpeed, uFrontAlpha;
-    uniform vec2 uSize, uShade, uGrainShadowOff, uFrontSize;
-    attribute vec4 aRand;
-    varying vec3 vCol;
-    varying float vAlpha;
-    varying float vStretch;
-    varying float vGlint;
+// ---- grains: ride the sheet, then get released and blown away ------------------------------
+const grainMat = new THREE.ShaderMaterial({
+  uniforms: U, transparent: true, depthWrite: false,
+  blending: THREE.CustomBlending,
+  blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+  blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+  vertexShader: COMMON + /* glsl */`
+    uniform float uSize, uDpr, uAgeK, uCamDist;
+    varying vec3 vCol; varying float vAlpha;
     void hide() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; vAlpha = 0.0; }
     void main() {
-      vec2 home = position.xy;
-      vec2 q = home * vec2(uAspect, 1.0);
-      // when does F reach this grain's threshold? each seed's term is linear in e, so the
-      // earliest e over the seeds is the answer - exact, no search
-      float target = position.z * uBand - maskNoise(home) + uB;
-      float eRel = 1e9;
-      for (int i = 0; i < ${MAX_SEEDS}; i++) {
-        if (i >= uSeedCount) break;
-        eRel = min(eRel, (target + length(q - uSeeds[i].xy)) / uSeeds[i].z);
+      vec2 p = (position.xy - 0.5) * 2.0 * uExt * 1.04;
+      float r = position.z;
+      float t = localT(p);
+      // untouched: the flat picture needs no grains on top of it
+      if (t <= 0.0) { hide(); return; }
+      vec3 n = vec3(0.0, 0.0, 1.0);
+      float h;
+      vec3 pos = sheetPos(p, t, h);
+      float rel = uFoldW + (r - 0.5) * 0.05;
+      float a = max(t - rel, 0.0) * uAgeK;
+      if (a <= 0.0) {
+        n = sheetNormal(p, h);
+      } else {
+        vec2 perp = vec2(-uDir.y, uDir.x);
+        vec2 wind = normalize(-uDir + perp * 0.25);
+        vec2 jit = vec2(snoise(p * 6.0 + r * 10.0), snoise(p * 6.0 + 31.0 + r * 10.0));
+        pos.xy += wind * (a * 0.15 + a * a * 0.35) + jit * a * 0.06;
+        pos.z += a * 0.12 + a * a * 0.1;
       }
-      if (eRel > 1.0 || uVis <= 0.0) { hide(); return; }
-      eRel = max(eRel, 0.0);
-      float pRel = acos(1.0 - 2.0 * eRel) / 3.14159265;   // undo the sine ease
-      float tau = (uS - pRel) * uDur;                       // seconds since it came loose
-      if (tau < 0.0 || tau > uMaxLife) { hide(); return; }
-
-      // its clump: neighbours that came off together share their push
-      vec2 cq = floor(q / uClump);
-      float c1 = hash12(cq), c2 = hash12(cq + 17.31), c3 = hash12(cq + 41.7);
-      bool front = uLayer > 1.5;
-      float size = front ? mix(uFrontSize.x, uFrontSize.y, pow(aRand.w, 1.6))
-                         : mix(uSize.x, uSize.y, pow(aRand.w, 2.2));
-      float sizeK = front ? aRand.w : (size - uSize.x) / max(uSize.y - uSize.x, 1e-3);
-
-      // the fall, with air drag: speed approaches this grain's terminal speed
-      float vt = uVt * mix(0.75, 1.25, 0.5 * sizeK + 0.5 * mix(c1, aRand.y, 0.5));
-      if (front) vt *= uFrontSpeed;             // nearer the eye, so it crosses the screen faster
-      float kk = vt / uG;                                   // time constant of the drag
-      float ex = exp(-tau / kk);
-      float v0 = mix(-0.05, 0.03, mix(c2, aRand.y, 0.35)); // negative: a small hop up first
-      float dist = vt * (tau - kk * (1.0 - ex)) + v0 * kk * (1.0 - ex);
-      float vel = vt * (1.0 - ex) + v0 * ex;
-      // sideways: the clump's push, damped by the air, plus the clump coming apart
-      float vx = ((c3 - 0.5) * 0.7 + (aRand.z - 0.5) * 0.3) * uSpread * (front ? 2.5 : 1.0);
-      float xOff = vx * kk * (1.0 - ex) + (aRand.z - 0.5) * uScatter * min(tau, 1.0);
-      vec2 p = home + vec2(xOff / uAspect, -dist);
-
-      // the heap: a grain that reaches the surface rests in it, somewhere below the top
-      bool landed = false;
-      float alpha = uVis;
-      if (uPileOn > 0.5 && !front) {           // the front curtain falls past the heap, out of frame
-        float ys = pileSurface(p.x) * mix(0.2, 1.0, sqrt(aRand.x));
-        if (p.y <= ys) { p.y = ys; landed = true; vel = 0.0; alpha *= smoothstep(0.0, 0.35, uPileK); }
-      }
-      float px = size * uPx;
-      if (uLayer > 0.5 && uLayer < 1.5) {       // the shadow pass: only grains in the air cast one
-        if (landed) { hide(); return; }
-        p += uGrainShadowOff * vec2(1.0 / uAspect, 1.0);
-        alpha *= uGrainShadow;
-        px *= 1.5;
-      }
-      if (front) alpha *= uFrontAlpha;
-      if (p.y < -0.05 || alpha <= 0.0) { hide(); return; }
-
-      // motion blur: stretched along the fall by one frame's travel
-      float streak = vel * uHpx / 60.0 * uBlur;
-      vStretch = 1.0 + min(streak / px, 5.0);
-      gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
-      gl_PointSize = px * vStretch;
-
-      vec3 col = texture2D(tImg1, cover(home, ${IMG1_ASPECT.toFixed(6)})).rgb;
-      col *= mix(uShade.x, uShade.y, aRand.y);
-      if (fract(aRand.x * 7.13) < uDark) col *= 0.55;       // the odd dark grain
-      vCol = col;
-      // tumbling: a glinting grain flashes as a facet turns to the light
-      float tumble = pow(max(sin(tau * (14.0 + 10.0 * aRand.z) + aRand.w * 40.0), 0.0), 24.0);
-      vGlint = (landed || uLayer > 0.5) ? 0.0 : tumble * step(1.0 - uGlints, fract(aRand.y * 13.7)) * 0.6;
-      vAlpha = alpha;
+      vAlpha = 1.0 - smoothstep(0.25, 0.9, a + r * 0.25);
+      // riding the sheet they fade in with the sand texture, so the picture does not dim
+      vAlpha *= smoothstep(0.0, uFoldW * 0.5, t);
+      if (vAlpha <= 0.001) { hide(); return; }
+      vec3 base = img1At(p) * (0.9 + 0.2 * fract(r * 13.1));
+      float sh = a > 0.0 ? 0.95 : relShade(n);
+      vCol = base * sh;
+      vec4 mv = modelViewMatrix * vec4(pos + vec3(0.0, 0.0, 0.0015), 1.0);
+      gl_Position = projectionMatrix * mv;
+      gl_PointSize = uSize * uDpr * (0.7 + 0.6 * fract(r * 7.3)) * (uCamDist / -mv.z);
     }`,
   fragmentShader: /* glsl */`
-    precision highp float;
-    varying vec3 vCol;
-    varying float vAlpha;
-    varying float vStretch;
-    varying float vGlint;
-    uniform float uLayer;
-    void main() {
-      vec2 d = gl_PointCoord * 2.0 - 1.0;
-      d.x *= vStretch;                          // the grain is 1/stretch as wide as it is long
-      float r = length(d);
-      if (r > 1.0) discard;
-      // a tiny sphere, lit from above-left
-      vec3 n = vec3(d.x, -d.y / vStretch, sqrt(max(1.0 - r * r, 0.0)));
-      float diff = 0.45 + 0.75 * max(dot(normalize(n), normalize(vec3(-0.45, 0.7, 0.6))), 0.0);
-      vec3 col = vCol * diff + vGlint;
-      float a = vAlpha * mix(1.0, 0.55, (vStretch - 1.0) / 5.0);
-      if (uLayer > 0.5 && uLayer < 1.5) {        // shadow: a soft dark smudge
-        gl_FragColor = vec4(0.0, 0.0, 0.0, a * smoothstep(1.0, 0.1, r));
-        return;
-      }
-      if (uLayer > 1.5) {                        // front curtain: out of focus, so soft-edged
-        gl_FragColor = vec4(vCol * mix(1.0, diff, 0.5), a * smoothstep(1.0, 0.25, r));
-        return;
-      }
-      gl_FragColor = vec4(col, a * smoothstep(1.0, 0.65, r));
-    }`,
+    varying vec3 vCol; varying float vAlpha;
+    void main() { gl_FragColor = vec4(vCol * vAlpha, vAlpha); }`,
 });
-const grainMat = grainMaterial(0);
-const grainGeo = buildGrains(CONFIG.grains);
-// the shadows: the same grains (the same attribute buffers), a share of them, drawn first
-const shadowGeo = new THREE.BufferGeometry();
-shadowGeo.setAttribute('position', grainGeo.getAttribute('position'));
-shadowGeo.setAttribute('aRand', grainGeo.getAttribute('aRand'));
-shadowGeo.setDrawRange(0, Math.round(CONFIG.grains * CONFIG.grainShadowShare));
-const layers = [
-  new THREE.Points(shadowGeo, grainMaterial(1)),
-  new THREE.Points(grainGeo, grainMat),
-  new THREE.Points(buildGrains(CONFIG.frontGrains), grainMaterial(2)),
-];
-layers.forEach((l, i) => { l.frustumCulled = false; l.visible = false; l.renderOrder = i + 1; scene.add(l); });
-if (!(CONFIG.grainShadow > 0)) layers[0].removeFromParent();
-if (!(CONFIG.frontGrains > 0)) layers[2].removeFromParent();
-
-// ---------------------------------------------------------------- the seeds ----
-// Openings in screen space (0..1), kept apart so they start at different places. Each gets
-// its own growth rate, then all rates are scaled together so that at the end the openings
-// have just covered the whole screen, ragged border included.
-let seedUv = [];
-function placeSeeds() {
-  seedUv = [];
-  const n = Math.min(MAX_SEEDS, Math.max(1, Math.round(CONFIG.seeds)));
-  const aspect = innerWidth / innerHeight;
-  for (let tries = 0; seedUv.length < n && tries < 4000; tries++) {
-    const s = { x: 0.06 + Math.random() * 0.88, y: 0.08 + Math.random() * 0.84,
-                r: 1 + (Math.random() * 2 - 1) * CONFIG.seedSizeVar };
-    const ok = seedUv.every(o => Math.hypot((o.x - s.x) * aspect, o.y - s.y) >
-                                 CONFIG.seedMinDist * (tries < 3000 ? 1 : 0.5));
-    if (ok) seedUv.push(s);
-  }
-  uploadSeeds();
-  pageMat.uniforms.uNoiseOff.value.set(Math.random(), Math.random());
+{
+  const n = Math.round(CONFIG.grains);
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < arr.length; i++) arr[i] = Math.random();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  const grains = new THREE.Points(g, grainMat);
+  grains.frustumCulled = false;
+  grains.renderOrder = 1;
+  scene.add(grains);
 }
-function uploadSeeds() {
-  const aspect = innerWidth / innerHeight;
-  // how far the openings must reach: the farthest point from them, weighted by their rates
-  let need = 0;
-  for (let gy = 0; gy <= 40; gy++) for (let gx = 0; gx <= 40; gx++) {
-    const x = gx / 40 * aspect, y = gy / 40;
-    let best = 1e9;
-    for (const s of seedUv) best = Math.min(best, Math.hypot(x - s.x * aspect, y - s.y) / s.r);
-    need = Math.max(need, best);
-  }
-  const A = CONFIG.maskAmount;
-  const u = pageMat.uniforms;
-  u.uB.value = 0.6 * A;              // below zero at e = 0 however the noise falls
-  seedUv.forEach((s, i) => u.uSeeds.value[i].set(s.x * aspect, s.y, s.r * need * 1.04 + 1.2 * A + CONFIG.band));
-  u.uSeedCount.value = seedUv.length;
-  u.uAspect.value = aspect;
-}
-
-// ---------------------------------------------------------------- the clock ----
-// s runs 0 -> 1 over the duration and on past 1 while the last grains land and the heap
-// drains; p = min(s, 1)
-let s = 0;
-let dir = 0;                 // +1 opening, -1 closing, 0 still
-const hint = document.getElementById('hint');
-function forward() {
-  if (dir === 1) return;
-  if (s <= 0) placeSeeds();  // a fresh set of openings each time it starts from image 1
-  s = Math.min(s, 1);
-  dir = 1;
-  if (hint) hint.classList.add('off');
-}
-function backward() {
-  if (dir === -1 || s <= 0) return;
-  s = Math.min(s, 1);
-  dir = -1;
-}
-
-addEventListener('wheel', e => { if (e.deltaY > 2) forward(); else if (e.deltaY < -2) backward(); }, { passive: true });
-let touchY = null;
-addEventListener('touchstart', e => { touchY = e.touches[0].clientY; }, { passive: true });
-addEventListener('touchmove', e => {
-  if (touchY === null) return;
-  const dy = touchY - e.touches[0].clientY;
-  if (dy > 20) { forward(); touchY = null; } else if (dy < -20) { backward(); touchY = null; }
-}, { passive: true });
-addEventListener('keydown', e => {
-  if (['ArrowDown', 'PageDown', ' ', 'End'].includes(e.key)) forward();
-  if (['ArrowUp', 'PageUp', 'Home'].includes(e.key)) backward();
-});
 
 function resize() {
-  renderer.setSize(innerWidth, innerHeight);
-  const dpr = renderer.getPixelRatio();
-  pageMat.uniforms.uCell.value = CONFIG.grainPx * dpr;
-  grainMat.uniforms.uPx.value = dpr;
-  grainMat.uniforms.uHpx.value = innerHeight * dpr;
-  if (seedUv.length) uploadSeeds(); else pageMat.uniforms.uAspect.value = innerWidth / innerHeight;
+  const w = innerWidth, h = innerHeight;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  renderer.setPixelRatio(dpr);
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  U.uExt.value.set(0.5 * w / h, 0.5);
+  U.uDpr.value = dpr;
+  U.uGrainRes.value = h / 1.4;
 }
 addEventListener('resize', resize);
 resize();
 
-window.transitionControl = { forward, backward, get progress() { return Math.min(s, 1); } };
+// ---------------------------------------------------------------- the timeline ----
+// p runs 0..1; scroll down plays towards 1, scroll up back towards 0
+let p = 0;
+let dir = 0;
+const hint = document.getElementById('hint');
+function forward() { dir = 1; if (hint) hint.classList.add('off'); }
+function backward() { if (p > 0) dir = -1; }
 
-// the heap's timeline, in seconds from the start: it fills while the sand rains down, and
-// drains once the last grains (released at the end of the opening) have had time to land
-const D = CONFIG.duration;
-const fallTime = 1.0 / CONFIG.terminal + 0.4;          // top of the screen to the floor, roughly
-const drainStart = D + fallTime;
-const drainEnd = drainStart + CONFIG.pileDrain;
-const tailEnd = CONFIG.pileHeight > 0 ? drainEnd / D + 0.05 : 1 + (fallTime + 0.5) / D;
+function frontFromProgress(q) {
+  let e = Math.min(Math.max(q, 0), 1);
+  e = 0.5 * e + 0.5 * e * e * (3 - 2 * e);
+  const fw = U.uFoldW.value, en = U.uEdgeN.value, ak = U.uAgeK.value;
+  const fStart = -0.75 * en - 0.02;
+  const fEnd = 1 + fw + 0.1 + 0.75 * en + 1.6 / ak;
+  return fStart + (fEnd - fStart) * e;
+}
+
+addEventListener('wheel', (e) => { if (e.deltaY > 2) forward(); else if (e.deltaY < -2) backward(); }, { passive: true });
+let touchY = null;
+addEventListener('touchstart', (e) => { touchY = e.touches[0].clientY; }, { passive: true });
+addEventListener('touchmove', (e) => {
+  if (touchY === null) return;
+  const dy = touchY - e.touches[0].clientY;
+  if (dy > 20) { forward(); touchY = null; } else if (dy < -20) { backward(); touchY = null; }
+}, { passive: true });
+addEventListener('keydown', (e) => {
+  if (['ArrowDown', 'PageDown', ' ', 'End'].includes(e.key)) forward();
+  if (['ArrowUp', 'PageUp', 'Home'].includes(e.key)) backward();
+});
+
+window.transitionControl = { forward, backward, get progress() { return p; } };
 
 let last = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now();
-  const dt = Math.min(0.05, (now - last) / 1000);
+  const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
-  if (dir === 1) {
-    s = Math.min(s + dt / D, tailEnd);
-  } else if (dir === -1) {
-    s -= dt / CONFIG.reverseDuration;
-    if (s <= 0) { s = 0; dir = 0; if (hint) hint.classList.remove('off'); }
+  if (dir !== 0) {
+    p += dir * dt / CONFIG.duration;
+    if (p >= 1) { p = 1; dir = 0; }
+    if (p <= 0) { p = 0; dir = 0; if (hint) hint.classList.remove('off'); }
   }
-  const p = Math.min(s, 1);
-  const e = 0.5 - 0.5 * Math.cos(Math.PI * p);
-  const u = pageMat.uniforms;
-  u.uE.value = e;
-  u.uFill.value = THREE.MathUtils.smoothstep(p, 0.985, 1.0);
-  const gu = grainMat.uniforms;
-  gu.uS.value = s;
-  gu.uVis.value = THREE.MathUtils.clamp(gu.uVis.value + (dir === 1 ? dt / 0.25 : -dt / 0.2), 0, 1);
-
-  const T = s * D;
-  const fill = THREE.MathUtils.smoothstep(T, 0.4, D + 0.6 * fallTime);
-  const drain = 1 - THREE.MathUtils.smoothstep(T, drainStart, drainEnd);
-  const k = fill * drain * gu.uVis.value;
-  u.uPile.value = CONFIG.pileHeight * k;
-  gu.uPileK.value = k;
-
-  const on = gu.uVis.value > 0 && s > 0 && s < tailEnd;
-  layers.forEach((l) => { l.visible = on; });
+  U.uF.value = frontFromProgress(p);
   renderer.render(scene, camera);
 });
