@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transition 2 — sand clip mask</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; background: #111; }
+    canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; }
+    video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    #hint { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 2;
+      font: 400 11px/1 Arial, sans-serif; letter-spacing: .25em; text-transform: uppercase;
+      color: rgba(0,0,0,.45); pointer-events: none; transition: opacity .6s; }
+    #hint.off { opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="hint">scroll ↓</div>
+  <!-- the mask: the sand clip forwards, and backwards for scrolling back up -->
+  <video id="fwd" src="./assets/mask.mp4" muted playsinline preload="auto"></video>
+  <video id="rev" src="./assets/mask-rev.mp4" muted playsinline preload="none"></video>
+  <script type="importmap">{"imports":{"three":"./assets/three.module.js"}}</script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
