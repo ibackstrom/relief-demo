@@ -1,20 +1,10 @@
-// TRANSITION 3 — image 1 is a sheet of sand that lifts, folds and blows away; image 2 is under it.
+// TRANSITION 3 — transition2's sand, in high resolution.
 //
-// The mask is the sand clip's own ALPHA (the 4K ProRes master has a real one), packed with the
-// sand's fold relief into one greyscale video by tools/make_mask.py:
-//   top    COVERAGE - how much sand is here. Area-averaged from 4K and smoothed across
-//          neighbouring frames, so the grain reads as sand density and does not flicker.
-//   bottom FOLDS    - the sand's brightness against its first frame, 0.5 = unchanged.
-//
-// On the page:
-//  - image 1 is SHADED by the folds and BENT by them - the picture lifts and creases with the
-//    sand instead of being cut out of it
-//  - where the sheet breaks up, image 1 goes to grains: the clip's own sand grains, which move
-//    with the sand. (transition2 dithered on a fixed screen pattern the sand slid across - that
-//    was the jiggle.)
-//  - the broken edge catches a soft warm light
-//  - image 2 lies in the sheet's shadow and settles in from a slight zoom as it is uncovered
-//  - speed 2 by default: the 8.8 s clip plays in 4.4 s. Scroll down plays it, up plays it back.
+// The mask is the sand clip's own ALPHA and nothing else: 1920 x 1080, area-scaled from the
+// 4K ProRes master, one greyscale video (tools/make_mask.py). Where there is sand, image 1;
+// where the sand has blown away, image 2. The grains are the clip's own grains - sharp, and
+// moving with the sand - with no shading, folds or light on top: just the sand.
+// Scroll down plays it at speed 2, scroll up plays it back.
 
 import * as THREE from 'three';
 
@@ -22,17 +12,11 @@ const PARAMS = new URLSearchParams(location.search);
 const num = (k, d) => (PARAMS.has(k) && isFinite(+PARAMS.get(k)) ? +PARAMS.get(k) : d);
 
 const CONFIG = {
-  speed: num('speed', 2.0),      // playback rate (2 = the 8.8 s clip in 4.4 s)
-  cover: [0.06, 0.50],           // coverage from which image 1 starts to show, and is solid
-  fold: 0.0,                     // how strongly the folds shade image 1 (0.85 before - the client
-                                 //   wanted just the sand, not the wave/caustic look)
-  foldRange: [0.45, 1.6],        // the most the folds may darken / lighten it
-  warp: 0.0,                     // how far the folds bend image 1 (0.010 before)
-  rim: 0.0,                      // warm light on the breaking edge (0.22 before)
-  rimColor: [1.0, 0.93, 0.84],
-  shadow: 0.42,                  // image 2 in the sheet's shadow
-  shadowOffset: [7, -10],        // in mask pixels (1280 wide): down and to the right
-  zoom: 0.06,                    // image 2 settles from this much larger to its place
+  speed: num('speed', 2.0),      // playback rate (2 = the 6.4 s clip in 3.2 s)
+  cover: [0.30, 0.62],           // alpha where image 1 starts to show, and where it is solid.
+                                 //   A narrow step keeps each grain crisp instead of a soft blur
+  shadow: 0.35,                  // image 2 in the sheet's shadow, as transition2
+  shadowOffset: [9, -12],        // in mask pixels (1920 wide): down and to the right
   endFade: [0.93, 1.0],          // over this last part the mask fades to clean image 2
 };
 
@@ -56,8 +40,8 @@ const tImg1 = raw(loader.load('./assets/img1.jpg'));
 const tImg2 = raw(loader.load('./assets/img2.jpg'));
 const IMG1_ASPECT = 1512 / 900;
 const IMG2_ASPECT = 2560 / 1663;
-const MASK_ASPECT = 1280 / 720;
-const MASK_W = 1280, MASK_H = 720;
+const MASK_ASPECT = 1920 / 1080;
+const MASK_W = 1920, MASK_H = 1080;
 
 const fwd = document.getElementById('fwd');
 const rev = document.getElementById('rev');
@@ -69,13 +53,9 @@ const U = {
   tImg1: { value: tImg1 }, tImg2: { value: tImg2 }, tMask: { value: tFwd },
   uAspect: { value: 1 },
   uCover: { value: new THREE.Vector2(...CONFIG.cover) },
-  uFold: { value: CONFIG.fold }, uFoldRange: { value: new THREE.Vector2(...CONFIG.foldRange) },
-  uWarp: { value: CONFIG.warp },
-  uRim: { value: CONFIG.rim }, uRimColor: { value: new THREE.Vector3(...CONFIG.rimColor) },
   uShadow: { value: CONFIG.shadow },
   uShadowOff: { value: new THREE.Vector2(CONFIG.shadowOffset[0] / MASK_W, CONFIG.shadowOffset[1] / MASK_H) },
-  uZoom: { value: CONFIG.zoom },
-  uPos: { value: 0 }, uOn: { value: 0 }, uEnd: { value: 0 },
+  uOn: { value: 0 }, uEnd: { value: 0 },
 };
 scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
   uniforms: U, depthTest: false, depthWrite: false,
@@ -85,56 +65,30 @@ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial
   fragmentShader: /* glsl */`
     precision highp float;
     uniform sampler2D tImg1, tImg2, tMask;
-    uniform float uAspect, uFold, uWarp, uRim, uShadow, uZoom, uPos, uOn, uEnd;
-    uniform vec2 uCover, uFoldRange, uShadowOff;
-    uniform vec3 uRimColor;
+    uniform float uAspect, uShadow, uOn, uEnd;
+    uniform vec2 uCover, uShadowOff;
     varying vec2 vUv;
 
     vec2 cover(vec2 uv, float ia) {
       vec2 s = uAspect > ia ? vec2(1.0, ia / uAspect) : vec2(uAspect / ia, 1.0);
       return (uv - 0.5) * s + 0.5;
     }
-    // The packed frame (1280 x 1080, texture v runs bottom-up): coverage fills the top 720
-    // rows, the folds the left half of the bottom 360. Each is read inside its own region,
-    // half a texel in from its edges, so linear filtering never mixes the two.
-    float coverageAt(vec2 m) {
-      m = clamp(m, vec2(0.5 / 1280.0, 0.5 / 720.0), vec2(1.0 - 0.5 / 1280.0, 1.0 - 0.5 / 720.0));
-      return texture2D(tMask, vec2(m.x, (360.0 + m.y * 720.0) / 1080.0)).r;
-    }
-    float foldAt(vec2 m) {
-      m = clamp(m, vec2(0.5 / 640.0, 0.5 / 360.0), vec2(1.0 - 0.5 / 640.0, 1.0 - 0.5 / 360.0));
-      return texture2D(tMask, vec2(m.x * 0.5, m.y * 360.0 / 1080.0)).r * 2.0;   // 1 = unchanged
-    }
+    float sandAt(vec2 m) { return texture2D(tMask, clamp(m, 0.0, 1.0)).r; }
 
     void main() {
       vec2 m = cover(vUv, ${MASK_ASPECT.toFixed(6)});
       float live = uOn * (1.0 - uEnd);
+      // where the sand is, image 1 - a narrow step, so every grain has an edge
+      float k = mix(1.0, smoothstep(uCover.x, uCover.y, sandAt(m)) * (1.0 - uEnd), uOn);
 
-      // ---- the folds: shade and bend image 1 ----
-      float S = foldAt(m);
-      vec2 e = vec2(1.5 / 640.0, 1.5 / 360.0);
-      vec2 grad = vec2(foldAt(m + vec2(e.x, 0.0)) - foldAt(m - vec2(e.x, 0.0)),
-                       foldAt(m + vec2(0.0, e.y)) - foldAt(m - vec2(0.0, e.y)));
-      vec2 uv1 = vUv - grad * uWarp * live;
-      float shade = mix(1.0, clamp(S, uFoldRange.x, uFoldRange.y), uFold * live);
-      vec3 c1 = texture2D(tImg1, cover(uv1, ${IMG1_ASPECT.toFixed(6)})).rgb * shade;
-
-      // ---- coverage: where the sheet still is ----
-      float A = coverageAt(m);
-      float k = mix(1.0, smoothstep(uCover.x, uCover.y, A) * (1.0 - uEnd), uOn);
-      // the breaking edge - thin sand, part covered - catches a warm light
-      float edge = smoothstep(0.02, uCover.y, A) * (1.0 - smoothstep(uCover.y, 0.95, A));
-      c1 += uRimColor * (uRim * edge * live);
-
-      // ---- image 2: in the sheet's shadow, settling in from a slight zoom ----
+      vec3 c1 = texture2D(tImg1, cover(vUv, ${IMG1_ASPECT.toFixed(6)})).rgb;
+      vec3 c2 = texture2D(tImg2, cover(vUv, ${IMG2_ASPECT.toFixed(6)})).rgb;
+      // image 2 in the sheet's shadow, cast down and to the right, softened over a few taps
       vec2 so = m - uShadowOff;
-      float cs = 0.2 * (coverageAt(so) + coverageAt(so + uShadowOff * 0.5)
-                      + coverageAt(so - uShadowOff * 0.5)
-                      + coverageAt(so + vec2(uShadowOff.y, uShadowOff.x) * 0.6)
-                      + coverageAt(so - vec2(uShadowOff.y, uShadowOff.x) * 0.6));
-      float z = 1.0 + uZoom * (1.0 - smoothstep(0.0, 1.0, uPos));
-      vec3 c2 = texture2D(tImg2, cover((vUv - 0.5) / z + 0.5, ${IMG2_ASPECT.toFixed(6)})).rgb;
-      c2 *= 1.0 - uShadow * smoothstep(0.0, 0.8, cs) * live;
+      vec2 sp = vec2(uShadowOff.y, -uShadowOff.x) * 0.6;
+      float cs = 0.2 * (sandAt(so) + sandAt(so + uShadowOff * 0.5) + sandAt(so - uShadowOff * 0.5)
+                      + sandAt(so + sp) + sandAt(so - sp));
+      c2 *= 1.0 - uShadow * cs * live;
 
       gl_FragColor = vec4(mix(c2, c1, k), 1.0);
     }`,
@@ -160,7 +114,7 @@ const hint = document.getElementById('hint');
 fwd.playbackRate = rev.playbackRate = CONFIG.speed;
 fwd.defaultPlaybackRate = rev.defaultPlaybackRate = CONFIG.speed;
 
-const dur = (v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 8.8);
+const dur = (v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 6.36);
 const posOf = (v) => (v === fwd ? v.currentTime / dur(v) : 1 - v.currentTime / dur(v));
 
 // run fn once the video has put its current frame on screen (and so on the texture); a
@@ -227,7 +181,6 @@ renderer.setAnimationLoop(() => {
   // the mask is on once the clip has shown a frame past its start; before that (and back at
   // the start after scrolling up) the page is image 1 exactly
   U.uOn.value = pos > 0.0005 ? 1 : 0;
-  U.uPos.value = pos;
   U.uEnd.value = THREE.MathUtils.smoothstep(pos, CONFIG.endFade[0], CONFIG.endFade[1]);
   renderer.render(scene, camera);
 });
