@@ -162,14 +162,17 @@ const CONFIG = {
   // The splash's WIDTH as a multiple of the title's - the reference's is about 5.3. The cloud
   // is sized from the title, not from the window: sized in window heights it grew with every
   // taller screen while the 16px title did not, and on a large monitor it was 9 titles wide.
-  burstSpan: 4.35,          // measured: 4.35 here gives 5.0 titles on screen (not all of the engine scales with it)
+  burstSpan: 3.8,           // measured: the WHOLE visible splash (99.5% of the ink) comes to ~5.3 titles,
+                            //   the reference; its dense body ~3 titles
   burstRays: 38,            // how many rays shoot out of the core
   burstRayShare: 0.40,      // share of the seats thrown along a ray rather than into the core
-  burstRayLength: [0.55, 2.3], // how far a ray reaches, in core radii (short ones are common)
+  burstRayLength: [0.5, 1.45], // how far a ray reaches, in core radii (short ones are common).
+                            //   Was 2.3 at most: the long ones drew a faint wide fringe
   burstRayWidth: [0.02, 0.09], // angular width of a ray, radians - narrow, so they read as spikes
   burstFlatten: 0.50,       // how strongly the rays gather toward the horizontal: 1 = evenly
                             //   round, lower = more of them sideways
-  burstSpeckle: 0.06,       // share of ray seats flung past the tip as loose droplets
+  burstSpeckle: 0.015,      // share of ray seats flung past the tip as loose droplets (0.06 read as noise)
+  burstCoreCut: 1.8,        // the core's Gaussian stops at this many sigma - no thin halo past the body
   // A third of what it was. Note that particleSize came down by the same third rather than
   // staying put, and that pairing is what keeps the look identical instead of merely smaller:
   // shrinking the mass alone cuts its area to a ninth and makes the same population nine
@@ -3432,7 +3435,7 @@ function buildParticles(count) {
       } else {
         // the core: a Gaussian with slow irregular lobes, so it has no circle for the eye
         ang = Math.random() * Math.PI * 2;
-        rad = Math.abs(gauss1()) * R * CONFIG.cornerBias
+        rad = Math.min(Math.abs(gauss1()), CONFIG.burstCoreCut) * R * CONFIG.cornerBias
             * (1 + 0.22 * Math.sin(3 * ang + 0.7) + 0.14 * Math.sin(5 * ang + 2.3));
       }
       seat.x = Math.cos(ang) * rad * CONFIG.burstAspectX;
@@ -3778,7 +3781,8 @@ function buildParticles(count) {
     lives[i] = Math.random() < CONFIG.lifeFraction ? 1 : 0;
     outward[i] = isCorner ? 1 : 0;
 
-    const travels = Math.random() < CONFIG.floatingParticles;
+    // BURST: none - flying out past the body they read as noise round the splash
+    const travels = !CONFIG.burst && Math.random() < CONFIG.floatingParticles;
     driftSpeed[i] = travels ? CONFIG.floatingSpeed * (0.6 + Math.random() * 0.8) : 0.0;
 
     // jitter the travel direction per mote so the risers fan instead of moving as a sheet
