@@ -162,8 +162,8 @@ const CONFIG = {
   // The splash's WIDTH as a multiple of the title's - the reference's is about 5.3. The cloud
   // is sized from the title, not from the window: sized in window heights it grew with every
   // taller screen while the 16px title did not, and on a large monitor it was 9 titles wide.
-  burstSpan: 3.8,           // measured: the WHOLE visible splash (99.5% of the ink) comes to ~5.3 titles,
-                            //   the reference; its dense body ~3 titles
+  burstSpan: 3.0,           // 3.8 measured 5.3 titles for the whole visible splash (the reference);
+                            //   3.0 is ~4.2, the client found 3.8 too big. The panel's SIZE bar
   burstRays: 38,            // how many rays shoot out of the core
   burstRayShare: 0.40,      // share of the seats thrown along a ray rather than into the core
   burstRayLength: [0.5, 1.45], // how far a ray reaches, in core radii (short ones are common).
@@ -5033,7 +5033,8 @@ tick();
 // why it is a bar and not a live drag: the seats are re-thrown and the buffers re-made.
 const uiEl = document.getElementById('pui');
 // Hidden unless ?ui=1. It is a tuning rail, not part of the piece.
-if (uiEl && PARAMS.get('ui') !== '1') {
+// BookNow: the panel is ON by default - it is how the spread is being chosen. ?ui=0 removes it.
+if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
   // Colour. Every particle carries the same colour now — the tone in the picture is how many
@@ -5064,16 +5065,41 @@ if (uiEl && PARAMS.get('ui') !== '1') {
   // corner's own side, so x runs right and y runs up. Both are group transforms: place()
   // re-runs and nothing is re-thrown, so they drag live at any population, and each prints
   // the value to paste into CONFIG once it is settled.
+  // The SPREAD. Size is the group's scale, so it drags live; the rest are cut into the seats
+  // and re-throw the population when the bar is released.
   const ROWS = [
-    { key: 'offsetX', name: 'offset x', cst: 'CONFIG.offsetX',
-      min: -0.5, max: 1.0, step: 0.005, value: CONFIG.offsetX,
-      place: true, text: () => CONFIG.offsetX.toFixed(3) },
-    { key: 'offsetY', name: 'offset y', cst: 'CONFIG.offsetY',
-      min: -0.5, max: 1.0, step: 0.005, value: CONFIG.offsetY,
-      place: true, text: () => CONFIG.offsetY.toFixed(3) },
+    { key: 'burstSpan', name: 'size', cst: 'CONFIG.burstSpan',
+      min: 1.2, max: 5, step: 0.05, value: CONFIG.burstSpan,
+      place: true, settle: true, text: () => CONFIG.burstSpan.toFixed(2) },
+    { key: 'burstAspectX', name: 'width stretch', cst: 'CONFIG.burstAspectX',
+      min: 0.6, max: 3, step: 0.05, value: CONFIG.burstAspectX,
+      rebuild: true, text: () => CONFIG.burstAspectX.toFixed(2) },
+    { key: 'burstAspectY', name: 'height stretch', cst: 'CONFIG.burstAspectY',
+      min: 0.4, max: 2, step: 0.05, value: CONFIG.burstAspectY,
+      rebuild: true, text: () => CONFIG.burstAspectY.toFixed(2) },
+    { key: 'burstRayShare', name: 'spikes (share)', cst: 'CONFIG.burstRayShare',
+      min: 0, max: 0.8, step: 0.01, value: CONFIG.burstRayShare,
+      rebuild: true, text: () => CONFIG.burstRayShare.toFixed(2) },
+    { key: 'burstRays', name: 'spikes (count)', cst: 'CONFIG.burstRays',
+      min: 4, max: 90, step: 1, value: CONFIG.burstRays,
+      rebuild: true, round: true, text: () => String(CONFIG.burstRays) },
+    { key: 'burstRayLen', name: 'spike length', cst: 'CONFIG.burstRayLength[1]',
+      min: 0.6, max: 2.5, step: 0.05, value: CONFIG.burstRayLength[1],
+      rebuild: true, apply: (v) => { CONFIG.burstRayLength[1] = v; },
+      text: () => CONFIG.burstRayLength[1].toFixed(2) },
+    { key: 'burstSpeckle', name: 'droplets', cst: 'CONFIG.burstSpeckle',
+      min: 0, max: 0.12, step: 0.005, value: CONFIG.burstSpeckle,
+      rebuild: true, text: () => CONFIG.burstSpeckle.toFixed(3) },
+    { key: 'burstCoreCut', name: 'core edge', cst: 'CONFIG.burstCoreCut',
+      min: 1, max: 3.5, step: 0.05, value: CONFIG.burstCoreCut,
+      rebuild: true, text: () => CONFIG.burstCoreCut.toFixed(2) },
+    { key: 'particleCount', name: 'quantity', cst: 'CONFIG.particleCount',
+      min: 100000, max: 900000, step: 20000, value: CONFIG.particleCount,
+      rebuild: true, round: true, text: () => String(CONFIG.particleCount) },
   ];
 
-  uiEl.innerHTML = '<h2>offset</h2>' + ROWS.map((r, i) =>
+  uiEl.hidden = false;
+  uiEl.innerHTML = '<h2>spread</h2>' + ROWS.map((r, i) =>
     '<div class="row"><div class="lbl">'
     + '<span class="name">' + r.name + '</span>'
     + '<span class="val" id="pv' + i + '">' + r.text() + '</span></div>'
@@ -5098,5 +5124,7 @@ if (uiEl && PARAMS.get('ui') !== '1') {
       if (r.rebuild) rebuildCloud(CONFIG.particleCount);
       document.getElementById('pv' + i).textContent = r.text();
     });
+    // size drags live as a scale; on release the words' own motes are re-seated to match it
+    if (r.settle) slider.addEventListener('change', () => rebuildCloud(CONFIG.particleCount));
   });
 }

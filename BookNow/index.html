@@ -40,6 +40,30 @@
   }
   html[data-bg="dark"] #loading { background: #0d0d0d; color: rgba(255,255,255,.45); }
   #hint { display: none; }
+  /* the spread controls - ?ui=0 removes them */
+  #pui {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 226px; z-index: 20;
+    box-sizing: border-box; overflow-y: auto;
+    background: rgba(255,255,255,.88); backdrop-filter: blur(6px);
+    border-right: 1px solid rgba(0,0,0,.12); padding: 14px 16px 18px;
+    font: 11px/1.35 Helvetica, Arial, sans-serif; color: rgba(0,0,0,.75);
+  }
+  #pui h2 {
+    margin: 0 0 4px; font-size: 10px; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; color: rgba(0,0,0,.5);
+  }
+  #pui .row { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(0,0,0,.10); }
+  #pui .row:first-of-type { margin-top: 6px; padding-top: 0; border-top: 0; }
+  #pui .lbl { display: flex; justify-content: space-between; align-items: center; gap: 7px; }
+  #pui .name { font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 10px; }
+  #pui .cst { display: block; margin-top: 2px; font-family: Consolas, Menlo, monospace;
+             font-size: 10px; color: rgba(0,0,0,.42); }
+  #pui .val { margin-left: auto; font-family: Consolas, Menlo, monospace; font-size: 11px;
+             color: #a41010; white-space: nowrap; }
+  #pui input[type=range] { width: 100%; margin: 5px 0 0; accent-color: #a41010; }
+  #pui .foot { margin-top: 11px; font-size: 10px; color: rgba(0,0,0,.4); }
+  #pui[hidden] { display: none; }
+
 </style>
 <script>
   // set before first paint so the dark page never flashes white
@@ -58,6 +82,7 @@
 <div id="ground"></div>
 <div id="loading">loading…</div>
 <div id="hint"></div>
+<div id="pui" hidden></div>
 <a id="booknow" href="#" role="button">BOOK NOW</a>
 <script type="module" src="./main.js"></script>
 </body>
