@@ -1,6 +1,8 @@
 """Turn the sand clip (sand on black) into the transition's mask files.
 
-  python tools/make_mask.py path/to/clip.mp4
+  python tools/make_mask.py path/to/clip.mov [width]
+
+width: scale the mask to this many pixels wide (default: the clip's own width)
 
 Writes to assets/:
   mask.mp4       the moving part of the clip, greyscale (luma is all the page reads)
@@ -18,6 +20,7 @@ import cv2
 import numpy as np
 
 src = sys.argv[1]
+width = int(sys.argv[2]) if len(sys.argv) > 2 else 0
 out = os.path.join(os.path.dirname(__file__), '..', 'assets')
 
 cap = cv2.VideoCapture(src)
@@ -38,9 +41,11 @@ end = min(end, len(F) - 1)
 n = end - start + 1
 print(f'{len(F)} frames at {fps:g} fps; using {start}..{end} ({n} frames, {n / fps:.2f} s)')
 
-common = ['-c:v', 'libx264', '-preset', 'slow', '-crf', '28', '-pix_fmt', 'yuv420p',
-          '-g', '12', '-an', '-movflags', '+faststart']
+common = ['-c:v', 'libx264', '-preset', 'slow', '-crf', '33', '-pix_fmt', 'yuv420p',
+          '-g', '25', '-an', '-movflags', '+faststart']
 trim = f'trim=start_frame={start}:end_frame={end + 1},setpts=PTS-STARTPTS,format=gray'
+if width:
+    trim += f',scale={width}:-2:flags=lanczos'
 subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', src, '-vf', trim + ',format=yuv420p',
                 *common, os.path.join(out, 'mask.mp4')], check=True)
 subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', src, '-vf', trim + ',reverse,format=yuv420p',

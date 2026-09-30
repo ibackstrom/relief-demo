@@ -9,7 +9,7 @@
 //    untouched - no sand texture printed over the picture
 //  - COVERAGE = ratio / cover: sand at `cover` of its starting brightness or more is solid;
 //    thinner sand is partly see-through
-//  - the partial coverage is dithered per screen pixel, so the clip's soft 700px edges break
+//  - the partial coverage is dithered per screen pixel, so the clip's soft 1280px edges break
 //    into crisp single grains at screen resolution instead of a blur
 //  - FOLDS: where the sand has moved, the ratio above or below 1 is its light and shade, and
 //    it shades image 1 - the picture takes the relief of the sand as it lifts
@@ -22,7 +22,7 @@ const PARAMS = new URLSearchParams(location.search);
 const num = (k, d) => (PARAMS.has(k) && isFinite(+PARAMS.get(k)) ? +PARAMS.get(k) : d);
 
 const CONFIG = {
-  speed: num('speed', 1.0),      // playback rate of the clip (1 = its own 8.5 s)
+  speed: num('speed', 1.0),      // playback rate of the clip (1 = its own 8.8 s)
   cover: 0.45,                   // sand at this share of its starting brightness counts as solid
   dither: 0.85,                  // 0 = soft edges from the clip, 1 = fully grainy edges
   grainPx: 1.25,                 // css px per dither cell
@@ -30,7 +30,7 @@ const CONFIG = {
   foldGate: [0.05, 0.18],        // change from the start below which no shading is applied
                                  //   (hides the clip's compression noise on still sand)
   shadow: 0.35,                  // darkness of the sand's shadow on image 2
-  shadowOffset: [3.0, -4.0],     // in clip pixels: down and right
+  shadowOffset: [5.5, -7.3],     // in clip pixels (1280 wide): down and right
   endFade: [0.92, 1.0],          // over this part of the clip the mask fades to clean image 2
 };
 
@@ -54,7 +54,7 @@ const tImg2 = raw(loader.load('./assets/img2.jpg'));
 const tRef = raw(loader.load('./assets/mask-ref.png'));
 const IMG1_ASPECT = 1512 / 900;
 const IMG2_ASPECT = 2560 / 1663;
-const MASK_W = 700, MASK_H = 394;
+const MASK_W = 1280, MASK_H = 720;   // assets/mask.json - the licensed clip, scaled to 1280
 
 const fwd = document.getElementById('fwd');
 const rev = document.getElementById('rev');
@@ -145,7 +145,7 @@ const hint = document.getElementById('hint');
 fwd.playbackRate = rev.playbackRate = CONFIG.speed;
 fwd.defaultPlaybackRate = rev.defaultPlaybackRate = CONFIG.speed;
 
-const dur = (v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 8.48);
+const dur = (v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 8.76);
 const posOf = (v) => (v === fwd ? v.currentTime / dur(v) : 1 - v.currentTime / dur(v));
 
 // run fn once the video has put its current frame on screen (and so on the texture); a
