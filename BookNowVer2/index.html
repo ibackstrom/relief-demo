@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Book Now — Ver2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  @font-face {
+    font-family: 'Neue Montreal';
+    src: url('./assets/NeueMontreal-Regular.woff2') format('woff2');
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; }
+  /* The page: the calligraphy pattern, faint, on white - or on near-black with ?bg=dark.
+     The particle canvas is transparent and lies over it. */
+  body { background: #f7f6f5; }
+  #ground {
+    position: fixed; inset: 0; z-index: 0;
+    background: url('./assets/pattern.jpg') center / cover no-repeat;
+    opacity: .55;
+  }
+  html[data-bg="dark"] body { background: #0d0d0d; }
+  html[data-bg="dark"] #ground { filter: invert(1) brightness(.55); opacity: .35; }
+  canvas { display: block; position: fixed; inset: 0; z-index: 1; }
+
+  /* The button. It is the fixed thing on the page - main.js reads its box and gathers the
+     cloud on it. */
+  #booknow {
+    position: fixed; z-index: 30; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    padding: 0; border: 0; background: none; cursor: pointer;
+    font: 400 16px/1 'Neue Montreal', Helvetica, Arial, sans-serif;
+    letter-spacing: .10em; color: #fff; white-space: nowrap; text-decoration: none;
+  }
+  #booknow:focus-visible { outline: 1px solid rgba(255,255,255,.7); outline-offset: 2px; }
+
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font: 12px/1 Helvetica, Arial, sans-serif; letter-spacing: .12em; color: rgba(0,0,0,.45);
+    text-transform: uppercase; background: #f7f6f5; transition: opacity .6s ease; z-index: 40;
+  }
+  html[data-bg="dark"] #loading { background: #0d0d0d; color: rgba(255,255,255,.45); }
+  #hint { display: none; }
+  /* the spread controls - ?ui=0 removes them */
+  #pui {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 226px; z-index: 50;
+    box-sizing: border-box; overflow-y: auto;
+    background: rgba(255,255,255,.88); backdrop-filter: blur(6px);
+    border-right: 1px solid rgba(0,0,0,.12); padding: 14px 16px 18px;
+    font: 11px/1.35 Helvetica, Arial, sans-serif; color: rgba(0,0,0,.75);
+  }
+  #pui h2 {
+    margin: 0 0 4px; font-size: 10px; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; color: rgba(0,0,0,.5);
+  }
+  #pui .row { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(0,0,0,.10); }
+  #pui .row:first-of-type { margin-top: 6px; padding-top: 0; border-top: 0; }
+  #pui .lbl { display: flex; justify-content: space-between; align-items: center; gap: 7px; }
+  #pui .name { font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 10px; }
+  #pui .cst { display: block; margin-top: 2px; font-family: Consolas, Menlo, monospace;
+             font-size: 10px; color: rgba(0,0,0,.42); }
+  #pui .val { margin-left: auto; font-family: Consolas, Menlo, monospace; font-size: 11px;
+             color: #a41010; white-space: nowrap; }
+  #pui input[type=range] { width: 100%; margin: 5px 0 0; accent-color: #a41010; }
+  #pui .foot { margin-top: 11px; font-size: 10px; color: rgba(0,0,0,.4); }
+  #pui[hidden] { display: none; }
+
+</style>
+<script>
+  // set before first paint so the dark page never flashes white
+  if (new URLSearchParams(location.search).get('bg') === 'dark') document.documentElement.dataset.bg = 'dark';
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="ground"></div>
+<div id="loading">loading…</div>
+<div id="hint"></div>
+<div id="pui" hidden></div>
+<a id="booknow" href="#" role="button">BOOK NOW</a>
+<script type="module" src="./main.js?v=5"></script>
+</body>
+</html>
