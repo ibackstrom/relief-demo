@@ -157,7 +157,12 @@ const CONFIG = {
   // behind the words rather than as a ball. The flow then frays the rays into filaments.
   burst: true,
   burstAspectX: 1.75,       // stretch across ...
-  burstAspectY: 0.80,       // ... and down: the splash is about twice as wide as it is tall
+  burstAspectY: 1.00,       // ... and down: the reference's splash is a little under twice as
+                            //   wide as it is tall (0.80 came out at 0.45 of the width; it is 0.58)
+  // The splash's WIDTH as a multiple of the title's - the reference's is about 5.3. The cloud
+  // is sized from the title, not from the window: sized in window heights it grew with every
+  // taller screen while the 16px title did not, and on a large monitor it was 9 titles wide.
+  burstSpan: 4.35,          // measured: 4.35 here gives 5.0 titles on screen (not all of the engine scales with it)
   burstRays: 38,            // how many rays shoot out of the core
   burstRayShare: 0.40,      // share of the seats thrown along a ray rather than into the core
   burstRayLength: [0.55, 2.3], // how far a ray reaches, in core radii (short ones are common)
@@ -1223,6 +1228,17 @@ if (PARAMS.get('bloom') === '0') CONFIG.bloom = false;
 if (PARAMS.get('shadow') === '0') CONFIG.shadow = false;
 // BURST: the dark page. A cast shadow means nothing on black, and the ink is lifted a little
 // so the red reads as bright on dark rather than as a stain.
+// BURST: the whole cloud's scale from the title's width. BURST_K is measured: the width holding
+// 97% of the ink, in px, per (massScale x cornerRadius x window height). massScale is the
+// group's scale, so the grain, the motion and the hover all come along with it.
+const BURST_K = 1.958;
+function fitBurst() {
+  if (!CONFIG.burst) return;
+  const el = document.getElementById('booknow');
+  const w = el ? el.getBoundingClientRect().width : 0;
+  if (w > 0) CONFIG.massScale = CONFIG.burstSpan * w / (BURST_K * CONFIG.cornerRadius * innerHeight);
+}
+fitBurst();
 if (PARAMS.get('bg') === 'dark') {
   CONFIG.shadow = false;
   CONFIG.colorOverlayR = 0.86; CONFIG.colorOverlayG = 0.05; CONFIG.colorOverlayB = 0.09;
@@ -4625,6 +4641,7 @@ let worldPush = 0;          // mouseStrength converted from frame-fraction to wo
 const attractWorld = new THREE.Vector3();
 
 function place() {
+  fitBurst();
   const vh = viewHeightAt(CONFIG.anchorZ);
   const vw = vh * camera.aspect;
   const cs = cornerSigns();
