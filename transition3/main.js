@@ -24,10 +24,11 @@ const num = (k, d) => (PARAMS.has(k) && isFinite(+PARAMS.get(k)) ? +PARAMS.get(k
 const CONFIG = {
   speed: num('speed', 2.0),      // playback rate (2 = the 8.8 s clip in 4.4 s)
   cover: [0.06, 0.50],           // coverage from which image 1 starts to show, and is solid
-  fold: 0.85,                    // how strongly the folds shade image 1
+  fold: 0.0,                     // how strongly the folds shade image 1 (0.85 before - the client
+                                 //   wanted just the sand, not the wave/caustic look)
   foldRange: [0.45, 1.6],        // the most the folds may darken / lighten it
-  warp: 0.010,                   // how far the folds bend image 1 (share of the screen)
-  rim: 0.22,                     // warm light on the breaking edge
+  warp: 0.0,                     // how far the folds bend image 1 (0.010 before)
+  rim: 0.0,                      // warm light on the breaking edge (0.22 before)
   rimColor: [1.0, 0.93, 0.84],
   shadow: 0.42,                  // image 2 in the sheet's shadow
   shadowOffset: [7, -10],        // in mask pixels (1280 wide): down and to the right
