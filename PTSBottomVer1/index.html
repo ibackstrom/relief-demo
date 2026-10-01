@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aurora Botanique — Bottom particles</title>
+  <link rel="icon" href="data:,">
+  <style>
+    @font-face { font-family: Montreal; src: url('./assets/NeueMontreal-Regular.woff2') format('woff2'); }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #090909; }
+    #page { position: absolute; width: min(100vw, 174.899vh); height: min(100vh, 57.176vw); inset: 0; margin: auto; }
+    #background { position: absolute; width: 100%; height: 100%; }
+    #book-label { position: absolute; right: 2.8%; top: 5.6%; color: #fff; font: 400 .81vw Montreal, Arial, sans-serif; }
+    canvas { position: fixed; inset: 0; pointer-events: none; z-index: 1; }
+    #categories { position: absolute; left: 34.8%; right: 34.8%; top: 87.8%; height: 4.6%; display: flex; align-items: stretch; justify-content: space-between; z-index: 2; }
+    #categories button { position: relative; padding: 0; border: 0; background: none; color: #858181; cursor: pointer; white-space: nowrap; font: 400 clamp(6px, .81vw, 1.42vh)/1 Montreal, Arial, sans-serif; transition: color .2s; }
+    #categories button:hover, #categories button[aria-pressed="true"] { color: #fff; }
+    #categories button::after { content: ''; position: absolute; bottom: 0; left: 35%; width: 30%; height: 2px; background: #bf1425; transform: scaleX(0); transition: transform .25s; }
+    #categories button[aria-pressed="true"]::after { transform: scaleX(1); }
+    #categories button:focus-visible { outline: 1px solid #fff; outline-offset: 5px; }
+    #status { position: fixed; bottom: 8px; left: 12px; color: #aaa; font: 11px Arial; z-index: 3; }
+    /* The tuning rail: hidden unless the page is opened with ?ui=1. The quantity bar
+       rebuilds the population on release. */
+    #pui {
+      position: fixed; top: 0; left: 0; bottom: 0; width: 226px; z-index: 20;
+      box-sizing: border-box; overflow-y: auto;
+      background: rgba(255,255,255,.88); backdrop-filter: blur(6px);
+      border-right: 1px solid rgba(0,0,0,.12); padding: 14px 16px 18px;
+      font: 11px/1.35 Helvetica, Arial, sans-serif; color: rgba(0,0,0,.75);
+    }
+    #pui h2 { margin: 0 0 4px; font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: rgba(0,0,0,.5); }
+    #pui .row { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(0,0,0,.10); }
+    #pui .row:first-of-type { margin-top: 6px; padding-top: 0; border-top: 0; }
+    #pui .lbl { display: flex; justify-content: space-between; align-items: center; gap: 7px; }
+    #pui .name { font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 10px; }
+    #pui .cst { display: block; margin-top: 2px; font-family: Consolas, Menlo, monospace; font-size: 10px; color: rgba(0,0,0,.42); }
+    #pui .val { margin-left: auto; font-family: Consolas, Menlo, monospace; font-size: 11px; color: #bf1425; white-space: nowrap; }
+    #pui input[type=range] { width: 100%; margin: 5px 0 0; accent-color: #bf1425; }
+    #pui .foot { margin-top: 11px; font-size: 10px; color: rgba(0,0,0,.4); }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    @media (max-width: 600px) and (orientation: portrait) {
+      #page { width: 100vw; height: 100vh; }
+      #background { object-fit: contain; }
+      #book-label { display: none; }
+      #categories { position: absolute; left: 0; right: 0; top: 86%; padding: 0 8px; width: 100vw; height: 44px; gap: 10px; }
+      #categories button { font-size: clamp(8px, 2.3vw, 12px); }
+    }
+  </style>
+  <script type="importmap">{"imports":{"three":"./assets/three.module.js"}}</script>
+</head>
+<body>
+  <main id="page">
+    <picture>
+      <source media="(max-width: 600px) and (orientation: portrait)" srcset="./assets/sketch-mobile.jpg">
+      <img id="background" src="./assets/sketch-background.jpg" alt="Aurora Botanique. Advanced skin care. A black cosmetic ampoule on an ornamental black background.">
+    </picture>
+    <span id="book-label" aria-hidden="true">BOOK NOW</span>
+    <h1 class="sr-only">Aurora Botanique — Advanced skin care</h1>
+    <nav id="categories" aria-label="Service category">
+      <button type="button" aria-pressed="true">COSMETOLOGY</button>
+      <button type="button" aria-pressed="false">MAKEUP / BROWS</button>
+      <button type="button" aria-pressed="false">STYLISTS</button>
+      <button type="button" aria-pressed="false">MANICURE</button>
+      <button type="button" aria-pressed="false">SPA</button>
+    </nav>
+  </main>
+  <div id="status" role="status">Loading particles…</div>
+  <div id="pui" hidden></div>
+  <script type="module">
+    const buttons = [...document.querySelectorAll('#categories button')];
+    for (const button of buttons) {
+      button.addEventListener('click', () => {
+        for (const item of buttons) item.setAttribute('aria-pressed', String(item === button));
+      });
+      button.addEventListener('keydown', event => {
+        const direction = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
+        if (!direction) return;
+        event.preventDefault();
+        const next = buttons[(buttons.indexOf(button) + direction + buttons.length) % buttons.length];
+        next.focus();
+        next.click();
+      });
+    }
+    try {
+      await document.fonts.ready;
+      await import('./main.js');
+      document.getElementById('status').remove();
+    } catch (error) {
+      document.getElementById('status').textContent = 'Particles could not load. Please use a browser with WebGL enabled.';
+      console.error(error);
+    }
+  </script>
+</body>
+</html>
