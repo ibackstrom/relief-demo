@@ -550,6 +550,11 @@ const CONFIG = {
   glideSeats: 5.0,          // how closely the respawn seats follow it, per s - ver10's
   glideArc: 0.085,          // the lift while travelling, so the path bows over the row - ver10's
   glideCurl: 1.2,           // extra stir while travelling, as a multiple of the scatter - ver10's
+  // ver16b: TRAIL CLEANUP. An extra pull on the stragglers only - motes further from where the
+  // cloud should be than trailReach mass radii are drawn in harder, and it fades to nothing as
+  // they rejoin the mass, so the trail clears faster without the cloud on the tab changing.
+  trailCleanup: 2.5,        // strength: 0 = off. Mass radii per second, per second
+  trailReach: 1.2,          // from how far out it starts, in mass radii
   glidePull: 3.4,           // the pull while travelling, x the resting pull: 3.4 x the client's
                             //   0.25 is ver10's 0.85, which is what carried ver10's mass across
   offsetX: 0.0,             // AURORA: the cloud lives at the bottom-centre, on the category
@@ -1828,6 +1833,8 @@ uniform float uAttractCore;
 uniform float uAttractCenterGrip;
 uniform float uAttractPull;
 uniform float uAttractStagger;   // ver13: per-mote spread in the pull, so the mass streams
+uniform float uTrailClean;       // ver16b: the stragglers' extra pull (see CONFIG.trailCleanup)
+uniform float uTrailReach;       //   and where it starts, object units
 // ver14: the flights. Up to eight at once, so a string of quick clicks is a string of
 // overlapping flights and every one of them is delivered in full.
 uniform vec2  uFlightD[8];       // each flight's displacement, in this object's units; 0 = free
@@ -2143,6 +2150,14 @@ void main(){
   float birthV = texture2D(tVel, vUv).w;
   vec3 flyTarget = uAttractPoint - vec3(flightOwed(seed.w, uNow, birthV, seed.xy), 0.0);
   v += attractTo(here, flyTarget, eager) * uDt;
+  // ver16b: trail cleanup - beyond the reach, an extra pull straight at the target that grows
+  // with distance and fades out as the mote gets back into the mass
+  {
+    vec2 toT = flyTarget.xy - here.xy;
+    float dT = length(toT);
+    float w = smoothstep(uTrailReach, uTrailReach * 2.0, dT);
+    if (w > 0.0) v.xy += (toT / dT) * (uTrailClean * w * uDt);
+  }
 
   v *= uDrag;
 
@@ -4609,6 +4624,7 @@ function makeSim() {
       uAttractCenterGrip: { value: CONFIG.attractCenterGrip },
       uAttractPull: { value: 0 },
       uAttractStagger: { value: CONFIG.attractStagger },
+      uTrailClean: { value: 0 }, uTrailReach: { value: 1 },
       uFlightD: { value: flightD },
       uFlightT0: { value: flightT0 },
       uNow: { value: 0 },
@@ -4842,6 +4858,8 @@ function stepSim(dt) {
   u.uAttractPull.value = (CONFIG.attractPull * sim.radius) / (dtc * simPushGain) * pullBoost;
   u.uAttractCore.value = Math.max(CONFIG.attractCore / pullBoost, 0.24);
   u.uAttractStagger.value = THREE.MathUtils.clamp(CONFIG.attractStagger, 0, 0.95);
+  u.uTrailClean.value = CONFIG.trailCleanup * sim.radius;   // mass radii -> object units
+  u.uTrailReach.value = CONFIG.trailReach * sim.radius;
   u.uAttractCenterGrip.value = CONFIG.attractCenterGrip;   // live, for the panel
   u.uNow.value = flightNow;
   u.uNowPrev.value = flightPrev;
@@ -5961,6 +5979,12 @@ if (uiEl && PARAMS.get('ui') === '0') {
       min: 0.3, max: 4, step: 0.05, value: CONFIG.glideDuration,
       apply: (v) => { CONFIG.glideDuration = v; applyGlideCss(); },
       text: () => CONFIG.glideDuration.toFixed(2) + ' s' },
+    { key: 'trailCleanup', name: 'trail cleanup', cst: 'CONFIG.trailCleanup',
+      min: 0, max: 12, step: 0.1, value: CONFIG.trailCleanup,
+      text: () => CONFIG.trailCleanup.toFixed(1) },
+    { key: 'trailReach', name: 'trail cleanup from', cst: 'CONFIG.trailReach',
+      min: 0.4, max: 3, step: 0.05, value: CONFIG.trailReach,
+      text: () => CONFIG.trailReach.toFixed(2) + ' r' },
     { key: 'glidePull', name: 'pull while moving', cst: 'CONFIG.glidePull',
       min: 1, max: 8, step: 0.1, value: CONFIG.glidePull,
       text: () => CONFIG.glidePull.toFixed(1) + ' x' },
@@ -6009,6 +6033,12 @@ if (uiEl && PARAMS.get('ui') === '0') {
       text: () => CONFIG.shiftYPx.toFixed(0) + ' px' },
   ];
 
+  // ver16b: in glide mode the flight bars do nothing - they drive ver15's routes - so they go
+  if (CONFIG.tabMotion === 'glide') {
+    const flightOnly = ['flightDur', 'flightSpread', 'flightArc', 'flightNoise', 'flightWanderFreq',
+                        'flightSwirl', 'flightSwirlBends', 'flightSwirlCells'];
+    for (let i = ROWS.length - 1; i >= 0; i--) if (flightOnly.includes(ROWS[i].key)) ROWS.splice(i, 1);
+  }
   uiEl.innerHTML = '<h2>particles</h2>' + ROWS.map((r, i) => r.section
     ? '<h2 style="margin-top:16px">' + r.section + '</h2>'
     : '<div class="row"><div class="lbl">'
