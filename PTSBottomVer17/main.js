@@ -552,7 +552,7 @@ const CONFIG = {
   // much shorter, the pull point and the respawn seats follow that much more closely, and the
   // pull while moving rises by its square root (so a fast move does not crush the mass). 1 = as
   // before; the delay is not touched.
-  transferSpeed: 1.0,
+  transferSpeed: 2.95,
   glideDelay: 0.0,          // s after the click before the cloud sets off (the tab lights at once)
   glideDuration: 1.9,       // s the anchor takes from tab to tab - ver10's
   glideSpring: 3.0,         // how closely the pull point follows the gliding anchor, per s - ver10's
@@ -562,9 +562,9 @@ const CONFIG = {
   // ver16b: TRAIL CLEANUP. An extra pull on the stragglers only - motes further from where the
   // cloud should be than trailReach mass radii are drawn in harder, and it fades to nothing as
   // they rejoin the mass, so the trail clears faster without the cloud on the tab changing.
-  trailCleanup: 2.5,        // strength: 0 = off. Mass radii per second, per second
+  trailCleanup: 8.0,        // strength: 0 = off. Mass radii per second, per second
   trailReach: 1.2,          // from how far out it starts, in mass radii
-  glidePull: 3.4,           // the pull while travelling, x the resting pull: 3.4 x the client's
+  glidePull: 4.0,           // the pull while travelling, x the resting pull: 3.4 x the client's
                             //   0.25 is ver10's 0.85, which is what carried ver10's mass across
   offsetX: 0.0,             // AURORA: the cloud lives at the bottom-centre, on the category
   offsetY: -0.150,           //   menu, not in the top-right corner. corner 'br' + anchorY 1
@@ -1022,7 +1022,7 @@ const CONFIG = {
                             //   than the laziest, so the mass leaves as a stream and arrives
                             //   over a window. The average is unchanged, so the settled cloud
                             //   is gripped exactly as it was.
-  attractPull: 0.25,        // AURORA ver11: was 0.85 — softened so the gathering keeps its
+  attractPull: 0.40,        // AURORA ver11: was 0.85 — softened so the gathering keeps its
                             //   volume; the wider reach below carries the mass anyway
                             //   most of the frame — up to six mass radii of travel. The old
                             //   0.10 was a standing bias for a label that never moved; this
