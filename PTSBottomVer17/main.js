@@ -548,6 +548,11 @@ const CONFIG = {
   // ver16: HOW THE CLOUD MOVES BETWEEN TABS. 'glide' is ver10's: the anchor glides, the pull
   // springs after it and the mass follows. 'flight' is ver14/15's scripted per-mote routes.
   tabMotion: 'glide',
+  // ver17b: TRANSFER SPEED - one multiplier on the whole move between tabs: the glide is that
+  // much shorter, the pull point and the respawn seats follow that much more closely, and the
+  // pull while moving rises by its square root (so a fast move does not crush the mass). 1 = as
+  // before; the delay is not touched.
+  transferSpeed: 1.0,
   glideDelay: 0.0,          // s after the click before the cloud sets off (the tab lights at once)
   glideDuration: 1.9,       // s the anchor takes from tab to tab - ver10's
   glideSpring: 3.0,         // how closely the pull point follows the gliding anchor, per s - ver10's
@@ -4857,7 +4862,7 @@ function stepSim(dt) {
   // 0.20 keeps the engagement sharp enough for a direct chase without the collapse.
   // ver16: in glide mode the pull rises to ver10's strength while the cloud travels
   const pullBoost = CONFIG.tabMotion === 'glide'
-    ? (0.55 + 0.45 * travelBoost) * (1 + glideTravel * (CONFIG.glidePull - 1))
+    ? (0.55 + 0.45 * travelBoost) * (1 + glideTravel * (CONFIG.glidePull * Math.sqrt(CONFIG.transferSpeed) - 1))
     : 0.80 + 0.20 * travelBoost;
   u.uAttractPull.value = (CONFIG.attractPull * sim.radius) / (dtc * simPushGain) * pullBoost;
   u.uAttractCore.value = Math.max(CONFIG.attractCore / pullBoost, 0.24);
@@ -5216,7 +5221,7 @@ function applyGlideCss() {
   if (!el) return;
   if (CONFIG.tabMotion !== 'glide') { el.style.transition = 'none'; return; }
   const e = 'cubic-bezier(.45,.05,.25,1)';
-  const d = CONFIG.glideDuration + 's ' + e + ' ' + CONFIG.glideDelay + 's';
+  const d = (CONFIG.glideDuration / Math.max(0.05, CONFIG.transferSpeed)) + 's ' + e + ' ' + CONFIG.glideDelay + 's';
   el.style.transition = ['left', 'top', 'width', 'height'].map((k) => k + ' ' + d).join(', ');
 }
 applyGlideCss();
@@ -5321,7 +5326,7 @@ function updateAttract(vh, dt) {
       const tx = committed.x + centreFix.x, ty = committed.y + centreFix.y - dropA;
       if (!glideSprungInit) { glideSprung.set(tx, ty, committed.z); glideSprungInit = true; }
       const ddx = tx - glideSprung.x, ddy = ty - glideSprung.y;
-      const kS = 1 - Math.exp(-dtA * CONFIG.glideSpring);
+      const kS = 1 - Math.exp(-dtA * CONFIG.glideSpring * CONFIG.transferSpeed);
       glideSprung.x += ddx * kS; glideSprung.y += ddy * kS; glideSprung.z = committed.z;
       const speed = Math.hypot(ddx, ddy) * kS / Math.max(1e-4, dtA) / Math.max(1e-6, vh);   // as ver10: in the cloud's own units
       glideTravel = Math.min(1, speed / 0.35);
@@ -5503,7 +5508,7 @@ function glideSeats(dtIn) {
   // ver16: in glide mode the seats EASE after the anchor, as ver10's did, so the respawns
   // travel with the cloud instead of appearing at the new tab ahead of it
   const kG = CONFIG.tabMotion === 'glide' && seatsPlaced
-    ? 1 - Math.exp(-Math.min(Math.max(glideDt, 1e-3), 0.05) * CONFIG.glideSeats) : 1;
+    ? 1 - Math.exp(-Math.min(Math.max(glideDt, 1e-3), 0.05) * CONFIG.glideSeats * CONFIG.transferSpeed) : 1;
   const dx = seatsPlaced ? (tx - seatShift.x) * kG : 0;
   const dy = seatsPlaced ? (ty - seatShift.y) * kG : 0;
   seatsPlaced = true;
@@ -5975,6 +5980,10 @@ if (uiEl && PARAMS.get('ui') === '0') {
 
     sec('switching tabs'),
     // ver16: ver10's glide - the delay before the cloud sets off, and how long it takes
+    { key: 'transferSpeed', name: 'transfer speed', cst: 'CONFIG.transferSpeed',
+      min: 0.25, max: 4, step: 0.05, value: CONFIG.transferSpeed,
+      apply: (v) => { CONFIG.transferSpeed = v; applyGlideCss(); },
+      text: () => CONFIG.transferSpeed.toFixed(2) + ' x' },
     { key: 'glideDelay', name: 'move delay', cst: 'CONFIG.glideDelay',
       min: 0, max: 2, step: 0.05, value: CONFIG.glideDelay,
       apply: (v) => { CONFIG.glideDelay = v; applyGlideCss(); },
