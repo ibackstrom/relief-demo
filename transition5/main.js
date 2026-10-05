@@ -55,7 +55,9 @@ if (PARAMS.get('depth') === '0') CONFIG.grainShadow = CONFIG.sheetShadow = CONFI
 
 // ---------------------------------------------------------------- renderer ----
 const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+// capped at 1.5: the sand mask is 1920 wide and the pictures smaller, so rendering at 2x on a
+// high-density screen doubled the work for nothing the eye can see
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
@@ -86,6 +88,52 @@ const MASK_ASPECT = MASK_W / MASK_H;
 
 const fwd = document.getElementById('fwd');
 const rev = document.getElementById('rev');
+
+// ---- the videos are downloaded IN FULL before they may play -------------------------------
+// Streamed, a 7.7 MB clip played at speed 2 outruns most connections and stops part-way to
+// buffer - the transition stuck at one point. Fetched whole into memory it can only play
+// smoothly, and seeking (for the reverse) is instant. The forward clip comes first; the
+// reverse follows in the background so the two never compete for the connection.
+const ready = { fwd: false, rev: false };
+let pendingDir = 0;                          // a scroll that came before the clip was ready
+const hintEl = document.getElementById('hint');
+const hintText = hintEl ? hintEl.textContent : '';
+async function fetchWhole(url, onProgress) {
+  const res = await fetch(url);
+  const total = +res.headers.get('content-length') || 0;
+  if (!res.body || !total) return URL.createObjectURL(await res.blob());
+  const reader = res.body.getReader();
+  const parts = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    got += value.length;
+    onProgress(got / total);
+  }
+  return URL.createObjectURL(new Blob(parts, { type: 'video/mp4' }));
+}
+function attach(video, url) {
+  return new Promise((resolve) => {
+    video.addEventListener('canplaythrough', resolve, { once: true });
+    video.src = url;
+    video.load();
+  });
+}
+(async () => {
+  const fwdUrl = await fetchWhole(fwd.dataset.src, (f) => {
+    if (hintEl) hintEl.textContent = 'loading ' + Math.round(f * 100) + '%';
+  });
+  await attach(fwd, fwdUrl);
+  ready.fwd = true;
+  if (hintEl) hintEl.textContent = hintText;
+  if (pendingDir > 0) { pendingDir = 0; run(1); }
+  const revUrl = await fetchWhole(rev.dataset.src, () => {});
+  await attach(rev, revUrl);
+  ready.rev = true;
+  if (pendingDir < 0) { pendingDir = 0; run(-1); }
+})();
 const tFwd = raw(new THREE.VideoTexture(fwd));
 const tRev = raw(new THREE.VideoTexture(rev));
 
@@ -234,11 +282,15 @@ for (const v of [fwd, rev]) {
 }
 
 function run(dir) {
+  // not downloaded yet: remember the request and start it the moment the clip is ready
+  if ((dir > 0 && !ready.fwd) || (dir < 0 && !ready.rev && active !== rev)) {
+    pendingDir = dir;              // (the hint stays up: it is showing the download)
+    return;
+  }
   if (pos <= 0.0005) framesAtStart = framesShown;
   want = dir;
   const target = dir > 0 ? fwd : rev;
   if (dir > 0 && hint) hint.classList.add('off');
-  if (dir > 0 && rev.preload === 'none') { rev.preload = 'auto'; rev.load(); }
   if (active === target) {
     if (target.ended || (dir > 0 && pos >= 1) || (dir < 0 && pos <= 0)) return;
     target.playbackRate = CONFIG.speed;
