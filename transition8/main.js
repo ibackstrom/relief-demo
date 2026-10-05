@@ -100,7 +100,7 @@ const rev = document.getElementById('rev');
 const ready = { fwd: false, rev: false };
 let pendingDir = 0;                          // a scroll that came before the clip was ready
 const hintEl = document.getElementById('hint');
-const hintText = hintEl ? hintEl.textContent : '';
+const hintText = 'scroll ↓';   // the page shows 'loading…' until the clip is in
 async function fetchWhole(url, onProgress) {
   const res = await fetch(url);
   const total = +res.headers.get('content-length') || 0;
@@ -131,6 +131,8 @@ function attach(video, url) {
   await attach(fwd, fwdUrl);
   ready.fwd = true;
   if (hintEl) hintEl.textContent = hintText;
+  // a scroll made before this script had even loaded, recorded by the page itself
+  if (window.__earlyScroll > 0) pendingDir = 1;
   if (pendingDir > 0) { pendingDir = 0; run(1); }
   const revUrl = await fetchWhole(rev.dataset.src, () => {});
   await attach(rev, revUrl);

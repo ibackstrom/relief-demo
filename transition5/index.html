@@ -34,11 +34,17 @@
 </head>
 <body>
   <div id="pui"></div>
-  <div id="hint">scroll ↓</div>
+  <div id="hint">loading…</div>
+  <script>
+    // remember a scroll made before main.js has loaded; main.js starts it once the clip is in
+    addEventListener('wheel', (e) => { if (e.deltaY > 2) window.__earlyScroll = 1; }, { passive: true });
+    addEventListener('keydown', (e) => { if (['ArrowDown', 'PageDown', ' '].includes(e.key)) window.__earlyScroll = 1; });
+    addEventListener('touchmove', () => { window.__earlyScroll = 1; }, { passive: true });
+  </script>
   <!-- the mask: the sand clip forwards, and backwards for scrolling back up -->
   <video id="fwd" data-src="./assets/mask.mp4" muted playsinline preload="auto"></video>
   <video id="rev" data-src="./assets/mask-rev.mp4" muted playsinline preload="auto"></video>
   <script type="importmap">{"imports":{"three":"./assets/three.module.js"}}</script>
-  <script type="module" src="./main.js?v=3"></script>
+  <script type="module" src="./main.js?v=4"></script>
 </body>
 </html>
