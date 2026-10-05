@@ -271,9 +271,10 @@ const backward = () => { if (pos > 0) run(-1); };
 fwd.addEventListener('ended', () => { pos = 1; });
 rev.addEventListener('ended', () => { pos = 0; if (hint) hint.classList.remove('off'); });
 
-addEventListener('wheel', (e) => { if (e.deltaY > 2) forward(); else if (e.deltaY < -2) backward(); }, { passive: true });
+const inPanel = (e) => !!(e.target && e.target.closest && e.target.closest('#pui'));
+addEventListener('wheel', (e) => { if (inPanel(e)) return; if (e.deltaY > 2) forward(); else if (e.deltaY < -2) backward(); }, { passive: true });
 let touchY = null;
-addEventListener('touchstart', (e) => { touchY = e.touches[0].clientY; }, { passive: true });
+addEventListener('touchstart', (e) => { touchY = inPanel(e) ? null : e.touches[0].clientY; }, { passive: true });
 addEventListener('touchmove', (e) => {
   if (touchY === null) return;
   const dy = touchY - e.touches[0].clientY;
@@ -284,7 +285,18 @@ addEventListener('keydown', (e) => {
   if (['ArrowUp', 'PageUp', 'Home'].includes(e.key)) backward();
 });
 
+function syncUniforms() {
+  U.uCover.value.set(CONFIG.cover[0], CONFIG.cover[1]);
+  U.uGrain.value.x = CONFIG.grainShadow;
+  U.uSheet.value.x = CONFIG.sheetShadow;
+  U.uAmbient.value.x = CONFIG.ambient;
+  U.uRelief.value.set(CONFIG.relief, CONFIG.reliefBlur, CONFIG.edgeDarken);
+  U.uSoft.value.set(CONFIG.soft, CONFIG.softBlur);
+  U.uFocus.value.set(CONFIG.edgeBlur, CONFIG.focusBlur);
+}
+
 renderer.setAnimationLoop(() => {
+  syncUniforms();
   if (!swapping && active.readyState >= 2) pos = Math.min(Math.max(posOf(active), 0), 1);
   // the mask is on once the clip has shown a frame past its start; before that (and back at
   // the start after scrolling up) the page is image 1 exactly
@@ -302,3 +314,56 @@ renderer.setAnimationLoop(() => {
   U.tMask.value = maskRT.texture;
   renderer.render(scene, camera);
 });
+
+// ---------------------------------------------------------------- the panel ----
+// On by default - it is how the look is being chosen. ?ui=0 removes it. Every bar is live; the
+// readout is the value to write into CONFIG once it is settled.
+const uiEl = document.getElementById('pui');
+if (uiEl && PARAMS.get('ui') === '0') uiEl.remove();
+else if (uiEl) {
+  const sec = (title) => ({ section: title });
+  const row = (key, name, min, max, step, get, set, digits = 2) => ({ key, name, min, max, step, get, set, digits });
+  const cfg = (k) => [() => CONFIG[k], (v) => { CONFIG[k] = v; }];
+  const ROWS = [
+    sec('playback'),
+    row('speed', 'speed', 0.25, 4, 0.05, () => CONFIG.speed, (v) => {
+      CONFIG.speed = v;
+      for (const vid of [fwd, rev]) { vid.defaultPlaybackRate = v; if (!vid.paused) vid.playbackRate = v; }
+    }),
+    sec('blur'),
+    row('steady', 'frame smoothing', 0, 0.9, 0.01, ...cfg('steady')),
+    row('soft', 'edge softness', 0, 1, 0.01, ...cfg('soft')),
+    row('softBlur', 'edge softness blur', 0, 4, 0.1, ...cfg('softBlur'), 1),
+    row('edgeBlur', 'image 1 blur at edge', 0, 6, 0.1, ...cfg('edgeBlur'), 1),
+    row('focusBlur', 'image 2 focus pull', 0, 6, 0.1, ...cfg('focusBlur'), 1),
+    sec('sand'),
+    row('coverLo', 'sand threshold', 0, 0.9, 0.01, () => CONFIG.cover[0], (v) => { CONFIG.cover[0] = v; }),
+    row('coverHi', 'sand solid at', 0.05, 1, 0.01, () => CONFIG.cover[1], (v) => { CONFIG.cover[1] = v; }),
+    sec('shadows'),
+    row('grainShadow', 'grain shadow', 0, 1, 0.01, ...cfg('grainShadow')),
+    row('sheetShadow', 'sheet shadow', 0, 1, 0.01, ...cfg('sheetShadow')),
+    row('ambient', 'ambient', 0, 1, 0.01, ...cfg('ambient')),
+    sec('edge of the sheet'),
+    row('relief', 'rounded edge', 0, 2, 0.01, ...cfg('relief')),
+    row('reliefBlur', 'rounded edge width', 0, 6, 0.1, ...cfg('reliefBlur'), 1),
+    row('edgeDarken', 'edge darken', 0, 1, 0.01, ...cfg('edgeDarken')),
+  ];
+  uiEl.innerHTML = '<div class="btns"><button type="button" id="pPlay">play ▶</button>'
+    + '<button type="button" id="pBack">◀ back</button></div>'
+    + ROWS.map((r, i) => r.section ? '<h2>' + r.section + '</h2>'
+      : '<div class="row"><div class="lbl"><span class="name">' + r.name + '</span>'
+        + '<span class="val" id="pv' + i + '">' + r.get().toFixed(r.digits) + '</span></div>'
+        + '<input type="range" id="pr' + i + '" min="' + r.min + '" max="' + r.max + '" step="' + r.step
+        + '" value="' + r.get() + '"></div>').join('')
+    + '<div class="foot">?ui=0 removes this panel</div>';
+  ROWS.forEach((r, i) => {
+    if (r.section) return;
+    const el = document.getElementById('pr' + i);
+    el.addEventListener('input', () => {
+      r.set(parseFloat(el.value));
+      document.getElementById('pv' + i).textContent = r.get().toFixed(r.digits);
+    });
+  });
+  document.getElementById('pPlay').addEventListener('click', forward);
+  document.getElementById('pBack').addEventListener('click', backward);
+}
