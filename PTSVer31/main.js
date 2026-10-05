@@ -765,6 +765,9 @@ const CONFIG = {
   // of the sign's motes live and fade like the cloud, so on their own the ground under the
   // words thinned out from moment to moment; these are always there underneath.
   signBacking: 0.08,
+  // the panel's ver30 <-> ver31 bar: the backing's share is signBacking x this. 0 = ver30
+  // exactly (no backing), 1 = ver31, 2 = twice the backing. The total never changes.
+  backingMix: 1.0,
   signSeats: 0.20,          // share of the population that belongs to the text. 0 is ver29.
                             //   Down from 0.50 with the tighter box below: the box lost about
                             //   two thirds of its area, so a fifth of the motes now sit in it
@@ -3748,7 +3751,8 @@ function buildParticles(count) {
   // does with worldToLocal, done by hand here because place() has not run yet.
   const signCount = Math.min(count, Math.round(count * CONFIG.signSeats));
   // ver31: the backing's own share, taken from what would have been free cloud
-  const backCount = Math.min(count - signCount, Math.round(count * CONFIG.signBacking));
+  const backCount = Math.min(count - signCount,
+    Math.round(count * CONFIG.signBacking * CONFIG.backingMix));
   const backing = new Float32Array(count);
   if (signCount > 0) {
     const el = document.getElementById('booknow');
@@ -4956,7 +4960,8 @@ tick();
 // why it is a bar and not a live drag: the seats are re-thrown and the buffers re-made.
 const uiEl = document.getElementById('pui');
 // Hidden unless ?ui=1. It is a tuning rail, not part of the piece.
-if (uiEl && PARAMS.get('ui') !== '1') {
+// ver31: the panel is ON, for the ver30 <-> ver31 bar; ?ui=0 removes it
+if (uiEl && PARAMS.get('ui') === '0') {
   uiEl.remove();
 } else if (uiEl) {
   // Colour. Every particle carries the same colour now — the tone in the picture is how many
@@ -4987,16 +4992,15 @@ if (uiEl && PARAMS.get('ui') !== '1') {
   // corner's own side, so x runs right and y runs up. Both are group transforms: place()
   // re-runs and nothing is re-thrown, so they drag live at any population, and each prints
   // the value to paste into CONFIG once it is settled.
+  // ver31: one bar - from ver30 (no backing under the sign) to ver31 and past it. The backing
+  // motes are seated when the population is thrown, so the cloud is re-thrown on release.
   const ROWS = [
-    { key: 'offsetX', name: 'offset x', cst: 'CONFIG.offsetX',
-      min: -0.5, max: 1.0, step: 0.005, value: CONFIG.offsetX,
-      place: true, text: () => CONFIG.offsetX.toFixed(3) },
-    { key: 'offsetY', name: 'offset y', cst: 'CONFIG.offsetY',
-      min: -0.5, max: 1.0, step: 0.005, value: CONFIG.offsetY,
-      place: true, text: () => CONFIG.offsetY.toFixed(3) },
+    { key: 'backingMix', name: 'ver30 ↔ ver31', cst: 'CONFIG.backingMix',
+      min: 0, max: 2, step: 0.05, value: CONFIG.backingMix, rebuild: true,
+      text: () => CONFIG.backingMix.toFixed(2) + '  (' + Math.round(CONFIG.signBacking * CONFIG.backingMix * 100) + '% backing)' },
   ];
 
-  uiEl.innerHTML = '<h2>offset</h2>' + ROWS.map((r, i) =>
+  uiEl.innerHTML = '<h2>backing under the sign</h2>' + ROWS.map((r, i) =>
     '<div class="row"><div class="lbl">'
     + '<span class="name">' + r.name + '</span>'
     + '<span class="val" id="pv' + i + '">' + r.text() + '</span></div>'
