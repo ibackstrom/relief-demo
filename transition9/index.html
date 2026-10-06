@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transition 9 — the sand's own light</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; background: #111; }
+    canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; }
+    video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    #hint { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 2;
+      font: 400 11px/1 Arial, sans-serif; letter-spacing: .25em; text-transform: uppercase;
+      color: rgba(0,0,0,.45); pointer-events: none; transition: opacity .6s; }
+    #hint.off { opacity: 0; }
+    /* the panel - ?ui=0 removes it */
+    #pui { position: fixed; top: 0; left: 0; bottom: 0; width: 230px; z-index: 50; box-sizing: border-box;
+      overflow-y: auto; background: rgba(255,255,255,.9); backdrop-filter: blur(6px);
+      border-right: 1px solid rgba(0,0,0,.12); padding: 12px 16px 18px;
+      font: 11px/1.35 Helvetica, Arial, sans-serif; color: rgba(0,0,0,.75); }
+    #pui h2 { margin: 14px 0 2px; font-size: 10px; font-weight: 600; letter-spacing: .12em;
+      text-transform: uppercase; color: rgba(0,0,0,.45); }
+    #pui .row { margin-top: 8px; }
+    #pui .lbl { display: flex; justify-content: space-between; gap: 6px; }
+    #pui .name { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 10px; }
+    #pui .val { font-family: Consolas, Menlo, monospace; color: #a41010; }
+    #pui input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #a41010; }
+    #pui .btns { display: flex; gap: 6px; }
+    #pui button { flex: 1; padding: 6px 0; border: 1px solid rgba(0,0,0,.2); border-radius: 3px;
+      background: #fff; font: 600 10px/1 Helvetica, Arial, sans-serif; letter-spacing: .08em;
+      text-transform: uppercase; cursor: pointer; }
+    #pui .foot { margin-top: 12px; font-size: 10px; color: rgba(0,0,0,.4); }
+  </style>
+</head>
+<body>
+  <div id="pui"></div>
+  <div id="hint">loading…</div>
+  <script>
+    // remember a scroll made before main.js has loaded; main.js starts it once the clip is in
+    addEventListener('wheel', (e) => { if (e.deltaY > 2) window.__earlyScroll = 1; }, { passive: true });
+    addEventListener('keydown', (e) => { if (['ArrowDown', 'PageDown', ' '].includes(e.key)) window.__earlyScroll = 1; });
+    addEventListener('touchmove', () => { window.__earlyScroll = 1; }, { passive: true });
+  </script>
+  <!-- the mask: the sand clip forwards, and backwards for scrolling back up -->
+  <video id="fwd" data-src="./assets/mask9.mp4" muted playsinline preload="auto"></video>
+  <video id="rev" data-src="./assets/mask9-rev.mp4" muted playsinline preload="auto"></video>
+  <script type="importmap">{"imports":{"three":"./assets/three.module.js"}}</script>
+  <script type="module" src="./main.js?v=1"></script>
+</body>
+</html>
