@@ -54,6 +54,7 @@ const CONFIG = {
   reliefBlur: 3.0,               // how wide the rounded edge is (mip level)
   edgeDarken: 0.0,              // thin sand at the very edge is a little darker
   endFade: [0.93, 1.0],          // over this last part the mask fades to clean image 2
+  startFade: 0.6,                // s the whole effect takes to fade in from clean image 1 (and back out)
   // transition5
   steady: 0.35,
   sandLight: 1.0,                // how strongly the sand's filmed light shades image 1 (1 = as filmed)
@@ -391,13 +392,23 @@ function syncUniforms() {
   U.uSandLight.value.set(CONFIG.sandLight, CONFIG.glint);
 }
 
+// the effect's fade in: 0 = clean image 1, 1 = the full effect. Eased, so it starts and settles
+// softly instead of switching on in one frame
+let onLevel = 0;
+let lastT = performance.now();
 renderer.setAnimationLoop(() => {
+  const nowT = performance.now();
+  const dtF = Math.min(0.1, (nowT - lastT) / 1000);
+  lastT = nowT;
   syncUniforms();
   if (!swapping && active.readyState >= 2) pos = Math.min(Math.max(posOf(active), 0), 1);
   // the mask is on once the clip has shown a frame past its start; before that (and back at
   // the start after scrolling up) the page is image 1 exactly
   const maskHasFrames = hasVFC ? framesShown - framesAtStart >= 2 : pos > 0.02;
-  U.uOn.value = pos > 0.0005 && maskHasFrames ? 1 : 0;
+  const want = pos > 0.0005 && maskHasFrames ? 1 : 0;
+  const stepF = CONFIG.startFade > 0 ? dtF / CONFIG.startFade : 1;
+  onLevel = want ? Math.min(1, onLevel + stepF) : Math.max(0, onLevel - stepF);
+  U.uOn.value = onLevel * onLevel * (3 - 2 * onLevel);
   U.uEnd.value = THREE.MathUtils.smoothstep(pos, CONFIG.endFade[0], CONFIG.endFade[1]);
   // the mask into its mipmapped copy first (three builds the mips after the pass), then the page
   // the new mask frame, blended with the last one; held still before the clip starts
@@ -424,6 +435,7 @@ else if (uiEl) {
   const cfg = (k) => [() => CONFIG[k], (v) => { CONFIG[k] = v; }];
   const ROWS = [
     sec('playback'),
+    row('startFade', 'start fade', 0, 2, 0.05, ...cfg('startFade')),
     row('speed', 'speed', 0.25, 4, 0.05, () => CONFIG.speed, (v) => {
       CONFIG.speed = v;
       for (const vid of [fwd, rev]) { vid.defaultPlaybackRate = v; if (!vid.paused) vid.playbackRate = v; }
