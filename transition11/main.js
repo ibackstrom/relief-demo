@@ -1,3 +1,10 @@
+// TRANSITION 11 (rev 3) — clean and crisp, in image 1's own colours. The client: still noisy.
+// The edge of the clip is fine random speckle; shown as filmed it scattered single pixels of both
+// pictures along the whole edge, and the grains' light added more speckle on top. Now the sand's
+// transparency is merged slightly first (CONFIG.clean - a blur level), so the speckle joins into
+// clumps and shapes, and then cut at CONFIG.edge with a one-pixel antialiased step: clean sand
+// shapes that still move exactly as the footage does. No tint, no grain light: image 1's colours.
+//
 // TRANSITION 11 (rev 2) — clean. Three things read as glitchy and are gone:
 //   FRAME PACING  the clip is 25 frames a second (50 at speed 2), screens refresh at 60, so the
 //                 sand stood still for one refresh and then two in turn - a stutter. Each new
@@ -76,9 +83,12 @@ const CONFIG = {
   startFade: 0.6,                // s the whole effect takes to fade in from clean image 1 (and back out)
   // transition5
   steady: 0.0,
-  sandLight: 1.0,                // the grains' own light and shade, as filmed (1)
-  sandColor: 0.35,               // 0 = image 1's colours on the sand, 1 = the clip's golden sand
-  alphaGamma: 1.0,               // the edge's transparency as filmed (1); higher = thinner sand                // how strongly the sand's filmed light shades image 1 (1 = as filmed)
+  sandLight: 0.0,                // the grains' own light and shade, as filmed (1)
+  sandColor: 0.0,               // 0 = image 1's colours on the sand, 1 = the clip's golden sand
+  alphaGamma: 1.0,
+  clean: 1.6,                    // how far the speckle is merged into clumps (blur level; 0 = raw)
+  edge: 0.5,                     // where the sand's edge is cut (lower = more sand)
+  crisp: 1.0,                    // edge width in screen pixels (1 = one-pixel antialiased edge)               // the edge's transparency as filmed (1); higher = thinner sand                // how strongly the sand's filmed light shades image 1 (1 = as filmed)
   glint: 0.0,                   // the brightest grains catch the light                  // share of the previous frame kept in the mask (0 = none)
   soft: 0.0,                    // how much of the blurred mask is mixed into the edge
   softBlur: 1.3,                 //   and how blurred that copy is (mip level)
@@ -243,6 +253,7 @@ const U = {
   tLight: { value: lightRT.texture },
   uSandLight: { value: new THREE.Vector2(CONFIG.sandLight, CONFIG.glint) },
   uSand: { value: new THREE.Vector3(CONFIG.sandColor, CONFIG.alphaGamma, 0) },
+  uClean: { value: new THREE.Vector3(CONFIG.clean, CONFIG.edge, CONFIG.crisp) },
   uMeanSand: { value: new THREE.Vector3(0.6759, 0.4942, 0.2409) },   // mask11.json mean_sand
 };
 scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
@@ -256,7 +267,7 @@ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial
     uniform float uBlend;              // 0 = the previous frame of the clip, 1 = the current one
     uniform float uAspect, uOn, uEnd;
     uniform vec2 uSoft, uFocus, uSandLight;
-    uniform vec3 uSand, uMeanSand;
+    uniform vec3 uSand, uMeanSand, uClean;
     uniform vec2 uCover, uGrainOff, uSheetOff, uAmbient;
     uniform vec3 uGrain, uSheet, uRelief;
     in vec2 vUv;
@@ -281,8 +292,11 @@ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial
       float live = uOn * (1.0 - uEnd);
 
       // the clip's transparency AS FILMED - no threshold: thin sand is partly see-through
-      float A = clamp(sandAt(m, 0.0), 0.0, 1.0);
-      float k = mix(1.0, pow(A, uSand.y) * (1.0 - uEnd), uOn);
+      // the sand merged into clumps, then cut cleanly with a one-pixel antialiased edge
+      float Ac = pow(clamp(sandAt(m, uClean.x), 0.0, 1.0), uSand.y);
+      float aa = max(fwidth(Ac) * uClean.z, 1e-4);
+      float cov = smoothstep(uClean.y - aa, uClean.y + aa, Ac);
+      float k = mix(1.0, cov * (1.0 - uEnd), uOn);
       // where the sheet is breaking or flying (0 inside the intact sheet, which stays image 1)
       float Ab = sandAt(m, 3.0);
       float w = (1.0 - smoothstep(0.90, 0.99, Ab)) * live;
@@ -419,6 +433,7 @@ function syncUniforms() {
   U.uFocus.value.set(CONFIG.edgeBlur, CONFIG.focusBlur);
   U.uSandLight.value.set(CONFIG.sandLight, CONFIG.glint);
   U.uSand.value.set(CONFIG.sandColor, CONFIG.alphaGamma, 0);
+  U.uClean.value.set(CONFIG.clean, CONFIG.edge, CONFIG.crisp);
 }
 
 // the effect's fade in: 0 = clean image 1, 1 = the full effect. Eased, so it starts and settles
@@ -485,9 +500,11 @@ else if (uiEl) {
       for (const vid of [fwd, rev]) { vid.defaultPlaybackRate = v; if (!vid.paused) vid.playbackRate = v; }
     }),
     sec('the sand at the edge'),
+    row('clean', 'clean (merge speckle)', 0, 4, 0.05, ...cfg('clean')),
+    row('edge', 'edge position', 0.05, 0.95, 0.01, ...cfg('edge')),
+    row('crisp', 'edge softness (px)', 0.5, 6, 0.1, ...cfg('crisp'), 1),
     row('sandColor', 'sand tint', 0, 1, 0.01, ...cfg('sandColor')),
     row('sandLight', 'grain light', 0, 2, 0.01, ...cfg('sandLight')),
-    row('alphaGamma', 'thinness', 0.3, 3, 0.05, ...cfg('alphaGamma')),
     sec('shadow'),
     row('grainShadow', 'contact shadow', 0, 1, 0.01, ...cfg('grainShadow')),
   ];
