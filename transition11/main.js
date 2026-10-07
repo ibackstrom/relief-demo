@@ -1,3 +1,13 @@
+// TRANSITION 11 (rev 4) — the client's notes: particles "soapy", "like noise", a pause/freeze,
+// no inertia, the last frames melting into a fade. So:
+//   SHARP     the mask is 2560 wide (area-scaled from the 4K master), the speckle only lightly
+//             merged (clean 0.6), and NO frame blending - blending two frames ghosted every grain
+//   PLAIN     the sand is image 1 itself, white - no grain light, no tint (both read as noise)
+//   NO PAUSE  the clip is trimmed to the motion, and the start fade is 0.15 s
+//   INERTIA   playback eases in over CONFIG.accel and slows into the end (CONFIG.settle) instead of
+//             starting and stopping dead
+//   NO MELT   the closing fade to image 2 is the last 2%, not 7%
+//
 // TRANSITION 11 (rev 3) — clean and crisp, in image 1's own colours. The client: still noisy.
 // The edge of the clip is fine random speckle; shown as filmed it scattered single pixels of both
 // pictures along the whole edge, and the grains' light added more speckle on top. Now the sand's
@@ -67,7 +77,7 @@ const CONFIG = {
   speed: num('speed', 2.0),      // playback rate (2 = the 6.4 s clip in 3.2 s)
   cover: [0.30, 0.62],           // alpha where image 1 starts to show, and where it is solid
   // the shadows on image 2. Offsets in mask pixels (1920 wide), down and to the right
-  grainShadow: 0.12,             // each grain's own tight shadow
+  grainShadow: 0.10,             // each grain's own tight shadow
   grainOffset: [2, -3],
   grainBlur: 0.7,                // mip level: 1 = two pixels soft
   sheetShadow: 0.0,             // the whole sheet's wide shadow
@@ -79,14 +89,16 @@ const CONFIG = {
   relief: 0.0,                  // how strongly the rounded edge is lit and shaded
   reliefBlur: 3.0,               // how wide the rounded edge is (mip level)
   edgeDarken: 0.0,              // thin sand at the very edge is a little darker
-  endFade: [0.93, 1.0],          // over this last part the mask fades to clean image 2
-  startFade: 0.6,                // s the whole effect takes to fade in from clean image 1 (and back out)
+  endFade: [0.98, 1.0],          // rev 4: the last 2% only - the sand clears itself, no melting fade
+  startFade: 0.15,               // s the effect takes to come in from clean image 1 (rev 4: was 0.6 - a pause)
+  accel: 0.5,                    // s playback takes to reach full speed - inertia instead of a jump start
+  settle: 0.55,                  // the speed it slows to over the last quarter (share of full speed)
   // transition5
   steady: 0.0,
   sandLight: 0.0,                // the grains' own light and shade, as filmed (1)
   sandColor: 0.0,               // 0 = image 1's colours on the sand, 1 = the clip's golden sand
   alphaGamma: 1.0,
-  clean: 1.6,                    // how far the speckle is merged into clumps (blur level; 0 = raw)
+  clean: 0.6,                    // how far the speckle is merged into clumps (blur level; 0 = raw)
   edge: 0.5,                     // where the sand's edge is cut (lower = more sand)
   crisp: 1.0,                    // edge width in screen pixels (1 = one-pixel antialiased edge)               // the edge's transparency as filmed (1); higher = thinner sand                // how strongly the sand's filmed light shades image 1 (1 = as filmed)
   glint: 0.0,                   // the brightest grains catch the light                  // share of the previous frame kept in the mask (0 = none)
@@ -127,7 +139,7 @@ const tImg1 = mip(loader.load('./assets/img1.jpg'));
 const tImg2 = mip(loader.load('./assets/img2.jpg'));
 const IMG1_ASPECT = 1512 / 900;
 const IMG2_ASPECT = 2560 / 1663;
-const MASK_W = 1920, MASK_H = 1080;
+const MASK_W = 2560, MASK_H = 1440;   // rev 4: assets/mask11.json
 const MASK_ASPECT = MASK_W / MASK_H;
 
 const fwd = document.getElementById('fwd');
@@ -228,7 +240,7 @@ const copyMat = new THREE.ShaderMaterial({
     in vec2 vUv;
     out vec4 outColor;
     void main() {
-      float now = texture(tVideo, vec2(vUv.x, 0.5 + vUv.y * 0.5)).r;   // the top half: coverage
+      float now = texture(tVideo, vUv).r;   // rev 4: the whole frame is the alpha
       outColor = vec4(now, 0.0, 0.0, 1.0);
     }`,
 });
@@ -339,7 +351,7 @@ const hint = document.getElementById('hint');
 fwd.playbackRate = rev.playbackRate = CONFIG.speed;
 fwd.defaultPlaybackRate = rev.defaultPlaybackRate = CONFIG.speed;
 
-const dur = (v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 6.36);
+const dur = (v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 6.16);
 const posOf = (v) => (v === fwd ? v.currentTime / dur(v) : 1 - v.currentTime / dur(v));
 
 // run fn once the video has put its current frame on screen (and so on the texture); a
@@ -366,7 +378,10 @@ for (const v of [fwd, rev]) {
   v.requestVideoFrameCallback(count);
 }
 
+let playStartAt = 0;
 function run(dir) {
+  playStartAt = performance.now();
+  rateNow = 0;              // the ease starts over
   // not downloaded yet: remember the request and start it the moment the clip is ready
   if ((dir > 0 && !ready.fwd) || (dir < 0 && !ready.rev && active !== rev)) {
     pendingDir = dir;              // (the hint stays up: it is showing the download)
@@ -440,8 +455,23 @@ function syncUniforms() {
 // softly instead of switching on in one frame
 let onLevel = 0;
 let lastT = performance.now();
+// rev 4: INERTIA - the playback rate eases up to speed after a start and slows into the end
+let rateNow = 0;
+function easeRate(nowT) {
+  if (active.paused || swapping) return;
+  const t = (nowT - playStartAt) / 1000;
+  const up = CONFIG.accel > 0 ? Math.min(1, t / CONFIG.accel) : 1;
+  const inF = 0.3 + 0.7 * up * up * (3 - 2 * up);
+  const left = active === fwd ? 1 - pos : pos;              // share of the clip still to play
+  // slows smoothly over the last quarter, down to CONFIG.settle of full speed at the very end
+  const k = Math.min(1, left / 0.25);
+  const outF = CONFIG.settle + (1 - CONFIG.settle) * k * k * (3 - 2 * k);
+  const rate = Math.max(0.07, CONFIG.speed * inF * outF);
+  if (Math.abs(rate - rateNow) > 0.015) { active.playbackRate = rate; rateNow = rate; }
+}
 renderer.setAnimationLoop(() => {
   const nowT = performance.now();
+  easeRate(nowT);
   const dtF = Math.min(0.1, (nowT - lastT) / 1000);
   lastT = nowT;
   syncUniforms();
@@ -461,7 +491,6 @@ renderer.setAnimationLoop(() => {
   const playing = hasVFC && !active.paused && !swapping;
   const copyInto = (mRT, lRT) => {
     renderer.setRenderTarget(mRT); renderer.render(copyScene, camera);
-    renderer.setRenderTarget(lRT); renderer.render(lightScene, camera);
   };
   if (!playing) {
     copyInto(maskRT, lightRT); copyInto(maskPrev, lightPrev);
@@ -475,7 +504,8 @@ renderer.setAnimationLoop(() => {
       copiedFrame = framesShown;
     }
     const interval = 1000 / (25 * Math.max(0.05, CONFIG.speed));
-    U.uBlend.value = Math.min(1, Math.max(0, (nowT - lastFrameAt) / interval));
+    // rev 4: no blending between frames - it ghosted every grain into soap
+    U.uBlend.value = 1;
   }
   renderer.setRenderTarget(null);
   U.tMask.value = maskRT.texture; U.tMaskPrev.value = maskPrev.texture;
@@ -495,6 +525,8 @@ else if (uiEl) {
   const ROWS = [
     sec('playback'),
     row('startFade', 'start fade', 0, 2, 0.05, ...cfg('startFade')),
+    row('accel', 'speed-up (s)', 0, 2, 0.05, ...cfg('accel')),
+    row('settle', 'slow into end', 0.2, 1, 0.01, ...cfg('settle')),
     row('speed', 'speed', 0.25, 4, 0.05, () => CONFIG.speed, (v) => {
       CONFIG.speed = v;
       for (const vid of [fwd, rev]) { vid.defaultPlaybackRate = v; if (!vid.paused) vid.playbackRate = v; }
@@ -503,8 +535,6 @@ else if (uiEl) {
     row('clean', 'clean (merge speckle)', 0, 4, 0.05, ...cfg('clean')),
     row('edge', 'edge position', 0.05, 0.95, 0.01, ...cfg('edge')),
     row('crisp', 'edge softness (px)', 0.5, 6, 0.1, ...cfg('crisp'), 1),
-    row('sandColor', 'sand tint', 0, 1, 0.01, ...cfg('sandColor')),
-    row('sandLight', 'grain light', 0, 2, 0.01, ...cfg('sandLight')),
     sec('shadow'),
     row('grainShadow', 'contact shadow', 0, 1, 0.01, ...cfg('grainShadow')),
   ];
