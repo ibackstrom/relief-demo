@@ -1,3 +1,13 @@
+// TRANSITION 11 (rev 2) — clean. Three things read as glitchy and are gone:
+//   FRAME PACING  the clip is 25 frames a second (50 at speed 2), screens refresh at 60, so the
+//                 sand stood still for one refresh and then two in turn - a stutter. Each new
+//                 frame of the sand now blends in over the time until the next is due.
+//   COLOUR LAYER  the sand stored in colour kept a quarter of its colour resolution, which put
+//                 blocky colour fringes on the grains. The sand is stored grey again (its light,
+//                 as transition9, faded smoothly to neutral - no seam) and its warm colour is a
+//                 smooth tint applied here.
+//   QUALITY       grey compresses better, so the clip is encoded finer (crf 27).
+//
 // TRANSITION 11 — the edge IS the footage. Every earlier version rebuilt the sand edge itself: the
 // alpha cut at a hard threshold (a pixel dissolve), lighting and shadows computed by us. The clip
 // already shows exactly how sand blows away, so here the edge is the clip: its transparency used
@@ -168,15 +178,17 @@ const maskOpts = {
   format: THREE.RedFormat, type: THREE.UnsignedByteType, depthBuffer: false, stencilBuffer: false,
   generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
 };
-// two copies, written in turn: each frame's mask is the new video frame blended with the last
+// rev 2: the CURRENT and the PREVIOUS frame of the clip, so the page can blend between them
 let maskRT = new THREE.WebGLRenderTarget(MASK_W, MASK_H, maskOpts);
 let maskPrev = new THREE.WebGLRenderTarget(MASK_W, MASK_H, maskOpts);
 // transition9: the video is 1920 x 2160 - coverage in the top half, the sand's light in the
 // bottom - so each copy reads its own half. The light needs no mips and no blending.
-const lightRT = new THREE.WebGLRenderTarget(MASK_W, MASK_H, {
-  format: THREE.RGBAFormat, type: THREE.UnsignedByteType, depthBuffer: false, stencilBuffer: false,
+const lightOpts = {
+  format: THREE.RedFormat, type: THREE.UnsignedByteType, depthBuffer: false, stencilBuffer: false,
   generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
-});
+};
+let lightRT = new THREE.WebGLRenderTarget(MASK_W, MASK_H, lightOpts);
+let lightPrev = new THREE.WebGLRenderTarget(MASK_W, MASK_H, lightOpts);
 const lightScene = new THREE.Scene();
 const lightMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false,
@@ -189,7 +201,7 @@ const lightMat = new THREE.ShaderMaterial({
     uniform sampler2D tVideo;
     in vec2 vUv;
     out vec4 outColor;
-    void main() { outColor = vec4(texture(tVideo, vec2(vUv.x, vUv.y * 0.5)).rgb, 1.0); }`,   // the sand's colour
+    void main() { outColor = vec4(texture(tVideo, vec2(vUv.x, vUv.y * 0.5)).r, 0.0, 0.0, 1.0); }`,   // the sand's light
 });
 lightScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), lightMat));
 const copyScene = new THREE.Scene();
@@ -207,7 +219,7 @@ const copyMat = new THREE.ShaderMaterial({
     out vec4 outColor;
     void main() {
       float now = texture(tVideo, vec2(vUv.x, 0.5 + vUv.y * 0.5)).r;   // the top half: coverage
-      outColor = vec4(mix(now, textureLod(tPrev, vUv, 0.0).r, uKeep), 0.0, 0.0, 1.0);
+      outColor = vec4(now, 0.0, 0.0, 1.0);
     }`,
 });
 copyScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copyMat));
@@ -216,6 +228,7 @@ copyScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copyMat));
 const px = (a) => new THREE.Vector2(a[0] / MASK_W, a[1] / MASK_H);
 const U = {
   tImg1: { value: tImg1 }, tImg2: { value: tImg2 }, tMask: { value: maskRT.texture },
+  tMaskPrev: { value: maskPrev.texture }, tLightPrev: { value: lightPrev.texture }, uBlend: { value: 1 },
   uAspect: { value: 1 },
   uCover: { value: new THREE.Vector2(...CONFIG.cover) },
   uGrain: { value: new THREE.Vector3(CONFIG.grainShadow, CONFIG.grainBlur, 0) },
@@ -239,7 +252,8 @@ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial
     void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
   fragmentShader: /* glsl */`
     precision highp float;
-    uniform sampler2D tImg1, tImg2, tMask, tLight;
+    uniform sampler2D tImg1, tImg2, tMask, tLight, tMaskPrev, tLightPrev;
+    uniform float uBlend;              // 0 = the previous frame of the clip, 1 = the current one
     uniform float uAspect, uOn, uEnd;
     uniform vec2 uSoft, uFocus, uSandLight;
     uniform vec3 uSand, uMeanSand;
@@ -252,7 +266,15 @@ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial
       vec2 s = uAspect > ia ? vec2(1.0, ia / uAspect) : vec2(uAspect / ia, 1.0);
       return (uv - 0.5) * s + 0.5;
     }
-    float sandAt(vec2 m, float lod) { return textureLod(tMask, clamp(m, 0.0, 1.0), lod).r; }
+    // the clip between its last two frames, so the sand moves smoothly at any refresh rate
+    float sandAt(vec2 m, float lod) {
+      m = clamp(m, 0.0, 1.0);
+      return mix(textureLod(tMaskPrev, m, lod).r, textureLod(tMask, m, lod).r, uBlend);
+    }
+    float lightAt(vec2 m) {
+      m = clamp(m, 0.0, 1.0);
+      return mix(texture(tLightPrev, m).r, texture(tLight, m).r, uBlend);
+    }
 
     void main() {
       vec2 m = cover(vUv, ${MASK_ASPECT.toFixed(6)});
@@ -266,13 +288,14 @@ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial
       float w = (1.0 - smoothstep(0.90, 0.99, Ab)) * live;
 
       vec3 img1 = texture(tImg1, cover(vUv, ${IMG1_ASPECT.toFixed(6)})).rgb;
-      // the sand here as filmed, and its brightness against the sand's average
-      vec3 sand = texture(tLight, clamp(m, 0.0, 1.0)).rgb;
+      // the grains' own filmed light (1 = the sand's local average, flat 1 away from the edge)
+      float L = lightAt(m) * 2.0;
+      vec3 c1 = img1 * mix(1.0, L, uSandLight.x * live);
+      // and the sand's warm colour as a smooth tint where the sheet breaks - its hue, at the
+      // picture's own brightness
       const vec3 LUMA = vec3(0.299, 0.587, 0.114);
-      float rel = dot(sand, LUMA) / max(dot(uMeanSand, LUMA), 1e-3);
-      vec3 madeOfSand = img1 * mix(1.0, rel, uSandLight.x);
-      vec3 sandLook = mix(madeOfSand, sand, uSand.x);
-      vec3 c1 = mix(img1, sandLook, w);
+      vec3 tint = uMeanSand / max(dot(uMeanSand, LUMA), 1e-3);
+      c1 *= mix(vec3(1.0), tint, uSand.x * w);
 
       // image 2, with only a faint contact shadow (the clip itself has none)
       vec3 c2 = texture(tImg2, cover(vUv, ${IMG2_ASPECT.toFixed(6)})).rgb;
@@ -318,10 +341,14 @@ function onFrame(v, fn) {
 // texture since playback began. Switched on at the moment play() is called, it read an empty
 // texture for a frame or two - a flash of image 2 over the whole screen at the start.
 let framesShown = 0, framesAtStart = 0;
+let lastFrameAt = 0, copiedFrame = -1;
 const hasVFC = 'requestVideoFrameCallback' in fwd;
 for (const v of [fwd, rev]) {
   if (!hasVFC) break;
-  const count = () => { if (!v.paused) framesShown++; v.requestVideoFrameCallback(count); };
+  const count = () => {
+    if (!v.paused) { framesShown++; lastFrameAt = performance.now(); }
+    v.requestVideoFrameCallback(count);
+  };
   v.requestVideoFrameCallback(count);
 }
 
@@ -412,17 +439,32 @@ renderer.setAnimationLoop(() => {
   onLevel = want ? Math.min(1, onLevel + stepF) : Math.max(0, onLevel - stepF);
   U.uOn.value = onLevel * onLevel * (3 - 2 * onLevel);
   U.uEnd.value = THREE.MathUtils.smoothstep(pos, CONFIG.endFade[0], CONFIG.endFade[1]);
-  // the mask into its mipmapped copy first (three builds the mips after the pass), then the page
-  // the new mask frame, blended with the last one; held still before the clip starts
-  const t = maskRT; maskRT = maskPrev; maskPrev = t;
-  copyMat.uniforms.tPrev.value = maskPrev.texture;
-  copyMat.uniforms.uKeep.value = U.uOn.value > 0 ? CONFIG.steady : 0;
-  renderer.setRenderTarget(maskRT);
-  renderer.render(copyScene, camera);
-  renderer.setRenderTarget(lightRT);
-  renderer.render(lightScene, camera);
+  // rev 2: a NEW frame of the clip is copied in once, the old current one becoming the
+  // previous; between new frames the page blends from previous to current over the time the
+  // next frame is due, so the sand never stands still for a refresh and then jumps. While the
+  // clip is not playing (before, after, during a swap) both hold the same frame.
+  const playing = hasVFC && !active.paused && !swapping;
+  const copyInto = (mRT, lRT) => {
+    renderer.setRenderTarget(mRT); renderer.render(copyScene, camera);
+    renderer.setRenderTarget(lRT); renderer.render(lightScene, camera);
+  };
+  if (!playing) {
+    copyInto(maskRT, lightRT); copyInto(maskPrev, lightPrev);
+    copiedFrame = framesShown;
+    U.uBlend.value = 1;
+  } else {
+    if (copiedFrame !== framesShown) {
+      let t = maskRT; maskRT = maskPrev; maskPrev = t;
+      t = lightRT; lightRT = lightPrev; lightPrev = t;
+      copyInto(maskRT, lightRT);
+      copiedFrame = framesShown;
+    }
+    const interval = 1000 / (25 * Math.max(0.05, CONFIG.speed));
+    U.uBlend.value = Math.min(1, Math.max(0, (nowT - lastFrameAt) / interval));
+  }
   renderer.setRenderTarget(null);
-  U.tMask.value = maskRT.texture;
+  U.tMask.value = maskRT.texture; U.tMaskPrev.value = maskPrev.texture;
+  U.tLight.value = lightRT.texture; U.tLightPrev.value = lightPrev.texture;
   renderer.render(scene, camera);
 });
 
@@ -443,10 +485,9 @@ else if (uiEl) {
       for (const vid of [fwd, rev]) { vid.defaultPlaybackRate = v; if (!vid.paused) vid.playbackRate = v; }
     }),
     sec('the sand at the edge'),
-    row('sandColor', 'sand colour (0 image → 1 clip)', 0, 1, 0.01, ...cfg('sandColor')),
+    row('sandColor', 'sand tint', 0, 1, 0.01, ...cfg('sandColor')),
     row('sandLight', 'grain light', 0, 2, 0.01, ...cfg('sandLight')),
     row('alphaGamma', 'thinness', 0.3, 3, 0.05, ...cfg('alphaGamma')),
-    row('steady', 'frame smoothing', 0, 0.9, 0.01, ...cfg('steady')),
     sec('shadow'),
     row('grainShadow', 'contact shadow', 0, 1, 0.01, ...cfg('grainShadow')),
   ];
