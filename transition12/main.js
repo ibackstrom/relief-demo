@@ -1,3 +1,13 @@
+// TRANSITION 12 (rev 3) — the picture CRUMBLES into its own grains. Before, the sheet vanished
+// along a noisy line while the grains sat at random points that matched no hole - up close, noise
+// laid over a wipe. Now the picture is a grid of cells (~2.5 px, CONFIG.cell), each cell is one
+// grain carrying that cell's colour, and a cell leaves the sheet in the very frame its grain breaks
+// off - the hole and the grain are one event; a grain is invisible until then. When it goes is
+// decided per cell: a broad noise (the front is irregular) + the cell's CLUMP (small groups break
+// off together) + its own share, spread over CONFIG.erode, so the edge erodes over a band. A clump
+// is thrown off together and stretches into a stream (each grain feels the air a little
+// differently). The sweep now ends when the last cell has gone, and so do the grains.
+//
 // TRANSITION 12 (rev 2) — SAND, not smoke. PTSVer30's swirl is how smoke or ink moves: light
 // stuff floating in eddies. Sand is heavy: lifted, thrown downwind and pulled down, held to a
 // terminal speed by the air, roughened only a little by turbulence - so grains stream in arcs
@@ -40,7 +50,7 @@ const CONFIG = {
   edgeBreakup: 0.25,        // noise on the front
   flySpeed: 4.0,            // how fast grains fly off once released
   grainSize: 1.6,           // px, the largest grains; most are smaller
-  grains: num('grains', pre('grains', 409600)),   // transition12: simulated, so 640 x 640
+  cell: num('cell', pre('cell', 2.5)),   // rev 3: css px per grain - the picture is cut into these
   speckle: 0.36,            // grain texture on the sheet inside the fold band
   shadow: 0.35,             // image 2 in the folded sheet's shadow just behind the tear
   shadowLength: 0.15,       // how far behind the tear that shadow reaches (sweep units)
@@ -56,10 +66,12 @@ const CONFIG = {
   airDrag: 2.2,             // how quickly the air brings a grain to the wind's speed (per second)
   gravity: 1.3,             // pull down, screen heights per second per second
   kickUp: 0.30,             // and the hop up as it comes loose (saltation)
-  endFade: 0.10,            // the last share of the sweep over which anything left fades out
+  endFade: 0.06,            // the last share of the sweep over which anything left fades out
+  erode: 0.35,              // how wide the crumbling band is (sweep units): how gradually it breaks up
+  clumpCells: 3,            // grains per side of a clump that breaks off together
   streak: 1.0,              // motion streak, 1 = one frame's travel
   grainShadow: 0.30,        // a grain's shadow on image 2
-  darkGrains: 0.08,         // share of darker grains
+  darkGrains: 0.03,         // share of darker grains
 };
 
 // ---------------------------------------------------------------- renderer ----
@@ -175,6 +187,20 @@ const COMMON = /* glsl */`
   // shading relative to a flat sheet, so image 1 at rest looks exactly like image 1
   float relShade(vec3 n) { return shade(n) / shade(vec3(0.0, 0.0, 1.0)); }
 
+  // rev 3: the picture as a grid of cells, one grain each, and the moment each cell lets go -
+  // read by the sheet (to open the hole) and by the grain (to leave), so the two are one event
+  uniform vec2 uGrid;
+  uniform float uClump, uErode;
+  vec2 cellOf(vec2 p) { return floor((p / (2.0 * uExt * 1.04) + 0.5) * uGrid); }
+  vec2 cellCentre(vec2 cell) { return ((cell + 0.5) / uGrid - 0.5) * 2.0 * uExt * 1.04; }
+  float releaseThr(vec2 cell) {
+    vec2 pc = cellCentre(cell);
+    float coarse = fbm(pc * 2.4 + 11.0);                       // the front's irregular line
+    float clump = hash12(floor(cell / uClump) + 7.0);          // small groups go together
+    float grain = hash12(cell + 3.1);                          // and each its own moment
+    return uFoldW + uErode * (0.5 + 0.45 * coarse + 0.35 * (clump - 0.5) + 0.2 * (grain - 0.5));
+  }
+
   // image 1 at plane point p, fitted like background-size: cover
   vec3 img1At(vec2 p) {
     vec2 uv = p / (2.0 * uExt) + 0.5;
@@ -260,8 +286,9 @@ const sheet = new THREE.Mesh(
         vec2 cell = floor(vP * uGrainRes);
         float g = hash12(cell);
         float speck = hash12(cell + 17.0);
-        // the sheet goes speckled, then disappears just before the grains fly
-        if (vT > uFoldW + 0.03 - speck * 0.06) discard;
+        // rev 3: this cell leaves the sheet in the frame its grain breaks off
+        vec2 sc = cellOf(vP);
+        if (localT(cellCentre(sc)) > releaseThr(sc)) discard;
         // the picture turns to sand texture as it enters the fold band
         float loose = smoothstep(0.0, uFoldW * 0.5, vT);
         vec3 base = img1At(vP) * (1.0 + loose * uSpeckle * (g - 0.5));
@@ -394,7 +421,10 @@ vec3 curlNoise(vec3 position, float frequency, float time, float amplitude, floa
 }
 `;
 
-const SIM = Math.round(Math.sqrt(CONFIG.grains));          // particles = SIM x SIM
+// rev 3: one grain per cell of the picture (capped, by widening the cells, near 700k)
+let CELL = CONFIG.cell;
+while (Math.ceil(innerWidth * 1.04 / CELL) * Math.ceil(innerHeight * 1.04 / CELL) > 700000) CELL *= 1.1;
+const SIM_W = Math.ceil(innerWidth * 1.04 / CELL), SIM_H = Math.ceil(innerHeight * 1.04 / CELL);
 const SIM_COMMON = COMMON + GLSL_SNOISE + /* glsl */`
   uniform sampler2D tSeed, tPos, tVel;
   uniform float uTime, uDt;
@@ -412,10 +442,12 @@ const SIM_COMMON = COMMON + GLSL_SNOISE + /* glsl */`
     return normalize(-uDir + perp * 0.25);
   }
   // where this grain lives on the sheet, and whether the sheet has let it go
-  vec2 homeOf(vec4 seed) { return (seed.xy - 0.5) * 2.0 * uExt * 1.04; }
+  vec2 cellOfSeed(vec4 seed) { return floor(seed.xy * uGrid); }
+  vec2 homeOf(vec4 seed) { return cellCentre(cellOfSeed(seed)); }
   bool releasedAt(vec2 p, float r, out float t) {
-    t = localT(p);
-    return t > uFoldW + (r - 0.5) * 0.05;
+    vec2 cell = cellOf(p);
+    t = localT(cellCentre(cell));
+    return t > releaseThr(cell);
   }
 `;
 const SIM_VERT = /* glsl */`
@@ -436,9 +468,16 @@ const simVelMat = new THREE.ShaderMaterial({
         // the moment it comes loose: thrown off with the wind, a little up off the page, and a
         // little of its own
         // thrown downwind with a hop up (saltation), each grain a little its own way
+        // rev 3: a clump is thrown off together - one direction and strength for the clump,
+        // a little of each grain's own on top - and comes apart in flight
+        vec2 cl = floor(cellOfSeed(seed) / uClump);
+        float ch = hash12(cl + 19.0), ch2 = hash12(cl + 41.0);
+        float ang = (ch - 0.5) * 0.9;
+        vec2 wd = windDir();
+        vec2 kd = vec2(wd.x * cos(ang) - wd.y * sin(ang), wd.x * sin(ang) + wd.y * cos(ang));
         vec2 jit = vec2(fract(seed.w * 37.1) - 0.5, fract(seed.w * 71.3) - 0.5);
-        v = vec3(windDir() * uKick * (0.6 + 0.8 * seed.z) + jit * uKick * 0.5
-                 + vec2(0.0, uKickUp * (0.4 + fract(seed.w * 13.7))),
+        v = vec3(kd * uKick * (0.7 + 0.6 * ch2) + jit * uKick * 0.25
+                 + vec2(0.0, uKickUp * (0.4 + 0.6 * ch2 + 0.3 * (seed.z - 0.5))),
                  uLift * (0.5 + seed.z));
       } else {
         // PTSVer30: the velocity settles toward the field (plus the wind) and keeps the rest of
@@ -446,7 +485,8 @@ const simVelMat = new THREE.ShaderMaterial({
         // heavy grain: the air drags it toward the wind's speed (plus a little turbulence)
         // and gravity pulls it down - so it streams in an arc and settles at a terminal speed
         vec3 air = vec3(windDir() * uWind, 0.0) + fieldVelocity(pos.xyz);
-        v += (air - v) * clamp(uAirDrag * uDt, 0.0, 1.0);
+        // each grain feels the air a little differently, so a clump stretches into a stream
+        v += (air - v) * clamp(uAirDrag * (0.7 + 0.6 * seed.w) * uDt, 0.0, 1.0);
         v.y -= uGrav * uDt;
       }
       gl_FragColor = vec4(v, 1.0);
@@ -478,18 +518,19 @@ const simPosMat = new THREE.ShaderMaterial({
 
 const canFloat = !!renderer.extensions.get('EXT_color_buffer_float');
 const simType = canFloat ? THREE.FloatType : THREE.HalfFloatType;
-const simRT = () => new THREE.WebGLRenderTarget(SIM, SIM, {
+const simRT = () => new THREE.WebGLRenderTarget(SIM_W, SIM_H, {
   type: simType, format: THREE.RGBAFormat, depthBuffer: false, stencilBuffer: false,
   minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false,
 });
 let posA = simRT(), posB = simRT(), velA = simRT(), velB = simRT();
 {
-  const seed = new Float32Array(SIM * SIM * 4);
-  for (let i = 0; i < SIM * SIM; i++) {
-    seed[i * 4] = Math.random(); seed[i * 4 + 1] = Math.random();
+  const seed = new Float32Array(SIM_W * SIM_H * 4);
+  for (let i = 0; i < SIM_W * SIM_H; i++) {
+    // rev 3: the cell's centre, not a random point
+    seed[i * 4] = ((i % SIM_W) + 0.5) / SIM_W; seed[i * 4 + 1] = (Math.floor(i / SIM_W) + 0.5) / SIM_H;
     seed[i * 4 + 2] = Math.random(); seed[i * 4 + 3] = Math.random();
   }
-  const tex = new THREE.DataTexture(seed, SIM, SIM, THREE.RGBAFormat, THREE.FloatType);
+  const tex = new THREE.DataTexture(seed, SIM_W, SIM_H, THREE.RGBAFormat, THREE.FloatType);
   tex.minFilter = tex.magFilter = THREE.NearestFilter;
   tex.needsUpdate = true;
   U.tSeed = { value: tex };
@@ -503,6 +544,8 @@ Object.assign(U, {
   uGrav: { value: CONFIG.gravity }, uKickUp: { value: CONFIG.kickUp }, uGone: { value: 0 },
   uHpx: { value: 900 }, uStreak: { value: CONFIG.streak }, uDark: { value: CONFIG.darkGrains },
   uShadowA: { value: CONFIG.grainShadow },
+  uGrid: { value: new THREE.Vector2(SIM_W, SIM_H) }, uClump: { value: CONFIG.clumpCells },
+  uErode: { value: CONFIG.erode }, uCellPx: { value: CELL },
 });
 const simScene = new THREE.Scene();
 const simQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), simVelMat);
@@ -527,34 +570,37 @@ function stepSim(dt) {
 // pass of their own drawn first, their small shadows on image 2
 const grainVert = (shadow) => COMMON + /* glsl */`
     uniform sampler2D tSeed, tPos, tVel;
-    uniform float uSize, uDpr, uCamDist, uGone, uHpx, uStreak, uDark, uShadowA;
+    uniform float uSize, uDpr, uCamDist, uGone, uHpx, uStreak, uDark, uShadowA, uCellPx;
     attribute vec2 aRef;
     varying vec3 vCol; varying float vAlpha; varying vec2 vDir; varying float vK;
     void hide() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; vAlpha = 0.0; }
     void main() {
       vec4 seed = texture2D(tSeed, aRef);
       vec4 st = texture2D(tPos, aRef);
-      vec2 p0 = (seed.xy - 0.5) * 2.0 * uExt * 1.04;
+      vec2 cell = floor(seed.xy * uGrid);
+      vec2 p0 = cellCentre(cell);
       float t = localT(p0);
-      if (t <= 0.0) { hide(); return; }      // untouched: the flat picture needs no grains
       float r = seed.z;
       vec3 pos = st.xyz;
       bool loose = st.w >= 0.0;
-      ${shadow ? 'if (!loose) { hide(); return; }' : ''}
+      // rev 3: a grain exists only once its cell has left the sheet - the sheet shows it until then
+      if (!loose) { hide(); return; }
       // off the screen is gone; and nothing outlives the transition
       if (loose && (abs(pos.x) > uExt.x * 1.08 || abs(pos.y) > uExt.y * 1.1)) { hide(); return; }
-      float a = smoothstep(0.0, uFoldW * 0.5, t) * (loose ? 1.0 - uGone : 1.0);
+      float a = 1.0 - uGone;
       if (a <= 0.001) { hide(); return; }
       // most grains fine, a few coarse; tone varied, the odd dark grain
-      float size = uSize * (0.45 + 0.55 * pow(fract(r * 7.3), 2.2));
-      vec3 base = img1At(p0) * (0.82 + 0.3 * fract(r * 13.1));
+      // the size of its cell (a touch more, so a clump leaves no gaps), its cell's colour as the
+      // sheet showed it at that moment, a little tone of its own
+      float size = uCellPx * (1.1 + 0.25 * fract(r * 7.3)) * uSize / 1.6;
+      float hh, nn;
+      hh = heightAt(p0, nn);
+      vec3 base = img1At(p0) * relShade(sheetNormal(p0, hh)) * (0.94 + 0.12 * fract(r * 13.1));
       if (fract(seed.w * 7.7) < uDark) base *= 0.6;
-      float sh = 1.0;
-      if (!loose) { float h, n0; h = heightAt(p0, n0); sh = relShade(sheetNormal(p0, h)); }
-      vCol = ${shadow ? 'vec3(0.0)' : 'base * sh'};
+      vCol = ${shadow ? 'vec3(0.0)' : 'base'};
       vAlpha = a * ${shadow ? 'uShadowA' : '1.0'};
       // the streak: one frame's travel on screen, along the motion
-      vec3 vel = loose ? texture2D(tVel, aRef).xyz : vec3(0.0);
+      vec3 vel = texture2D(tVel, aRef).xyz;
       float px = size * uDpr;
       float travel = length(vel.xy) * uHpx / 60.0 * uStreak;
       vK = 1.0 + min(travel / max(px, 0.5), 4.0);
@@ -590,11 +636,11 @@ const grainMatOf = (shadow) => new THREE.ShaderMaterial({
 const grainMat = grainMatOf(false);
 const shadowMat = grainMatOf(true);
 {
-  const n = SIM * SIM;
+  const n = SIM_W * SIM_H;
   const ref = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) {
-    ref[i * 2] = ((i % SIM) + 0.5) / SIM;
-    ref[i * 2 + 1] = (Math.floor(i / SIM) + 0.5) / SIM;
+    ref[i * 2] = ((i % SIM_W) + 0.5) / SIM_W;
+    ref[i * 2 + 1] = (Math.floor(i / SIM_W) + 0.5) / SIM_H;
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
@@ -637,7 +683,8 @@ function frontFromProgress(q) {
   e = 0.5 * e + 0.5 * e * e * (3 - 2 * e);
   const fw = U.uFoldW.value, en = U.uEdgeN.value, ak = U.uAgeK.value;
   const fStart = -0.75 * en - 0.02;
-  const fEnd = 1 + fw + 0.1 + 0.75 * en + 1.6 / ak;
+  // rev 3: the sweep ends when the last cell has left the sheet - not seconds later
+  const fEnd = 1 + fw + 1.1 * CONFIG.erode + 0.75 * en + 0.02;
   return fStart + (fEnd - fStart) * e;
 }
 
@@ -683,6 +730,7 @@ function syncSim() {
   U.uWind.value = CONFIG.wind; U.uKick.value = CONFIG.kick; U.uLift.value = CONFIG.lift;
   U.uAirDrag.value = CONFIG.airDrag; U.uGrav.value = CONFIG.gravity; U.uKickUp.value = CONFIG.kickUp;
   U.uStreak.value = CONFIG.streak; U.uDark.value = CONFIG.darkGrains; U.uShadowA.value = CONFIG.grainShadow;
+  U.uErode.value = CONFIG.erode; U.uClump.value = CONFIG.clumpCells;
   // nothing outlives the transition: what is left fades over the last share of the sweep
   U.uGone.value = THREE.MathUtils.smoothstep(p, 1 - CONFIG.endFade, 1);
   U.uSize.value = CONFIG.grainSize;
@@ -697,6 +745,7 @@ else if (uiEl) {
     ['fieldFreq', 'turbulence size (fine)', 0.5, 8, 0.1], ['grainSize', 'grain size', 0.5, 4, 0.05],
     ['darkGrains', 'dark grains', 0, 0.4, 0.01], ['streak', 'motion streak', 0, 3, 0.05],
     ['grainShadow', 'grain shadow', 0, 1, 0.01], ['endFade', 'end fade', 0.02, 0.4, 0.01],
+    ['erode', 'crumble width', 0.02, 1.2, 0.01], ['clumpCells', 'clump size', 1, 12, 1],
     ['duration', 'sweep time (s)', 2, 14, 0.5],
   ];
   uiEl.innerHTML = '<div class="btns"><button type="button" id="pPlay">play ▶</button>'
@@ -714,4 +763,4 @@ else if (uiEl) {
   for (const ev of ['wheel', 'touchstart']) uiEl.addEventListener(ev, (e) => e.stopPropagation(), { passive: true });
 }
 // ?debug=1: expose the simulation for headless checks
-if (PARAMS.get('debug') === '1') window.__t12 = { renderer, get pos() { return posA; }, SIM };
+if (PARAMS.get('debug') === '1') window.__t12 = { renderer, get pos() { return posA; }, W: SIM_W, H: SIM_H };
