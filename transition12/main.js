@@ -1,3 +1,10 @@
+// TRANSITION 12 (rev 2) — SAND, not smoke. PTSVer30's swirl is how smoke or ink moves: light
+// stuff floating in eddies. Sand is heavy: lifted, thrown downwind and pulled down, held to a
+// terminal speed by the air, roughened only a little by turbulence - so grains stream in arcs
+// instead of curling. They are opaque, crisp and varied (mostly fine, a few coarse, the odd dark
+// one), streak along their motion, cast a small shadow on image 2, and leave by flying off rather
+// than by fading. Nothing outlives the transition: what is still on screen is gone by its end.
+//
 // TRANSITION 12 — transition (v4)'s sand reveal, with the released grains moving the way
 // PTSVer30's particles do: simulated, carried by a swirling field with momentum, drawn as lit
 // spheres. See the grains section below. Everything about the sheet is transition v4's.
@@ -32,23 +39,27 @@ const CONFIG = {
   foldContrast: 1.4,        // how strongly the folds are shaded
   edgeBreakup: 0.25,        // noise on the front
   flySpeed: 4.0,            // how fast grains fly off once released
-  grainSize: 1.4,           // px
+  grainSize: 1.6,           // px, the largest grains; most are smaller
   grains: num('grains', pre('grains', 409600)),   // transition12: simulated, so 640 x 640
   speckle: 0.36,            // grain texture on the sheet inside the fold band
   shadow: 0.35,             // image 2 in the folded sheet's shadow just behind the tear
   shadowLength: 0.15,       // how far behind the tear that shadow reaches (sweep units)
   // transition12: the released grains' motion, PTSVer30's field
   fieldFreq: 2.6,           // swirl size: higher = smaller eddies (per screen height)
-  fieldGain: 0.22,          // how fast the field carries a grain (screen heights per second)
+  fieldGain: 0.05,          // turbulence: how much the air's eddies roughen a path (was 0.22 - smoke)
   fieldSpeed: 0.45,         // how fast the field itself changes
   fieldFine: 0.70,          // weight of the finer octave
   fieldDivergence: 0.75,    // the spreading part of the field (PTSVer30's)
-  wind: 0.18,               // steady drift off the sheet (screen heights per second)
-  kick: 0.30,               // how hard a grain is thrown as it comes loose
+  wind: 0.55,               // the wind's speed, screen heights per second - what the sand is blown at
+  kick: 0.35,               // how hard a grain is thrown downwind as it comes loose
   lift: 0.10,               // and how far up off the page
-  settle: 0.06,             // how quickly a grain gives up its own motion for the field's (per frame)
-  drag: 0.985,              // and how much of its speed it keeps each frame
-  life: 3.2,                // s a loose grain lives before it has faded
+  airDrag: 2.2,             // how quickly the air brings a grain to the wind's speed (per second)
+  gravity: 1.3,             // pull down, screen heights per second per second
+  kickUp: 0.30,             // and the hop up as it comes loose (saltation)
+  endFade: 0.10,            // the last share of the sweep over which anything left fades out
+  streak: 1.0,              // motion streak, 1 = one frame's travel
+  grainShadow: 0.30,        // a grain's shadow on image 2
+  darkGrains: 0.08,         // share of darker grains
 };
 
 // ---------------------------------------------------------------- renderer ----
@@ -388,7 +399,7 @@ const SIM_COMMON = COMMON + GLSL_SNOISE + /* glsl */`
   uniform sampler2D tSeed, tPos, tVel;
   uniform float uTime, uDt;
   uniform float uFieldSpeed, uFieldFreq, uFieldGain, uFine, uDivergence;
-  uniform float uWind, uKick, uSettle, uDrag, uLift;
+  uniform float uWind, uKick, uLift, uAirDrag, uGrav, uKickUp;
   varying vec2 vUv;
   vec3 fieldVelocity(vec3 p) {
     float t = uTime * uFieldSpeed;
@@ -424,14 +435,19 @@ const simVelMat = new THREE.ShaderMaterial({
       if (pos.w < 0.0) {
         // the moment it comes loose: thrown off with the wind, a little up off the page, and a
         // little of its own
+        // thrown downwind with a hop up (saltation), each grain a little its own way
         vec2 jit = vec2(fract(seed.w * 37.1) - 0.5, fract(seed.w * 71.3) - 0.5);
-        v = vec3(windDir() * uKick + jit * uKick * 0.8, uLift * (0.5 + seed.z));
+        v = vec3(windDir() * uKick * (0.6 + 0.8 * seed.z) + jit * uKick * 0.5
+                 + vec2(0.0, uKickUp * (0.4 + fract(seed.w * 13.7))),
+                 uLift * (0.5 + seed.z));
       } else {
         // PTSVer30: the velocity settles toward the field (plus the wind) and keeps the rest of
         // what it had, so it carries momentum through the swirl instead of snapping to it
-        vec3 target = fieldVelocity(pos.xyz) + vec3(windDir() * uWind, 0.0);
-        v += (target - v) * clamp(uSettle * uDt * 60.0, 0.0, 1.0);
-        v *= pow(uDrag, uDt * 60.0);
+        // heavy grain: the air drags it toward the wind's speed (plus a little turbulence)
+        // and gravity pulls it down - so it streams in an arc and settles at a terminal speed
+        vec3 air = vec3(windDir() * uWind, 0.0) + fieldVelocity(pos.xyz);
+        v += (air - v) * clamp(uAirDrag * uDt, 0.0, 1.0);
+        v.y -= uGrav * uDt;
       }
       gl_FragColor = vec4(v, 1.0);
     }`,
@@ -483,8 +499,10 @@ Object.assign(U, {
   uFieldSpeed: { value: CONFIG.fieldSpeed }, uFieldFreq: { value: CONFIG.fieldFreq },
   uFieldGain: { value: CONFIG.fieldGain }, uFine: { value: CONFIG.fieldFine },
   uDivergence: { value: CONFIG.fieldDivergence }, uWind: { value: CONFIG.wind },
-  uKick: { value: CONFIG.kick }, uSettle: { value: CONFIG.settle }, uDrag: { value: CONFIG.drag },
-  uLift: { value: CONFIG.lift }, uLife: { value: CONFIG.life },
+  uKick: { value: CONFIG.kick }, uLift: { value: CONFIG.lift }, uAirDrag: { value: CONFIG.airDrag },
+  uGrav: { value: CONFIG.gravity }, uKickUp: { value: CONFIG.kickUp }, uGone: { value: 0 },
+  uHpx: { value: 900 }, uStreak: { value: CONFIG.streak }, uDark: { value: CONFIG.darkGrains },
+  uShadowA: { value: CONFIG.grainShadow },
 });
 const simScene = new THREE.Scene();
 const simQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), simVelMat);
@@ -502,19 +520,16 @@ function stepSim(dt) {
   [posA, posB] = [posB, posA];
   [velA, velB] = [velB, velA];
   U.tPos.value = posA.texture;
+  U.tVel.value = velA.texture;
 }
 
-// the grains drawn as PTSVer30's are: tiny lit spheres
-const grainMat = new THREE.ShaderMaterial({
-  uniforms: U, transparent: true, depthWrite: false,
-  blending: THREE.CustomBlending,
-  blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
-  blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
-  vertexShader: COMMON + /* glsl */`
-    uniform sampler2D tSeed, tPos;
-    uniform float uSize, uDpr, uCamDist, uLife;
+// the grains: opaque and crisp, varied in size and tone, streaked along their motion - and, in a
+// pass of their own drawn first, their small shadows on image 2
+const grainVert = (shadow) => COMMON + /* glsl */`
+    uniform sampler2D tSeed, tPos, tVel;
+    uniform float uSize, uDpr, uCamDist, uGone, uHpx, uStreak, uDark, uShadowA;
     attribute vec2 aRef;
-    varying vec3 vCol; varying float vAlpha;
+    varying vec3 vCol; varying float vAlpha; varying vec2 vDir; varying float vK;
     void hide() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; vAlpha = 0.0; }
     void main() {
       vec4 seed = texture2D(tSeed, aRef);
@@ -524,39 +539,56 @@ const grainMat = new THREE.ShaderMaterial({
       if (t <= 0.0) { hide(); return; }      // untouched: the flat picture needs no grains
       float r = seed.z;
       vec3 pos = st.xyz;
-      float age = st.w;
-      // riding the sheet they fade in with the sand texture; loose, they fade over their life
-      float a = smoothstep(0.0, uFoldW * 0.5, t);
-      vec3 base = img1At(p0) * (0.9 + 0.2 * fract(r * 13.1));
-      float sh = 1.0;
-      if (age < 0.0) {
-        float h, n0;
-        h = heightAt(p0, n0);
-        sh = relShade(sheetNormal(p0, h));
-      } else {
-        float life = uLife * (0.6 + 0.8 * fract(seed.w * 5.3));
-        a *= 1.0 - smoothstep(life * 0.45, life, age);
-      }
+      bool loose = st.w >= 0.0;
+      ${shadow ? 'if (!loose) { hide(); return; }' : ''}
+      // off the screen is gone; and nothing outlives the transition
+      if (loose && (abs(pos.x) > uExt.x * 1.08 || abs(pos.y) > uExt.y * 1.1)) { hide(); return; }
+      float a = smoothstep(0.0, uFoldW * 0.5, t) * (loose ? 1.0 - uGone : 1.0);
       if (a <= 0.001) { hide(); return; }
-      vCol = base * sh;
-      vAlpha = a;
+      // most grains fine, a few coarse; tone varied, the odd dark grain
+      float size = uSize * (0.45 + 0.55 * pow(fract(r * 7.3), 2.2));
+      vec3 base = img1At(p0) * (0.82 + 0.3 * fract(r * 13.1));
+      if (fract(seed.w * 7.7) < uDark) base *= 0.6;
+      float sh = 1.0;
+      if (!loose) { float h, n0; h = heightAt(p0, n0); sh = relShade(sheetNormal(p0, h)); }
+      vCol = ${shadow ? 'vec3(0.0)' : 'base * sh'};
+      vAlpha = a * ${shadow ? 'uShadowA' : '1.0'};
+      // the streak: one frame's travel on screen, along the motion
+      vec3 vel = loose ? texture2D(tVel, aRef).xyz : vec3(0.0);
+      float px = size * uDpr;
+      float travel = length(vel.xy) * uHpx / 60.0 * uStreak;
+      vK = 1.0 + min(travel / max(px, 0.5), 4.0);
+      vDir = length(vel.xy) > 1e-5 ? normalize(vel.xy) : vec2(1.0, 0.0);
+      ${shadow ? 'pos += vec3(0.004, -0.007, -pos.z);' : ''}
       vec4 mv = modelViewMatrix * vec4(pos + vec3(0.0, 0.0, 0.0015), 1.0);
       gl_Position = projectionMatrix * mv;
-      gl_PointSize = uSize * uDpr * (0.7 + 0.6 * fract(r * 7.3)) * (uCamDist / -mv.z);
-    }`,
-  fragmentShader: /* glsl */`
-    varying vec3 vCol; varying float vAlpha;
+      gl_PointSize = px * vK * (uCamDist / -mv.z);
+    }`;
+const grainFrag = (shadow) => /* glsl */`
+    varying vec3 vCol; varying float vAlpha; varying vec2 vDir; varying float vK;
     void main() {
-      // a lit sphere, light from the upper left - PTSVer30's grain
       vec2 d = gl_PointCoord * 2.0 - 1.0;
-      float r2 = dot(d, d);
+      d.y = -d.y;
+      // an ellipse along the motion: as long as the point, 1/vK as wide
+      float along = dot(d, vDir), across = dot(d, vec2(-vDir.y, vDir.x)) * vK;
+      float r2 = along * along + across * across;
       if (r2 > 1.0) discard;
-      vec3 n = vec3(d.x, -d.y, sqrt(1.0 - r2));
-      float lit = 0.62 + 0.5 * max(dot(n, normalize(vec3(-0.45, 0.55, 0.7))), 0.0);
-      float a = vAlpha * smoothstep(1.0, 0.7, r2);
-      gl_FragColor = vec4(vCol * lit * a, a);
-    }`,
+      float a = vAlpha * ${shadow ? 'smoothstep(1.0, 0.2, r2)' : 'smoothstep(1.0, 0.75, r2)'};
+      ${shadow ? 'gl_FragColor = vec4(0.0, 0.0, 0.0, a);' : `
+      // a grain catches the light on its upper left
+      vec3 n = vec3(along, across / vK, sqrt(max(1.0 - r2, 0.0)));
+      float lit = 0.78 + 0.32 * max(dot(normalize(n), normalize(vec3(-0.45, 0.55, 0.7))), 0.0);
+      gl_FragColor = vec4(vCol * lit * a, a);`}
+    }`;
+const grainMatOf = (shadow) => new THREE.ShaderMaterial({
+  uniforms: U, transparent: true, depthWrite: false,
+  blending: THREE.CustomBlending,
+  blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+  blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+  vertexShader: grainVert(shadow), fragmentShader: grainFrag(shadow),
 });
+const grainMat = grainMatOf(false);
+const shadowMat = grainMatOf(true);
 {
   const n = SIM * SIM;
   const ref = new Float32Array(n * 2);
@@ -567,6 +599,10 @@ const grainMat = new THREE.ShaderMaterial({
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
   g.setAttribute('aRef', new THREE.BufferAttribute(ref, 2));
+  const shadows = new THREE.Points(g, shadowMat);      // drawn first, under the grains
+  shadows.frustumCulled = false;
+  shadows.renderOrder = 0.5;
+  scene.add(shadows);
   const grains = new THREE.Points(g, grainMat);
   grains.frustumCulled = false;
   grains.renderOrder = 1;
@@ -583,6 +619,7 @@ function resize() {
   U.uExt.value.set(0.5 * w / h, 0.5);
   U.uDpr.value = dpr;
   U.uGrainRes.value = h / 1.4;
+  if (U.uHpx) U.uHpx.value = h * dpr;
 }
 addEventListener('resize', resize);
 resize();
@@ -644,18 +681,22 @@ function syncSim() {
   U.uFieldFreq.value = CONFIG.fieldFreq; U.uFieldGain.value = CONFIG.fieldGain;
   U.uFieldSpeed.value = CONFIG.fieldSpeed; U.uFine.value = CONFIG.fieldFine;
   U.uWind.value = CONFIG.wind; U.uKick.value = CONFIG.kick; U.uLift.value = CONFIG.lift;
-  U.uSettle.value = CONFIG.settle; U.uDrag.value = CONFIG.drag; U.uLife.value = CONFIG.life;
+  U.uAirDrag.value = CONFIG.airDrag; U.uGrav.value = CONFIG.gravity; U.uKickUp.value = CONFIG.kickUp;
+  U.uStreak.value = CONFIG.streak; U.uDark.value = CONFIG.darkGrains; U.uShadowA.value = CONFIG.grainShadow;
+  // nothing outlives the transition: what is left fades over the last share of the sweep
+  U.uGone.value = THREE.MathUtils.smoothstep(p, 1 - CONFIG.endFade, 1);
   U.uSize.value = CONFIG.grainSize;
 }
 const uiEl = document.getElementById('pui');
 if (uiEl && PARAMS.get('ui') === '0') uiEl.remove();
 else if (uiEl) {
   const rows = [
-    ['fieldGain', 'swirl strength', 0, 1, 0.01], ['fieldFreq', 'swirl size (fine)', 0.5, 8, 0.1],
-    ['fieldSpeed', 'swirl change', 0, 2, 0.01], ['wind', 'wind', 0, 1, 0.01],
-    ['kick', 'throw', 0, 1.5, 0.01], ['lift', 'lift', 0, 0.5, 0.01],
-    ['settle', 'follow the swirl', 0.005, 0.3, 0.005], ['drag', 'keep speed', 0.9, 1, 0.001],
-    ['life', 'life (s)', 0.5, 8, 0.1], ['grainSize', 'grain size', 0.5, 4, 0.05],
+    ['wind', 'wind', 0, 2, 0.01], ['gravity', 'gravity', 0, 4, 0.05],
+    ['airDrag', 'air drag', 0.2, 8, 0.1], ['kick', 'throw', 0, 1.5, 0.01],
+    ['kickUp', 'hop up', 0, 1.5, 0.01], ['fieldGain', 'turbulence', 0, 0.5, 0.005],
+    ['fieldFreq', 'turbulence size (fine)', 0.5, 8, 0.1], ['grainSize', 'grain size', 0.5, 4, 0.05],
+    ['darkGrains', 'dark grains', 0, 0.4, 0.01], ['streak', 'motion streak', 0, 3, 0.05],
+    ['grainShadow', 'grain shadow', 0, 1, 0.01], ['endFade', 'end fade', 0.02, 0.4, 0.01],
     ['duration', 'sweep time (s)', 2, 14, 0.5],
   ];
   uiEl.innerHTML = '<div class="btns"><button type="button" id="pPlay">play ▶</button>'
