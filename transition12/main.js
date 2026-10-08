@@ -1,3 +1,13 @@
+// TRANSITION 12 (rev 2) — no boiling. The 4K master renders its sand as fresh noise every frame:
+// the grain pattern at the edge is re-randomised frame to frame, so shown sharp it boils and
+// sparkles (the "glitches in mask11.mp4" - the encode reproduces the source faithfully). So the
+// footage now gives only the SHAPE - its alpha blurred enough (CONFIG.clean, a blur level) to
+// average the boiling out, still moving exactly as the clip does - and the crisp grain-level
+// detail comes from a SAND MAP fixed on the screen: round grains of 1.5-4 px, each with its own
+// release threshold. As the footage's shape passes, each grain drops out at its own moment and
+// stays gone. The particles are released by the same test, so a grain leaves the picture in the
+// frame its particle flies off.
+//
 // TRANSITION 12 — transition11's reveal (the footage's own alpha, sharp, with inertia) plus
 // grains with VOLUME coming off its edge - see "the grains" below.
 //
@@ -117,7 +127,9 @@ const CONFIG = {
   sandLight: 0.0,                // the grains' own light and shade, as filmed (1)
   sandColor: 0.0,               // 0 = image 1's colours on the sand, 1 = the clip's golden sand
   alphaGamma: 1.0,
-  clean: 0.6,                    // how far the speckle is merged into clumps (blur level; 0 = raw)
+  clean: 3.2,                    // rev 2: the footage's alpha blurred to this level - its shape, not its boiling grain
+  grainAmp: 0.55,                // how deep into the shape the sand grains reach (the crumbling band)
+  grainScale: 1.0,               // size of the sand map's grains (1 = 1.5-4 px)
   edge: 0.5,                     // where the sand's edge is cut (lower = more sand)
   crisp: 1.0,                    // edge width in screen pixels (1 = one-pixel antialiased edge)               // the edge's transparency as filmed (1); higher = thinner sand                // how strongly the sand's filmed light shades image 1 (1 = as filmed)
   glint: 0.0,                   // the brightest grains catch the light                  // share of the previous frame kept in the mask (0 = none)
@@ -267,6 +279,36 @@ copyScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copyMat));
 
 // ------------------------------------------------------------------ the page ----
 const px = (a) => new THREE.Vector2(a[0] / MASK_W, a[1] / MASK_H);
+// rev 2: THE SAND MAP. A 1024 px tile of overlapping round grains (r 0.75-2 px), each one value -
+// its release threshold. Fixed to the screen, so a grain stays where it is until it drops out.
+function makeSandMap() {
+  const N = 1024;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgb(128,128,128)';
+  g.fillRect(0, 0, N, N);
+  const count = Math.round(N * N / 3.2);
+  for (let i = 0; i < count; i++) {
+    const x = Math.random() * N, y = Math.random() * N;
+    const r = 0.75 + 1.25 * Math.random() ** 2;
+    const v = Math.floor(Math.random() * 256);
+    g.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')';
+    // drawn in all four wrapped positions so the tile repeats seamlessly
+    for (const dx of [0, -N, N]) for (const dy of [0, -N, N]) {
+      if (x + dx < -3 || x + dx > N + 3 || y + dy < -3 || y + dy > N + 3) continue;
+      g.beginPath(); g.arc(x + dx, y + dy, r, 0, Math.PI * 2); g.fill();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.NoColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.minFilter = t.magFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  return t;
+}
+const tSandMap = makeSandMap();
+
 const U = {
   tImg1: { value: tImg1 }, tImg2: { value: tImg2 }, tMask: { value: maskRT.texture },
   tMaskPrev: { value: maskPrev.texture }, tLightPrev: { value: lightPrev.texture }, uBlend: { value: 1 },
@@ -285,6 +327,8 @@ const U = {
   uSandLight: { value: new THREE.Vector2(CONFIG.sandLight, CONFIG.glint) },
   uSand: { value: new THREE.Vector3(CONFIG.sandColor, CONFIG.alphaGamma, 0) },
   uClean: { value: new THREE.Vector3(CONFIG.clean, CONFIG.edge, CONFIG.crisp) },
+  tSandMap: { value: tSandMap }, uSandMap: { value: new THREE.Vector3(CONFIG.grainAmp, CONFIG.grainScale, 1) },
+  uScreen: { value: new THREE.Vector2(innerWidth, innerHeight) },
   uMeanSand: { value: new THREE.Vector3(0.6759, 0.4942, 0.2409) },   // mask11.json mean_sand
 };
 scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
@@ -298,7 +342,9 @@ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial
     uniform float uBlend;              // 0 = the previous frame of the clip, 1 = the current one
     uniform float uAspect, uOn, uEnd;
     uniform vec2 uSoft, uFocus, uSandLight;
-    uniform vec3 uSand, uMeanSand, uClean;
+    uniform vec3 uSand, uMeanSand, uClean, uSandMap;
+    uniform sampler2D tSandMap;
+    uniform vec2 uScreen;
     uniform vec2 uCover, uGrainOff, uSheetOff, uAmbient;
     uniform vec3 uGrain, uSheet, uRelief;
     in vec2 vUv;
@@ -324,9 +370,12 @@ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial
 
       // the clip's transparency AS FILMED - no threshold: thin sand is partly see-through
       // the sand merged into clumps, then cut cleanly with a one-pixel antialiased edge
+      // rev 2: the footage's SHAPE (blurred past its boiling grain) cut by the fixed sand map
       float Ac = pow(clamp(sandAt(m, uClean.x), 0.0, 1.0), uSand.y);
-      float aa = max(fwidth(Ac) * uClean.z, 1e-4);
-      float cov = smoothstep(uClean.y - aa, uClean.y + aa, Ac);
+      float gm = texture(tSandMap, vUv * uScreen / (1024.0 * uSandMap.y)).r;
+      float vv = Ac + (gm - 0.5) * uSandMap.x;
+      float aa = 0.012 * uClean.z;
+      float cov = smoothstep(uClean.y - aa, uClean.y + aa, vv);
       float k = mix(1.0, cov * (1.0 - uEnd), uOn);
       // where the sheet is breaking or flying (0 inside the intact sheet, which stays image 1)
       float Ab = sandAt(m, 3.0);
@@ -476,7 +525,7 @@ let GCELL = CONFIG.cell;
 while (Math.ceil(innerWidth / GCELL) * Math.ceil(innerHeight / GCELL) > 500000) GCELL *= 1.1;
 const GW = Math.ceil(innerWidth / GCELL), GH = Math.ceil(innerHeight / GCELL);
 const G = {
-  tMask: U.tMask, uAspect: U.uAspect, uClean: U.uClean, uSand: U.uSand, uOn: U.uOn, uEnd: U.uEnd,
+  tMask: U.tMask, uAspect: U.uAspect, tSandMap: U.tSandMap, uSandMap: U.uSandMap, uScreen: U.uScreen, uClean: U.uClean, uSand: U.uSand, uOn: U.uOn, uEnd: U.uEnd,
   tImg1: U.tImg1,
   tSeed: { value: null }, tPos: { value: null }, tVel: { value: null },
   uTime: { value: 0 }, uDt: { value: 1 / 60 },
@@ -489,7 +538,9 @@ const G = {
 const G_COMMON = /* glsl */`
   uniform sampler2D tMask, tSeed, tPos, tVel;
   uniform float uAspect, uOn, uEnd, uTime, uDt;
-  uniform vec3 uClean, uSand;
+  uniform vec3 uClean, uSand, uSandMap;
+  uniform sampler2D tSandMap;
+  uniform vec2 uScreen;
   vec2 coverM(vec2 uv) {
     float ia = ${MASK_ASPECT.toFixed(6)};
     vec2 s = uAspect > ia ? vec2(1.0, ia / uAspect) : vec2(uAspect / ia, 1.0);
@@ -499,7 +550,8 @@ const G_COMMON = /* glsl */`
   bool covered(vec2 uv) {
     if (uOn < 0.5) return true;
     float a = pow(clamp(textureLod(tMask, clamp(coverM(uv), 0.0, 1.0), uClean.x).r, 0.0, 1.0), uSand.y);
-    return a >= uClean.y;
+    float gm = texture2D(tSandMap, uv * uScreen / (1024.0 * uSandMap.y)).r;
+    return a + (gm - 0.5) * uSandMap.x >= uClean.y;
   }
 `;
 const G_VERT = /* glsl */`
@@ -684,6 +736,7 @@ if (PARAMS.get('debug') === '1') window.__t12 = { renderer, get pos() { return g
 function resize() {
   renderer.setSize(innerWidth, innerHeight);
   U.uAspect.value = innerWidth / innerHeight;
+  if (U.uScreen) U.uScreen.value.set(innerWidth, innerHeight);
 }
 addEventListener('resize', resize);
 resize();
@@ -799,6 +852,7 @@ function syncUniforms() {
   U.uSandLight.value.set(CONFIG.sandLight, CONFIG.glint);
   U.uSand.value.set(CONFIG.sandColor, CONFIG.alphaGamma, 0);
   U.uClean.value.set(CONFIG.clean, CONFIG.edge, CONFIG.crisp);
+  U.uSandMap.value.set(CONFIG.grainAmp, CONFIG.grainScale, 1);
 }
 
 // the effect's fade in: 0 = clean image 1, 1 = the full effect. Eased, so it starts and settles
@@ -886,7 +940,9 @@ else if (uiEl) {
       for (const vid of [fwd, rev]) { vid.defaultPlaybackRate = v; if (!vid.paused) vid.playbackRate = v; }
     }),
     sec('the sand at the edge'),
-    row('clean', 'clean (merge speckle)', 0, 4, 0.05, ...cfg('clean')),
+    row('clean', 'shape smoothing (blur)', 0, 6, 0.05, ...cfg('clean')),
+    row('grainAmp', 'sand band depth', 0, 1.5, 0.01, ...cfg('grainAmp')),
+    row('grainScale', 'sand grain size', 0.5, 3, 0.05, ...cfg('grainScale')),
     row('edge', 'edge position', 0.05, 0.95, 0.01, ...cfg('edge')),
     row('crisp', 'edge softness (px)', 0.5, 6, 0.1, ...cfg('crisp'), 1),
     sec('grains'),
