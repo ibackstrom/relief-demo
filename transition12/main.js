@@ -83,15 +83,15 @@ const CONFIG = {
   windAngle: 18,                 // degrees: the way the clip's sand blows (up and to the right)
   wind: 0.45,                    // screen heights per second
   kick: 0.30,                    // the throw as a grain comes loose
-  liftZ: 0.55,                   // and how fast it rises off the picture toward the viewer
+  liftZ: 0.35,                   // how fast a grain rises off the picture (was 0.55)
   airDrag: 1.6,                  // how quickly the air takes a grain over (per second)
   gravity: 0.25,                 // a little fall
   turbulence: 0.06,              // PTSVer30's field, roughening the paths
   turbSize: 3.0,                 // its eddies: higher = smaller
-  life: 1.6,                     // s, how long a loose grain lasts (all are gone at the end anyway)
-  grainSize: 1.0,                // x the cell
-  bigGrains: 0.04,               // share of large foreground grains
-  perspective: 1.2,              // how much a grain grows as it rises
+  life: 0.5,                     // s a loose grain lasts - short, so the sand dissolves off the edge (was 1.6)
+  grainSize: 0.6,                // x the cell: small sand (was 1.0)
+  bigGrains: 0.0,                // no large foreground grains - small sand only (was 0.04)
+  perspective: 0.25,             // grains barely grow as they rise (was 1.2 - they became spheres)
   grainShadowA: 0.45,            // the grain's shadow on image 2
   shadowDistance: 0.10,          // how far the shadow falls per unit of height      // playback rate (2 = the 6.4 s clip in 3.2 s)
   cover: [0.30, 0.62],           // alpha where image 1 starts to show, and where it is solid
@@ -609,7 +609,7 @@ const gDrawVert = (shadow) => /* glsl */`
     vec4 st = texture2D(tPos, aRef);
     if (st.w < 0.0) { hide(); return; }                 // still part of the picture
     float life = uLife * (0.6 + 0.8 * fract(seed.w * 5.3));
-    float a = (1.0 - smoothstep(life * 0.5, life, st.w)) * (1.0 - uEnd);
+    float a = (1.0 - smoothstep(life * 0.15, life, st.w)) * (1.0 - uEnd);
     if (a <= 0.002) { hide(); return; }
     float z = max(st.z, 0.0);
     // sizes: most about a cell, a few large foreground grains
@@ -618,7 +618,7 @@ const gDrawVert = (shadow) => /* glsl */`
     float grow = 1.0 + z * uPersp;                       // nearer the viewer, larger
     vec2 xy = st.xy;
     ${shadow
-      ? 'xy += vec2(0.55, -1.0) * z * uShadowDist; size *= 1.0 + z * 3.0; vSoft = clamp(z * 4.0, 0.0, 1.0); a *= uShadowA * (1.0 - 0.6 * clamp(z * 2.5, 0.0, 1.0));'
+      ? 'xy += vec2(0.55, -1.0) * z * uShadowDist; size *= 1.0 + z * 1.0; vSoft = clamp(z * 4.0, 0.0, 1.0); a *= uShadowA * (1.0 - 0.6 * clamp(z * 2.5, 0.0, 1.0));'
       : 'size *= grow; vSoft = 0.0;'}
     if (xy.x < -0.05 || xy.x > uAspect + 0.05 || xy.y < -0.05 || xy.y > 1.05) { hide(); return; }
     vCol = texture2D(tImg1, coverI(seed.xy)).rgb * (0.92 + 0.16 * fract(seed.w * 13.1));
@@ -862,7 +862,8 @@ renderer.setAnimationLoop(() => {
   U.tLight.value = lightRT.texture; U.tLightPrev.value = lightPrev.texture;
   // transition12: the grains, stepped against this frame's mask
   syncGrains();
-  stepGrains(Math.min(dtF, 1 / 30));
+  // stepped by the real frame time, so a grain's life is real seconds even on a slow device
+  stepGrains(dtF);
   renderer.render(scene, camera);
 });
 
