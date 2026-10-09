@@ -1,3 +1,8 @@
+// TRANSITION 15 (rev 2) — smooth, and PARTICLES, not spheres: soft flat dots in image 1's own
+// colours, small and fairly even; each piece of the picture fades out over a moment while its
+// particle fades in (no hard switch); a broader, softer front; larger, slower swirls and longer,
+// gentler fades.
+//
 // TRANSITION 15 — image 1 dissolves into PTSVer4's spheres.
 //
 // The reveal grows out of the top-right corner, the way the PTS cloud blooms out of its corner:
@@ -19,21 +24,23 @@ const num = (k, d) => (PARAMS.has(k) && isFinite(+PARAMS.get(k)) ? +PARAMS.get(k
 const CONFIG = {
   duration: num('dur', 3.2),     // s, the reveal at full speed
   accel: 0.35,                   // s to reach full speed (inertia); it eases into the end too
-  band: 0.30,                    // how deep the breaking band is
-  streak: 0.85,                  // how much it breaks in clumps (0 = an even front)
-  dune: 0.10,                    // how lobed the front is
+  band: 0.40,                    // how deep the dissolving band is - broad, so it is gradual
+  streak: 0.60,                  // how much it breaks in clumps (softer than 0.85)
+  dune: 0.06,                    // how lobed the front is
   cell: num('cell', 4.0),        // css px per piece of the picture
   gapLead: 0.012,
+  handover: 0.035,               // share of the reveal over which a piece fades out as its particle fades in
+  softness: 0.6,                 // particle edge softness (0 = crisp dot, 1 = very soft)
   // PTSVer4's motes
-  sizeMin: 1.6,                  // px, the smallest
-  sizeMax: 16.0,                 // px, the largest
-  sizeBias: 4.0,                 // PTSVer4's: higher crowds the population toward the small end
-  kick: 0.10,                    // drift out of the corner (screen heights per second)
-  float: 0.12,                   // and up
-  curlAmp: 0.10,                 // the swirl: how far it carries a mote
-  curlFreq: 3.0,                 // its size: higher = tighter eddies
-  curlSpeed: 1.0,                // how fast it evolves
-  life: 1.1,                     // s a mote lives
+  sizeMin: 1.1,                  // px, the smallest particle
+  sizeMax: 3.0,                  // px, the largest - small particles, no bubbles
+  sizeBias: 1.6,                 // how strongly they lean small
+  kick: 0.07,                    // drift out of the corner (screen heights per second)
+  float: 0.08,                   // and up
+  curlAmp: 0.08,                 // the swirl: how far it carries a particle
+  curlFreq: 1.6,                 // its size: lower = larger, smoother eddies
+  curlSpeed: 0.5,                // how fast it evolves - slow
+  life: 1.5,                     // s a particle lives, fading softly
   grainSize: 1.0,                // x all sizes
   wrap: 0.45,                    // key light wrapped past the terminator
   fill: 0.30,                    // the cool fill
@@ -41,8 +48,8 @@ const CONFIG = {
   shininess: 40.0,
   rim: 0.18,                     // the fresnel rim
   coreAlpha: 0.78,               // opacity through the middle of a sphere - low reads as shells
-  depthFade: 0.45,               // alpha lost toward the back
-  depthDarken: 0.22,             // brightness lost toward the back
+  depthFade: 0.25,               // alpha lost toward the back
+  depthDarken: 0.10,             // brightness lost toward the back
   // the page
   edgeShadow: 0.18,              // the breaking edge's shadow on image 2
   ripple: 0.0, rippleLength: 0.2, rippleFreq: 55, windAngle: 0, accelWind: 0, wobble: 0, lift: 0,
@@ -117,7 +124,7 @@ const U = {
   uWind: { value: new THREE.Vector2(1, 0) }, uU0: { value: 0 }, uU1: { value: 1 },
   uF0: { value: 0 }, uF1: { value: 1 },
   uBand: { value: CONFIG.band }, uStreak: { value: CONFIG.streak }, uDune: { value: CONFIG.dune },
-  uGapLead: { value: CONFIG.gapLead },
+  uGapLead: { value: CONFIG.gapLead }, uHandover: { value: CONFIG.handover }, uSoftness: { value: CONFIG.softness },
   uKick: { value: CONFIG.kick }, uAccelW: { value: CONFIG.accelWind }, uWob: { value: CONFIG.wobble },
   uFloat: { value: CONFIG.float }, uCurlAmp: { value: CONFIG.curlAmp }, uCurlFreq: { value: CONFIG.curlFreq },
   uCurlSpeed: { value: CONFIG.curlSpeed }, uSizeMin: { value: CONFIG.sizeMin }, uSizeMax: { value: CONFIG.sizeMax },
@@ -133,7 +140,7 @@ const U = {
 const COMMON = /* glsl */`
   uniform sampler2D tImg1, tImg2, tCell;
   uniform vec2 uScreen, uWind;
-  uniform float uDpr, uCell, uP, uD, uU0, uU1, uF0, uF1, uBand, uStreak, uDune, uGapLead;
+  uniform float uDpr, uCell, uP, uD, uU0, uU1, uF0, uF1, uBand, uStreak, uDune, uGapLead, uHandover, uSoftness;
   vec2 coverUv(vec2 uv, float ia) {
     float sa = uScreen.x / uScreen.y;
     vec2 s = sa > ia ? vec2(1.0, ia / sa) : vec2(sa / ia, 1.0);
@@ -172,7 +179,7 @@ const cellMat = new THREE.ShaderMaterial({
       float ang = atan(rel.y, rel.x);
       float dune = uDune * (0.6 * snoise(vec2(ang * 2.2, 1.7)) + 0.4 * fbm(X * 2.0));
       // it breaks in CLUMPS, not lines
-      float streak = 0.5 + 0.5 * (0.7 * fbm(X * 7.0) + 0.3 * snoise(X * 23.0));
+      float streak = 0.5 + 0.5 * (0.8 * fbm(X * 3.5) + 0.2 * snoise(X * 11.0));
       float grain = hash12(cell);
       float thr = uBand * (0.5 + uStreak * (streak - 0.5) + 0.25 * (grain - 0.5));
       float pr = (thr + s - dune - uF0) / (uF1 - uF0);
@@ -239,7 +246,10 @@ const pageMat = new THREE.ShaderMaterial({
       float d = length(local);
       float aa = 0.7 / (uCell * uDpr);
       float inGrain = 1.0 - smoothstep(0.5 - aa, 0.5 + aa, d);
-      return inGrain * step(uP, cd.r) + (1.0 - inGrain) * step(uP, cd.r - uGapLead);
+      // rev 2: a piece fades out over the hand-over window, as its particle fades in
+      float on = 1.0 - smoothstep(cd.r - uHandover, cd.r, uP);
+      float onGap = 1.0 - smoothstep(cd.r - uGapLead - uHandover, cd.r - uGapLead, uP);
+      return inGrain * on + (1.0 - inGrain) * onGap;
     }
     void main() {
       vec2 px = gl_FragCoord.xy / uDpr;
@@ -287,7 +297,7 @@ const grainVert = (shadow) => /* glsl */`
   }
   void main() {
     vec4 cd = texelFetch(tCell, ivec2(aCell), 0);
-    float tau = (uP - cd.r) * uD;                     // seconds since it came loose
+    float tau = (uP - (cd.r - uHandover)) * uD;       // seconds since its piece began to go
     if (tau <= 0.0 || tau >= uLife) { hide(); return; }
     float r1 = cd.g, r2 = cd.b;
     float r3 = fract(r1 * 37.7 + r2 * 11.3);          // its depth in the cloud, 0 front .. 1 back
@@ -303,7 +313,7 @@ const grainVert = (shadow) => /* glsl */`
     float size = mix(uSizeMin, uSizeMax, pow(fract(r2 * 7.3 + r1), uSizeBias)) * uGrainSize
                * (1.15 - 0.3 * r3);
     // fade in briefly, live, fade out; and fainter and darker toward the back
-    float a = smoothstep(0.0, 0.08, tau) * (1.0 - smoothstep(uLife * 0.45, uLife, tau));
+    float a = smoothstep(0.0, uHandover * uD, tau) * (1.0 - smoothstep(uLife * 0.3, uLife, tau));
     a *= 1.0 - uDepthFade * r3;
     vAlpha = a;
     vCol = texture(tImg1, coverUv(cpx / uScreen, ${IMG1_ASPECT.toFixed(6)})).rgb * (1.0 - uDepthDarken * r3);
@@ -313,31 +323,16 @@ const grainVert = (shadow) => /* glsl */`
   }`;
 const grainFrag = (shadow) => /* glsl */`
   precision highp float;
-  uniform float uWrap, uFill, uSpecular, uShininess, uRim, uCoreAlpha;
+  uniform float uSoftness;
   in vec3 vCol; in float vAlpha; in float vPx;
   out vec4 outColor;
   void main() {
+    // a particle: a flat dot of its piece's colour with a soft edge - no sphere shading
     vec2 d = gl_PointCoord * 2.0 - 1.0;
-    d.y = -d.y;
-    float r2 = dot(d, d);
-    if (r2 > 1.0) discard;
-    // PTSVer4's sphere: the unit disc is a unit sphere's silhouette, so the normal is exact
-    vec3 n = vec3(d, sqrt(1.0 - r2));
-    vec3 L = normalize(vec3(-0.45, 0.72, 0.52));
-    vec3 F = normalize(vec3(0.55, -0.55, 0.30));
-    float key = max((dot(n, L) + uWrap) / (1.0 + uWrap), 0.0);       // wrapped past the terminator
-    float fill = max(dot(n, F), 0.0) * uFill;
-    // the glint, switched off on motes too small to hold it (it would only sparkle)
-    float specGate = smoothstep(3.0, 9.0, vPx);
-    float spec = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), uShininess) * uSpecular * specGate;
-    float fres = pow(1.0 - n.z, 4.2);
-    vec3 col = vCol * (0.22 + 0.85 * key) + vCol * vec3(0.42, 0.52, 0.72) * fill
-             + vec3(1.0) * spec + vec3(1.0, 0.72, 0.68) * fres * uRim;
-    // the rim drives alpha too: dense at the edge, thinner through the middle - a shell
-    float edge = 1.0 - smoothstep(1.0 - 0.16 * 2.0, 1.0, r2);
-    float a = vAlpha * edge * (mix(uCoreAlpha, 1.0, fres) + spec * 0.9);
-    a = clamp(a, 0.0, 1.0);
-    outColor = vec4(col * a, a);
+    float r = length(d);
+    if (r > 1.0) discard;
+    float a = vAlpha * (1.0 - smoothstep(1.0 - max(uSoftness, 0.05), 1.0, r));
+    outColor = vec4(vCol * a, a);
   }`;
 const grainMat = (shadow) => new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3, uniforms: U, transparent: true, depthTest: false, depthWrite: false,
@@ -431,10 +426,8 @@ else if (uiEl) {
     ['curlFreq', 'swirl size (fine)', 0.5, 10, 0.1, live('curlFreq', 'uCurlFreq')],
     ['life', 'life (s) *', 0.2, 3, 0.05, (v) => { CONFIG.life = v; U.uLife.value = v; computeCells(); }],
     ['look'],
-    ['specular', 'glint', 0, 1.5, 0.01, live('specular', 'uSpecular')],
-    ['rim', 'rim', 0, 1, 0.01, live('rim', 'uRim')],
-    ['coreAlpha', 'core opacity', 0.1, 1, 0.01, live('coreAlpha', 'uCoreAlpha')],
-    ['fill', 'cool fill', 0, 1, 0.01, live('fill', 'uFill')],
+    ['softness', 'particle softness', 0, 1, 0.01, live('softness', 'uSoftness')],
+    ['handover', 'hand-over (smooth)', 0.005, 0.15, 0.005, live('handover', 'uHandover')],
     ['depthFade', 'depth fade', 0, 1, 0.01, live('depthFade', 'uDepthFade')],
     ['edgeShadow', 'edge shadow', 0, 0.8, 0.01, live('edgeShadow', 'uEdgeShadow')],
   ];
